@@ -79,6 +79,57 @@
       const [userName, setUserName] = useState('');
       const [error, setError] = useState('');
       const [loading, setLoading] = useState(false);
+      
+      // Super Admin
+      const [showSuperAdmin, setShowSuperAdmin] = useState(false);
+      const [superAdminPassword, setSuperAdminPassword] = useState('');
+      const [superAdminAuth, setSuperAdminAuth] = useState(false);
+      const [allSessions, setAllSessions] = useState([]);
+      const [loadingSessions, setLoadingSessions] = useState(false);
+      
+      const SUPER_ADMIN_PASSWORD = "HF2026Admin";
+
+      const loadAllSessions = async () => {
+        setLoadingSessions(true);
+        const snapshot = await database.ref('sessions').once('value');
+        const data = snapshot.val() || {};
+        const sessionsList = Object.entries(data).map(([code, sessionData]) => ({
+          code,
+          createdAt: sessionData.config?.createdAt || 0,
+          nombreBars: sessionData.bars ? Object.keys(sessionData.bars).length : 0,
+          nombreUsers: sessionData.users ? Object.keys(sessionData.users).length : 0,
+          historiqueCount: sessionData.historique ? Object.keys(sessionData.historique).length : 0,
+          ventesCount: sessionData.historiqueVentes ? Object.keys(sessionData.historiqueVentes).length : 0
+        }));
+        sessionsList.sort((a, b) => b.createdAt - a.createdAt);
+        setAllSessions(sessionsList);
+        setLoadingSessions(false);
+      };
+
+      const supprimerSession = async (code) => {
+        if (confirm(`Supprimer définitivement la session ${code} ?\n\nToutes les données seront perdues (RGPD).`)) {
+          await database.ref(`sessions/${code}`).remove();
+          setAllSessions(prev => prev.filter(s => s.code !== code));
+        }
+      };
+
+      const supprimerToutesSessions = async () => {
+        if (confirm(`⚠️ ATTENTION ⚠️\n\nSupprimer TOUTES les ${allSessions.length} sessions ?\n\nCette action est IRRÉVERSIBLE !`)) {
+          if (confirm(`Dernière confirmation :\nVoulez-vous vraiment supprimer toutes les données ?`)) {
+            await database.ref('sessions').remove();
+            setAllSessions([]);
+          }
+        }
+      };
+
+      const authentifierSuperAdmin = () => {
+        if (superAdminPassword === SUPER_ADMIN_PASSWORD) {
+          setSuperAdminAuth(true);
+          loadAllSessions();
+        } else {
+          alert('Mot de passe incorrect');
+        }
+      };
 
       const generateSessionCode = () => {
         const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -179,7 +230,104 @@
                   🔗 Rejoindre une session
                 </button>
               </div>
+              
+              {/* Bouton Super Admin discret */}
+              <button
+                onClick={() => setShowSuperAdmin(true)}
+                className="mt-8 text-neutral-600 text-xs hover:text-neutral-400 transition-colors"
+              >
+                🔐 Administration
+              </button>
             </div>
+
+            {/* Modal Super Admin */}
+            {showSuperAdmin && (
+              <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
+                <div className="bg-neutral-900 rounded-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto border border-neutral-700">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xl font-bold text-red-400">🔐 Super Admin</h3>
+                    <button 
+                      onClick={() => { setShowSuperAdmin(false); setSuperAdminAuth(false); setSuperAdminPassword(''); }}
+                      className="text-neutral-400 hover:text-white"
+                    >✕</button>
+                  </div>
+
+                  {!superAdminAuth ? (
+                    <div className="space-y-4">
+                      <p className="text-neutral-400 text-sm">Accès réservé à l'administrateur principal.</p>
+                      <div>
+                        <label className="block text-sm text-neutral-400 mb-1">Mot de passe Super Admin</label>
+                        <input 
+                          type="password"
+                          value={superAdminPassword}
+                          onChange={(e) => setSuperAdminPassword(e.target.value)}
+                          className="w-full px-4 py-3 bg-neutral-800 rounded-lg"
+                          placeholder="Mot de passe..."
+                          onKeyPress={(e) => e.key === 'Enter' && authentifierSuperAdmin()}
+                        />
+                      </div>
+                      <button 
+                        onClick={authentifierSuperAdmin}
+                        className="w-full py-3 bg-red-600 rounded-lg font-medium"
+                      >
+                        Accéder
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <p className="text-green-400 text-sm">✓ Authentifié</p>
+                        <button 
+                          onClick={loadAllSessions}
+                          className="text-xs text-neutral-400 hover:text-white"
+                        >
+                          🔄 Actualiser
+                        </button>
+                      </div>
+
+                      <div className="bg-yellow-900/30 border border-yellow-700 rounded-lg p-3">
+                        <p className="text-yellow-400 text-sm">⚠️ RGPD : La suppression est définitive et irréversible.</p>
+                      </div>
+
+                      {loadingSessions ? (
+                        <p className="text-center text-neutral-400 py-4">Chargement...</p>
+                      ) : allSessions.length === 0 ? (
+                        <p className="text-center text-neutral-500 py-4">Aucune session trouvée</p>
+                      ) : (
+                        <div className="space-y-2 max-h-64 overflow-y-auto">
+                          {allSessions.map(s => (
+                            <div key={s.code} className="bg-neutral-800 rounded-lg p-3 flex items-center justify-between">
+                              <div>
+                                <p className="font-mono font-bold text-white">{s.code}</p>
+                                <p className="text-xs text-neutral-400">
+                                  {s.createdAt ? new Date(s.createdAt).toLocaleDateString('fr-FR') : 'Date inconnue'}
+                                  {' • '}{s.nombreUsers} user(s) • {s.historiqueCount + s.ventesCount} enregistrements
+                                </p>
+                              </div>
+                              <button 
+                                onClick={() => supprimerSession(s.code)}
+                                className="px-3 py-1 bg-red-600 hover:bg-red-500 rounded text-sm"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {allSessions.length > 0 && (
+                        <button 
+                          onClick={supprimerToutesSessions}
+                          className="w-full py-3 bg-red-900 hover:bg-red-800 rounded-lg font-medium border border-red-600 mt-4"
+                        >
+                          🗑️ Supprimer TOUTES les sessions ({allSessions.length})
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         );
       }
