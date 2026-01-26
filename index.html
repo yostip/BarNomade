@@ -302,6 +302,10 @@
       const [venteEquipDefaillant, setVenteEquipDefaillant] = useState(false);
       const [venteNumEquipement, setVenteNumEquipement] = useState('');
       const [venteDonneesPartielles, setVenteDonneesPartielles] = useState(false);
+      
+      // Réinitialisation
+      const [showModalReinit, setShowModalReinit] = useState(false);
+      const [reinitPassword, setReinitPassword] = useState('');
 
       const ADMIN_PASSWORD = "Hellfest26";
 
@@ -604,6 +608,39 @@
       const sauvegarderConfig = async (newConfig) => {
         await database.ref(`sessions/${session}/config`).update(newConfig);
         setShowParametres(false);
+      };
+
+      // ==================== RÉINITIALISATION ====================
+      const reinitialiserDonnees = async (avecExport) => {
+        if (reinitPassword !== ADMIN_PASSWORD) {
+          alert('Mot de passe incorrect');
+          return;
+        }
+
+        // Export si demandé
+        if (avecExport) {
+          exporterHistoriqueFuts();
+          exporterHistoriqueVentes();
+          exporterBenevoles();
+        }
+
+        // Supprimer les données (garder config et bars)
+        await database.ref(`sessions/${session}/bars`).remove();
+        await database.ref(`sessions/${session}/historique`).remove();
+        await database.ref(`sessions/${session}/historiqueVentes`).remove();
+        await database.ref(`sessions/${session}/affectations`).remove();
+
+        // Réinitialiser les bars avec 0 fûts
+        for (const bar of barsNomades) {
+          await database.ref(`sessions/${session}/bars/${bar.id}`).set({
+            ...bar,
+            futs: []
+          });
+        }
+
+        setShowModalReinit(false);
+        setReinitPassword('');
+        alert('Réinitialisation effectuée !');
       };
 
       // ==================== FONCTIONS BÉNÉVOLES ====================
@@ -1199,6 +1236,69 @@
                     });
                   }} className="flex-1 py-3 bg-red-600 rounded-lg font-medium">💾 Sauvegarder</button>
                 </div>
+
+                {isAdmin && (
+                  <button 
+                    onClick={() => setShowModalReinit(true)} 
+                    className="w-full mt-4 py-3 bg-red-900 hover:bg-red-800 rounded-lg font-medium border border-red-600"
+                  >
+                    🔒 Réinitialiser (Admin)
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Modal Réinitialisation */}
+          {showModalReinit && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+              <div className="bg-red-950 rounded-2xl w-full max-w-md p-6 border border-red-700">
+                <h3 className="text-xl font-bold mb-4 text-red-400">⚠️ Réinitialisation Admin</h3>
+                
+                <div className="bg-red-900/50 rounded-lg p-4 mb-4">
+                  <p className="font-bold text-yellow-400 mb-2">⚠️ Suppression :</p>
+                  <ul className="text-red-300 text-sm space-y-1 ml-4">
+                    <li>• Fûts attribués</li>
+                    <li>• Historiques fûts/ventes</li>
+                    <li>• Affectations bénévoles</li>
+                  </ul>
+                  <p className="text-green-400 text-sm mt-3">La configuration des bars sera conservée.</p>
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-sm text-neutral-400 mb-1">Mot de passe admin</label>
+                  <div className="relative">
+                    <input 
+                      type="password" 
+                      value={reinitPassword}
+                      onChange={(e) => setReinitPassword(e.target.value)}
+                      placeholder="Mot de passe..."
+                      className="w-full px-4 py-2 bg-neutral-800 rounded-lg"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <button 
+                    onClick={() => reinitialiserDonnees(true)}
+                    className="w-full py-3 bg-neutral-700 hover:bg-neutral-600 rounded-lg flex items-center justify-center gap-2"
+                  >
+                    📥 Exporter puis réinitialiser
+                  </button>
+                  <button 
+                    onClick={() => reinitialiserDonnees(false)}
+                    className="w-full py-3 bg-neutral-700 hover:bg-neutral-600 rounded-lg flex items-center justify-center gap-2"
+                  >
+                    🗑️ Réinitialiser sans exporter
+                  </button>
+                </div>
+
+                <button 
+                  onClick={() => { setShowModalReinit(false); setReinitPassword(''); }}
+                  className="w-full mt-4 py-3 bg-neutral-800 rounded-lg"
+                >
+                  Annuler
+                </button>
               </div>
             </div>
           )}
