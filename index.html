@@ -1,0 +1,1359 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0D0D0D">
+  <title>Gestion Fûts - Hellfest 2026</title>
+  
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiR2VzdGlvbiBGw7t0cyAtIEhlbGxmZXN0IDIwMjYiLCJzaG9ydF9uYW1lIjoiRsO7dHMgSEYiLCJzdGFydF91cmwiOiIuIiwiZGlzcGxheSI6InN0YW5kYWxvbmUiLCJiYWNrZ3JvdW5kX2NvbG9yIjoiIzBEMEQwRCIsInRoZW1lX2NvbG9yIjoiI0U2Mzk0NiIsImljb25zIjpbeyJzcmMiOiJkYXRhOmltYWdlL3N2Zyt4bWw7YmFzZTY0LFBITjJaeUI0Yld4dWN6MGlhSFIwY0RvdkwzZDNkeTUzTXk1dmNtY3ZNakF3TUM5emRtY2lJSFpwWlhkQ2IzZzlJakFnTUNBeU5UWWdNalUySWo0OGNtVmpkQ0IzYVdSMGFEMGlNalUySWlCb1pXbG5hSFE5SWpJMU5pSWdabWxzYkQwaUl6QkVNRVF3UkNJdlBqeGphWEpqYkdVZ1kzZzlJakV5T0NJZ1kzazlJakV5T0NJZ2NqMGlPVEFpSUdacGJHdzlJaU5GTmpNNU5EWWlMejQ4ZEdWNGRDQjRQU0l4TWpnaUlIazlJakUwTUNJZ1ptOXVkQzF6YVhwbFBTSTBNQ0lnWm1sc2JEMGlkMmhwZEdVaUlIUmxlSFF0WVc1amFHOXlQU0p0YVdSa2JHVWlQdWU0cGVPQnJqd3ZkR1Y0ZEQ0OEwzTjJaejQ9Iiwic2l6ZXMiOiIyNTZ4MjU2IiwidHlwZSI6ImltYWdlL3N2Zyt4bWwifV19">
+  <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2Ij48cmVjdCB3aWR0aD0iMjU2IiBoZWlnaHQ9IjI1NiIgZmlsbD0iIzBEMEQwRCIvPjxjaXJjbGUgY3g9IjEyOCIgY3k9IjEyOCIgcj0iOTAiIGZpbGw9IiNFNjM5NDYiLz48dGV4dCB4PSIxMjgiIHk9IjE0MCIgZm9udC1zaXplPSI0MCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPvCfjro8L3RleHQ+PC9zdmc+">
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  
+  <style>
+    * { -webkit-tap-highlight-color: transparent; }
+    body { overscroll-behavior: none; }
+    @media (display-mode: standalone) {
+      body { padding-top: env(safe-area-inset-top); }
+    }
+  </style>
+</head>
+<body class="bg-black">
+  <div id="root"></div>
+  
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    // ==================== FIREBASE CONFIG ====================
+    const firebaseConfig = {
+      apiKey: "AIzaSyCgl30syyCEJif9q96E2jzv-aTXxXgvgv0",
+      authDomain: "gestion-futs-hellfest.firebaseapp.com",
+      databaseURL: "https://gestion-futs-hellfest-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "gestion-futs-hellfest",
+      storageBucket: "gestion-futs-hellfest.firebasestorage.app",
+      messagingSenderId: "107509834680",
+      appId: "1:107509834680:web:3a58295d3268b5d19f654d"
+    };
+
+    // Initialize Firebase
+    const app = firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+
+    // ==================== ICONS ====================
+    const Icon = ({ name, className }) => {
+      const ref = useRef(null);
+      useEffect(() => {
+        if (ref.current) {
+          ref.current.innerHTML = '';
+          const icon = lucide.createElement(lucide.icons[name]);
+          ref.current.appendChild(icon);
+        }
+      }, [name]);
+      return <span ref={ref} className={className} style={{ display: 'inline-flex', alignItems: 'center' }} />;
+    };
+
+    // ==================== SESSION SCREEN ====================
+    const SessionScreen = ({ onJoinSession }) => {
+      const [mode, setMode] = useState('choice'); // choice, create, join
+      const [sessionCode, setSessionCode] = useState('');
+      const [userName, setUserName] = useState('');
+      const [error, setError] = useState('');
+      const [loading, setLoading] = useState(false);
+
+      const generateSessionCode = () => {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let code = 'HF26-';
+        for (let i = 0; i < 4; i++) {
+          code += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return code;
+      };
+
+      const createSession = async () => {
+        if (!userName.trim()) {
+          setError('Entre ton prénom');
+          return;
+        }
+        setLoading(true);
+        setError('');
+        
+        const newCode = generateSessionCode();
+        const sessionRef = database.ref(`sessions/${newCode}`);
+        
+        // Données initiales de la session
+        const initialData = {
+          createdAt: Date.now(),
+          config: {
+            nombreJours: 4,
+            maxFutsParBar: 2,
+            stockInitialBiere: 50,
+            stockInitialCidre: 20,
+            prixPinte: 7,
+            prixPichet: 16,
+            prixGobelet: 5
+          },
+          barsNomades: [],
+          historique: [],
+          historiqueVentes: [],
+          benevoles: [],
+          jourActuel: 1
+        };
+
+        try {
+          await sessionRef.set(initialData);
+          // Ajouter l'utilisateur
+          const userRef = sessionRef.child('users').push();
+          await userRef.set({
+            name: userName.trim(),
+            joinedAt: Date.now(),
+            lastActive: Date.now()
+          });
+          
+          onJoinSession(newCode, userName.trim(), userRef.key);
+        } catch (err) {
+          setError('Erreur de création: ' + err.message);
+          setLoading(false);
+        }
+      };
+
+      const joinSession = async () => {
+        if (!userName.trim()) {
+          setError('Entre ton prénom');
+          return;
+        }
+        if (!sessionCode.trim()) {
+          setError('Entre le code de session');
+          return;
+        }
+        setLoading(true);
+        setError('');
+
+        const code = sessionCode.trim().toUpperCase();
+        const sessionRef = database.ref(`sessions/${code}`);
+
+        try {
+          const snapshot = await sessionRef.once('value');
+          if (!snapshot.exists()) {
+            setError('Session introuvable');
+            setLoading(false);
+            return;
+          }
+          
+          // Ajouter l'utilisateur
+          const userRef = sessionRef.child('users').push();
+          await userRef.set({
+            name: userName.trim(),
+            joinedAt: Date.now(),
+            lastActive: Date.now()
+          });
+          
+          onJoinSession(code, userName.trim(), userRef.key);
+        } catch (err) {
+          setError('Erreur de connexion: ' + err.message);
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div className="min-h-screen bg-black flex items-center justify-center p-4">
+          <div className="bg-neutral-900 rounded-2xl border-2 border-red-600 p-6 w-full max-w-md">
+            <div className="text-center mb-6">
+              <div className="text-4xl mb-2">🍺</div>
+              <h1 className="text-2xl font-bold text-white">Gestion Fûts</h1>
+              <p className="text-red-500 font-semibold">Hellfest 2026</p>
+            </div>
+
+            {mode === 'choice' && (
+              <div className="space-y-4">
+                <button
+                  onClick={() => setMode('create')}
+                  className="w-full py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-lg border border-orange-500 transition-colors"
+                >
+                  🆕 Créer une session
+                </button>
+                <button
+                  onClick={() => setMode('join')}
+                  className="w-full py-4 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl font-bold text-lg border border-neutral-600 transition-colors"
+                >
+                  🔗 Rejoindre une session
+                </button>
+              </div>
+            )}
+
+            {(mode === 'create' || mode === 'join') && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-neutral-400 text-sm mb-1">Ton prénom</label>
+                  <input
+                    type="text"
+                    value={userName}
+                    onChange={(e) => setUserName(e.target.value)}
+                    placeholder="Ex: Marie"
+                    className="w-full px-4 py-3 bg-neutral-800 border border-neutral-600 rounded-xl text-white placeholder-neutral-500 focus:border-red-500 focus:outline-none"
+                  />
+                </div>
+
+                {mode === 'join' && (
+                  <div>
+                    <label className="block text-neutral-400 text-sm mb-1">Code de session</label>
+                    <input
+                      type="text"
+                      value={sessionCode}
+                      onChange={(e) => setSessionCode(e.target.value.toUpperCase())}
+                      placeholder="Ex: HF26-A1B2"
+                      className="w-full px-4 py-3 bg-neutral-800 border border-neutral-600 rounded-xl text-white placeholder-neutral-500 focus:border-red-500 focus:outline-none text-center text-xl tracking-widest"
+                    />
+                  </div>
+                )}
+
+                {error && (
+                  <div className="bg-red-900/50 border border-red-600 text-red-400 px-4 py-2 rounded-lg text-sm">
+                    {error}
+                  </div>
+                )}
+
+                <button
+                  onClick={mode === 'create' ? createSession : joinSession}
+                  disabled={loading}
+                  className="w-full py-4 bg-red-600 hover:bg-red-700 disabled:bg-neutral-700 text-white rounded-xl font-bold text-lg border border-orange-500 disabled:border-neutral-600 transition-colors"
+                >
+                  {loading ? '⏳ Connexion...' : (mode === 'create' ? '🚀 Créer' : '🔗 Rejoindre')}
+                </button>
+
+                <button
+                  onClick={() => { setMode('choice'); setError(''); }}
+                  className="w-full py-2 text-neutral-400 hover:text-white transition-colors"
+                >
+                  ← Retour
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    // ==================== MAIN APP ====================
+    const App = () => {
+      // Session state
+      const [sessionCode, setSessionCode] = useState(null);
+      const [userName, setUserName] = useState('');
+      const [userId, setUserId] = useState(null);
+      const [connectedUsers, setConnectedUsers] = useState([]);
+      const [isOnline, setIsOnline] = useState(true);
+      const [lastSync, setLastSync] = useState(null);
+
+      // App state
+      const [isAdmin, setIsAdmin] = useState(false);
+      const [showModalAdmin, setShowModalAdmin] = useState(false);
+      const [adminPasswordInput, setAdminPasswordInput] = useState('');
+      const [showAdminPassword, setShowAdminPassword] = useState(false);
+      const [adminPasswordError, setAdminPasswordError] = useState(false);
+      const [pendingAdminAction, setPendingAdminAction] = useState(null);
+
+      // Data state
+      const [config, setConfig] = useState({
+        nombreJours: 4,
+        maxFutsParBar: 2,
+        stockInitialBiere: 50,
+        stockInitialCidre: 20,
+        prixPinte: 7,
+        prixPichet: 16,
+        prixGobelet: 5
+      });
+      const [jourActuel, setJourActuel] = useState(1);
+      const [barsNomades, setBarsNomades] = useState([]);
+      const [historique, setHistorique] = useState([]);
+      const [historiqueVentes, setHistoriqueVentes] = useState([]);
+      const [benevoles, setBenevoles] = useState([]);
+
+      // UI state
+      const [showParametres, setShowParametres] = useState(false);
+      const [showHistorique, setShowHistorique] = useState(false);
+      const [showHistoriqueVentes, setShowHistoriqueVentes] = useState(false);
+      const [showModalRetour, setShowModalRetour] = useState(false);
+      const [showModalVentes, setShowModalVentes] = useState(false);
+      const [showModalBenevoles, setShowModalBenevoles] = useState(false);
+      const [showModalAnnulation, setShowModalAnnulation] = useState(false);
+      const [showSessionInfo, setShowSessionInfo] = useState(false);
+      const [filtreHistoriqueJour, setFiltreHistoriqueJour] = useState(0);
+      const [filtreVentesJour, setFiltreVentesJour] = useState(0);
+
+      // Modal state
+      const [retourBarId, setRetourBarId] = useState(null);
+      const [retourFutIndex, setRetourFutIndex] = useState(null);
+      const [commentaireRetour, setCommentaireRetour] = useState('');
+
+      // Ventes state
+      const [venteBarId, setVenteBarId] = useState(null);
+      const [ventePintes, setVentePintes] = useState(0);
+      const [ventePichets, setVentePichets] = useState(0);
+      const [venteGobelets, setVenteGobelets] = useState(0);
+      const [venteEquipementDefaillant, setVenteEquipementDefaillant] = useState(false);
+
+      // Config temp
+      const [tempConfig, setTempConfig] = useState(config);
+      const [newBarName, setNewBarName] = useState('');
+      const [newBarType, setNewBarType] = useState('biere');
+      const [newBenevoleName, setNewBenevoleName] = useState('');
+      const [editingBenevoleId, setEditingBenevoleId] = useState(null);
+      const [editingBenevoleName, setEditingBenevoleName] = useState('');
+      const [editingBarId, setEditingBarId] = useState(null);
+      const [editingBarName, setEditingBarName] = useState('');
+
+      const ADMIN_PASSWORD = "Hellfest26";
+      const UNDO_LIMIT = 50;
+
+      // ==================== FIREBASE SYNC ====================
+      useEffect(() => {
+        if (!sessionCode) return;
+
+        const sessionRef = database.ref(`sessions/${sessionCode}`);
+
+        // Écouter les changements de données
+        const unsubscribeConfig = sessionRef.child('config').on('value', (snapshot) => {
+          if (snapshot.exists()) {
+            setConfig(snapshot.val());
+            setTempConfig(snapshot.val());
+          }
+          setLastSync(new Date());
+        });
+
+        const unsubscribeJour = sessionRef.child('jourActuel').on('value', (snapshot) => {
+          if (snapshot.exists()) {
+            setJourActuel(snapshot.val());
+          }
+        });
+
+        const unsubscribeBars = sessionRef.child('barsNomades').on('value', (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.val();
+            const barsArray = Object.keys(data).map(key => ({ ...data[key], id: key }));
+            setBarsNomades(barsArray);
+          } else {
+            setBarsNomades([]);
+          }
+        });
+
+        const unsubscribeHistorique = sessionRef.child('historique').on('value', (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.val();
+            const arr = Object.keys(data).map(key => ({ ...data[key], id: key }));
+            arr.sort((a, b) => b.horodatage - a.horodatage);
+            setHistorique(arr);
+          } else {
+            setHistorique([]);
+          }
+        });
+
+        const unsubscribeVentes = sessionRef.child('historiqueVentes').on('value', (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.val();
+            const arr = Object.keys(data).map(key => ({ ...data[key], id: key }));
+            arr.sort((a, b) => b.horodatage - a.horodatage);
+            setHistoriqueVentes(arr);
+          } else {
+            setHistoriqueVentes([]);
+          }
+        });
+
+        const unsubscribeBenevoles = sessionRef.child('benevoles').on('value', (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.val();
+            const arr = Object.keys(data).map(key => ({ ...data[key], id: key }));
+            setBenevoles(arr);
+          } else {
+            setBenevoles([]);
+          }
+        });
+
+        const unsubscribeUsers = sessionRef.child('users').on('value', (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.val();
+            const users = Object.keys(data).map(key => ({ ...data[key], id: key }));
+            setConnectedUsers(users);
+          } else {
+            setConnectedUsers([]);
+          }
+        });
+
+        // Mise à jour du lastActive
+        const updateActivity = () => {
+          if (userId) {
+            sessionRef.child(`users/${userId}/lastActive`).set(Date.now());
+          }
+        };
+        const activityInterval = setInterval(updateActivity, 30000);
+
+        // Détection online/offline
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+
+        // Cleanup
+        return () => {
+          sessionRef.child('config').off('value', unsubscribeConfig);
+          sessionRef.child('jourActuel').off('value', unsubscribeJour);
+          sessionRef.child('barsNomades').off('value', unsubscribeBars);
+          sessionRef.child('historique').off('value', unsubscribeHistorique);
+          sessionRef.child('historiqueVentes').off('value', unsubscribeVentes);
+          sessionRef.child('benevoles').off('value', unsubscribeBenevoles);
+          sessionRef.child('users').off('value', unsubscribeUsers);
+          clearInterval(activityInterval);
+          window.removeEventListener('online', handleOnline);
+          window.removeEventListener('offline', handleOffline);
+        };
+      }, [sessionCode, userId]);
+
+      // ==================== FIREBASE WRITE FUNCTIONS ====================
+      const updateFirebase = async (path, data) => {
+        if (!sessionCode) return;
+        try {
+          await database.ref(`sessions/${sessionCode}/${path}`).set(data);
+        } catch (err) {
+          console.error('Firebase write error:', err);
+        }
+      };
+
+      const pushToFirebase = async (path, data) => {
+        if (!sessionCode) return;
+        try {
+          const ref = database.ref(`sessions/${sessionCode}/${path}`).push();
+          await ref.set(data);
+          return ref.key;
+        } catch (err) {
+          console.error('Firebase push error:', err);
+        }
+      };
+
+      const removeFromFirebase = async (path) => {
+        if (!sessionCode) return;
+        try {
+          await database.ref(`sessions/${sessionCode}/${path}`).remove();
+        } catch (err) {
+          console.error('Firebase remove error:', err);
+        }
+      };
+
+      // ==================== CALCULATIONS ====================
+      const calculerStocks = () => {
+        let biere = config.stockInitialBiere;
+        let cidre = config.stockInitialCidre;
+        let vides = 0;
+        let casse = 0;
+        let reutilBiere = 0;
+        let reutilCidre = 0;
+
+        historique.forEach(m => {
+          const isBiere = m.typeFut === 'biere';
+          switch (m.typeMouvement) {
+            case 'SORTIE':
+              if (isBiere) biere--; else cidre--;
+              break;
+            case 'SORTIE_REUTILISABLE':
+              if (isBiere) reutilBiere--; else reutilCidre--;
+              break;
+            case 'RETOUR_VIDE':
+              vides++;
+              break;
+            case 'RETOUR_CASSE':
+              casse++;
+              break;
+            case 'RETOUR_REUTILISABLE':
+              if (isBiere) reutilBiere++; else reutilCidre++;
+              break;
+            case 'ANNULATION_SORTIE':
+              if (isBiere) biere++; else cidre++;
+              break;
+            case 'ANNULATION_SORTIE_REUTILISABLE':
+              if (isBiere) reutilBiere++; else reutilCidre++;
+              break;
+            case 'ANNULATION_RETOUR_VIDE':
+              vides--;
+              break;
+            case 'ANNULATION_RETOUR_CASSE':
+              casse--;
+              break;
+            case 'ANNULATION_RETOUR_REUTILISABLE':
+              if (isBiere) reutilBiere--; else reutilCidre--;
+              break;
+          }
+        });
+
+        return {
+          stockBiere: biere,
+          stockCidre: cidre,
+          stockVides: vides,
+          stockCasse: casse,
+          stockReutilisablesBiere: reutilBiere,
+          stockReutilisablesCidre: reutilCidre
+        };
+      };
+
+      const stocks = calculerStocks();
+      const { stockBiere, stockCidre, stockVides, stockCasse, stockReutilisablesBiere, stockReutilisablesCidre } = stocks;
+
+      const compterBarsParType = () => {
+        const biereCount = barsNomades.filter(b => b.type === 'biere').length;
+        const cidreCount = barsNomades.filter(b => b.type === 'cidre').length;
+        return { biereCount, cidreCount };
+      };
+
+      const { biereCount, cidreCount } = compterBarsParType();
+      const barsBiere = barsNomades.filter(b => b.type === 'biere');
+      const barsCidre = barsNomades.filter(b => b.type === 'cidre');
+
+      const calculerTotauxVentes = () => {
+        let montantTotal = 0, nbPintes = 0, nbPichets = 0, nbGobelets = 0, nbDefaillances = 0;
+        historiqueVentes.forEach(v => {
+          const mult = v.estAnnulation ? -1 : 1;
+          montantTotal += v.montantTotal * mult;
+          nbPintes += (v.nbPintes || 0) * mult;
+          nbPichets += (v.nbPichets || 0) * mult;
+          nbGobelets += (v.nbGobelets || 0) * mult;
+          if (v.equipementDefaillant && !v.estAnnulation) nbDefaillances++;
+        });
+        return { montantTotal, nbPintes, nbPichets, nbGobelets, nbDefaillances };
+      };
+
+      const totauxVentes = calculerTotauxVentes();
+      const hasData = historique.length > 0 || historiqueVentes.length > 0;
+
+      // ==================== ACTIONS ====================
+      const attribuerFut = async (barId) => {
+        const bar = barsNomades.find(b => b.id === barId);
+        if (!bar || bar.futs.length >= config.maxFutsParBar) return;
+
+        const isBiere = bar.type === 'biere';
+        const stockNeuf = isBiere ? stockBiere : stockCidre;
+        const stockReutil = isBiere ? stockReutilisablesBiere : stockReutilisablesCidre;
+
+        if (stockNeuf <= 0 && stockReutil <= 0) return;
+
+        const useReutilisable = stockReutil > 0;
+        const newFut = {
+          id: Date.now().toString(),
+          type: bar.type,
+          isReutilisable: useReutilisable,
+          attribueA: Date.now()
+        };
+
+        // Mise à jour du bar
+        const updatedFuts = [...(bar.futs || []), newFut];
+        await updateFirebase(`barsNomades/${barId}/futs`, updatedFuts);
+
+        // Historique
+        await pushToFirebase('historique', {
+          typeMouvement: useReutilisable ? 'SORTIE_REUTILISABLE' : 'SORTIE',
+          typeFut: bar.type,
+          barId: barId,
+          nomBar: bar.nom,
+          horodatage: Date.now(),
+          jour: jourActuel,
+          isReutilisable: useReutilisable,
+          user: userName
+        });
+      };
+
+      const retournerFut = async (typeRetour) => {
+        if (retourBarId === null || retourFutIndex === null) return;
+
+        const bar = barsNomades.find(b => b.id === retourBarId);
+        if (!bar) return;
+
+        const fut = bar.futs[retourFutIndex];
+        if (!fut) return;
+
+        // Retirer le fût
+        const updatedFuts = bar.futs.filter((_, i) => i !== retourFutIndex);
+        await updateFirebase(`barsNomades/${retourBarId}/futs`, updatedFuts);
+
+        // Type de mouvement
+        let typeMouvement;
+        if (typeRetour === 'vide') typeMouvement = 'RETOUR_VIDE';
+        else if (typeRetour === 'casse') typeMouvement = 'RETOUR_CASSE';
+        else typeMouvement = 'RETOUR_REUTILISABLE';
+
+        // Historique
+        await pushToFirebase('historique', {
+          typeMouvement,
+          typeFut: bar.type,
+          barId: retourBarId,
+          nomBar: bar.nom,
+          horodatage: Date.now(),
+          jour: jourActuel,
+          isReutilisable: fut.isReutilisable,
+          commentaire: commentaireRetour.trim(),
+          user: userName
+        });
+
+        fermerModalRetour();
+      };
+
+      const enregistrerVente = async () => {
+        if (!venteBarId) return;
+        const bar = barsNomades.find(b => b.id === venteBarId);
+        if (!bar) return;
+
+        const montant = (ventePintes * config.prixPinte) + (ventePichets * config.prixPichet) + (venteGobelets * config.prixGobelet);
+        if (montant <= 0 && !venteEquipementDefaillant) return;
+
+        await pushToFirebase('historiqueVentes', {
+          barId: venteBarId,
+          nomBar: bar.nom,
+          typeBoisson: bar.type,
+          nbPintes: ventePintes,
+          nbPichets: ventePichets,
+          nbGobelets: venteGobelets,
+          montantTotal: montant,
+          equipementDefaillant: venteEquipementDefaillant,
+          horodatage: Date.now(),
+          jour: jourActuel,
+          user: userName
+        });
+
+        resetVenteForm();
+      };
+
+      // ==================== CONFIG ====================
+      const sauvegarderConfig = async () => {
+        await updateFirebase('config', tempConfig);
+        setShowParametres(false);
+      };
+
+      const ajouterBar = async () => {
+        if (!newBarName.trim()) return;
+        await pushToFirebase('barsNomades', {
+          nom: newBarName.trim(),
+          type: newBarType,
+          futs: []
+        });
+        setNewBarName('');
+      };
+
+      const supprimerBar = async (barId) => {
+        const bar = barsNomades.find(b => b.id === barId);
+        if (bar && bar.futs && bar.futs.length > 0) {
+          alert('Impossible de supprimer un bar avec des fûts en cours');
+          return;
+        }
+        await removeFromFirebase(`barsNomades/${barId}`);
+      };
+
+      const ajouterBenevole = async () => {
+        if (!newBenevoleName.trim()) return;
+        await pushToFirebase('benevoles', {
+          nom: newBenevoleName.trim(),
+          barId: null
+        });
+        setNewBenevoleName('');
+      };
+
+      const supprimerBenevole = async (benevoleId) => {
+        await removeFromFirebase(`benevoles/${benevoleId}`);
+      };
+
+      const affecterBenevole = async (benevoleId, barId) => {
+        await updateFirebase(`benevoles/${benevoleId}/barId`, barId || null);
+      };
+
+      const changerJour = async (newJour) => {
+        await updateFirebase('jourActuel', newJour);
+      };
+
+      // ==================== UI HELPERS ====================
+      const ouvrirModalRetour = (barId, futIndex) => {
+        setRetourBarId(barId);
+        setRetourFutIndex(futIndex);
+        setCommentaireRetour('');
+        setShowModalRetour(true);
+      };
+
+      const fermerModalRetour = () => {
+        setShowModalRetour(false);
+        setRetourBarId(null);
+        setRetourFutIndex(null);
+        setCommentaireRetour('');
+      };
+
+      const resetVenteForm = () => {
+        setVenteBarId(null);
+        setVentePintes(0);
+        setVentePichets(0);
+        setVenteGobelets(0);
+        setVenteEquipementDefaillant(false);
+      };
+
+      const formatMontant = (montant) => `${montant.toFixed(2)} €`;
+      const formatHeure = (timestamp) => new Date(timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+      // Admin
+      const demanderAccesAdmin = (action) => {
+        if (isAdmin) {
+          executerActionAdmin(action);
+        } else {
+          setPendingAdminAction(action);
+          setShowModalAdmin(true);
+          setAdminPasswordInput('');
+          setAdminPasswordError(false);
+        }
+      };
+
+      const validerAccesAdmin = () => {
+        if (adminPasswordInput === ADMIN_PASSWORD) {
+          setIsAdmin(true);
+          setShowModalAdmin(false);
+          if (pendingAdminAction) {
+            executerActionAdmin(pendingAdminAction);
+            setPendingAdminAction(null);
+          }
+        } else {
+          setAdminPasswordError(true);
+        }
+      };
+
+      const executerActionAdmin = (action) => {
+        switch (action) {
+          case 'parametres': setShowParametres(true); setTempConfig(config); break;
+          case 'historique': setShowHistorique(!showHistorique); break;
+          case 'ventes': setShowHistoriqueVentes(!showHistoriqueVentes); break;
+          case 'jour_precedent': if (jourActuel > 1) changerJour(jourActuel - 1); break;
+          case 'jour_suivant': if (jourActuel < config.nombreJours) changerJour(jourActuel + 1); break;
+        }
+      };
+
+      const getMouvementStyle = (type) => {
+        switch (type) {
+          case 'SORTIE': return { bg: 'bg-green-900/50', text: 'text-green-400', label: '📤 Sortie' };
+          case 'SORTIE_REUTILISABLE': return { bg: 'bg-green-900/50', text: 'text-green-400', label: '📤♻️' };
+          case 'RETOUR_VIDE': return { bg: 'bg-blue-900/50', text: 'text-blue-400', label: '📥 Vide' };
+          case 'RETOUR_CASSE': return { bg: 'bg-red-900/50', text: 'text-red-400', label: '⚠️ Casse' };
+          case 'RETOUR_REUTILISABLE': return { bg: 'bg-purple-900/50', text: 'text-purple-400', label: '♻️ N.term' };
+          case 'ANNULATION_SORTIE': return { bg: 'bg-orange-900/50', text: 'text-orange-400', label: '↩️ Ann.' };
+          default: return { bg: 'bg-neutral-800', text: 'text-neutral-400', label: type };
+        }
+      };
+
+      const historiqueFiltres = filtreHistoriqueJour === 0 ? historique : historique.filter(m => m.jour === filtreHistoriqueJour);
+      const ventesFiltrees = filtreVentesJour === 0 ? historiqueVentes : historiqueVentes.filter(v => v.jour === filtreVentesJour);
+
+      // ==================== JOIN SESSION ====================
+      const handleJoinSession = (code, name, uId) => {
+        setSessionCode(code);
+        setUserName(name);
+        setUserId(uId);
+      };
+
+      const quitterSession = async () => {
+        if (userId && sessionCode) {
+          await removeFromFirebase(`users/${userId}`);
+        }
+        setSessionCode(null);
+        setUserName('');
+        setUserId(null);
+        setIsAdmin(false);
+      };
+
+      // ==================== RENDER ====================
+      if (!sessionCode) {
+        return <SessionScreen onJoinSession={handleJoinSession} />;
+      }
+
+      return (
+        <div className="min-h-screen bg-black p-2 sm:p-4">
+          {/* Connection Status Bar */}
+          <div className="max-w-7xl mx-auto mb-2">
+            <div className="flex items-center justify-between bg-neutral-900 rounded-lg px-3 py-2 border border-neutral-800">
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`} />
+                <span className="text-sm text-neutral-400">
+                  {isOnline ? 'Connecté' : 'Hors ligne'}
+                </span>
+                <span className="text-neutral-600">|</span>
+                <span className="text-sm font-mono text-red-500">{sessionCode}</span>
+                <button 
+                  onClick={() => setShowSessionInfo(true)}
+                  className="text-neutral-500 hover:text-white"
+                >
+                  ℹ️
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-neutral-500">👥 {connectedUsers.length}</span>
+                <span className="text-sm text-amber-500">{userName}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Header */}
+          <div className="max-w-7xl mx-auto mb-4">
+            <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-3 sm:p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h1 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+                    🍺 Gestion des Fûts
+                  </h1>
+                  <p className="text-neutral-400 text-xs sm:text-sm">
+                    🍺 {biereCount} bar(s) | 🍎 {cidreCount} bar(s) | Max {config.maxFutsParBar}/bar
+                  </p>
+                </div>
+                
+                {/* Sélecteur de jour */}
+                <div className={`flex items-center gap-2 rounded-lg px-3 py-2 ${isAdmin ? 'bg-red-600' : 'bg-neutral-800'} border border-red-600`}>
+                  <span className="text-white text-sm">Jour</span>
+                  <button 
+                    onClick={() => demanderAccesAdmin('jour_precedent')}
+                    disabled={isAdmin && jourActuel === 1}
+                    className="w-7 h-7 flex items-center justify-center bg-white/20 hover:bg-white/30 rounded disabled:opacity-50"
+                  >
+                    <span className="text-white">◀</span>
+                  </button>
+                  <span className="w-8 text-center text-xl font-bold text-white">{jourActuel}</span>
+                  <button 
+                    onClick={() => demanderAccesAdmin('jour_suivant')}
+                    disabled={isAdmin && jourActuel === config.nombreJours}
+                    className="w-7 h-7 flex items-center justify-center bg-white/20 hover:bg-white/30 rounded disabled:opacity-50"
+                  >
+                    <span className="text-white">▶</span>
+                  </button>
+                  <span className="text-white/60 text-xs">/{config.nombreJours}</span>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {isAdmin ? (
+                    <button onClick={() => setIsAdmin(false)} className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm border border-orange-500">
+                      🔓 Admin
+                    </button>
+                  ) : (
+                    <button onClick={() => demanderAccesAdmin('parametres')} className="px-3 py-2 bg-neutral-800 text-neutral-400 rounded-lg text-sm border border-neutral-600">
+                      🔒 Admin
+                    </button>
+                  )}
+                  
+                  <button onClick={() => setShowModalVentes(true)} className="px-3 py-2 bg-emerald-700 text-white rounded-lg text-sm border border-emerald-500">
+                    💰 Ventes
+                  </button>
+                  
+                  <button onClick={() => setShowModalBenevoles(true)} className="px-3 py-2 bg-indigo-700 text-white rounded-lg text-sm border border-indigo-500">
+                    👥 Bénévoles
+                  </button>
+                  
+                  <button onClick={() => demanderAccesAdmin('ventes')} className="px-3 py-2 bg-teal-700 text-white rounded-lg text-sm border border-teal-500">
+                    📊 {historiqueVentes.length}
+                  </button>
+                  
+                  <button onClick={() => demanderAccesAdmin('historique')} className="px-3 py-2 bg-red-700 text-white rounded-lg text-sm border border-red-500">
+                    📋 {historique.length}
+                  </button>
+                  
+                  <button onClick={() => demanderAccesAdmin('parametres')} className="px-3 py-2 bg-neutral-700 text-white rounded-lg text-sm border border-red-600">
+                    ⚙️
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="max-w-7xl mx-auto">
+            {/* Résumé Ventes */}
+            {historiqueVentes.length > 0 && (
+              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-4 mb-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">💰</span>
+                    <div>
+                      <p className="text-neutral-400 text-sm">Total (net)</p>
+                      <p className="text-2xl font-bold text-white">{formatMontant(totauxVentes.montantTotal)}</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-4 text-center">
+                    <div><p className="text-xl font-bold text-orange-400">{totauxVentes.nbPintes}</p><p className="text-xs text-neutral-400">Pintes</p></div>
+                    <div><p className="text-xl font-bold text-orange-400">{totauxVentes.nbPichets}</p><p className="text-xs text-neutral-400">Pichets</p></div>
+                    <div><p className="text-xl font-bold text-orange-400">{totauxVentes.nbGobelets}</p><p className="text-xs text-neutral-400">Gobelets</p></div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Historique Ventes */}
+            {showHistoriqueVentes && (
+              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-4 mb-4">
+                <h2 className="text-lg font-bold text-white mb-3">📊 Historique Ventes</h2>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {ventesFiltrees.map(v => (
+                    <div key={v.id} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs bg-red-600 text-white px-1.5 py-0.5 rounded">J{v.jour}</span>
+                          <span className="text-lg font-bold text-green-400">{formatMontant(v.montantTotal)}</span>
+                          <span className="text-sm text-neutral-300">{v.nomBar}</span>
+                          <span className="text-xs">{v.typeBoisson === 'biere' ? '🍺' : '🍎'}</span>
+                        </div>
+                        <span className="text-xs text-neutral-500">{formatHeure(v.horodatage)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Stocks */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+              <div className="bg-neutral-900 rounded-xl border-2 border-blue-500 p-3">
+                <p className="text-neutral-400 text-xs">Vides</p>
+                <p className="text-2xl font-bold text-white">{stockVides}</p>
+              </div>
+              <div className="bg-neutral-900 rounded-xl border-2 border-red-500 p-3">
+                <p className="text-neutral-400 text-xs">Casse</p>
+                <p className="text-2xl font-bold text-white">{stockCasse}</p>
+              </div>
+              <div className="bg-neutral-900 rounded-xl border-2 border-amber-500 p-3">
+                <p className="text-neutral-400 text-xs">♻️ Bière</p>
+                <p className="text-2xl font-bold text-white">{stockReutilisablesBiere}</p>
+              </div>
+              <div className="bg-neutral-900 rounded-xl border-2 border-orange-500 p-3">
+                <p className="text-neutral-400 text-xs">♻️ Cidre</p>
+                <p className="text-2xl font-bold text-white">{stockReutilisablesCidre}</p>
+              </div>
+            </div>
+
+            {/* Historique Fûts */}
+            {showHistorique && (
+              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-4 mb-4">
+                <h2 className="text-lg font-bold text-white mb-3">📋 Historique Fûts</h2>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {historiqueFiltres.map(m => {
+                    const style = getMouvementStyle(m.typeMouvement);
+                    return (
+                      <div key={m.id} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs bg-red-600 text-white px-1.5 py-0.5 rounded">J{m.jour}</span>
+                            <span className={`px-2 py-0.5 rounded text-xs ${style.bg} ${style.text}`}>{style.label}</span>
+                            <span className="text-sm text-neutral-300">{m.typeFut === 'biere' ? '🍺' : '🍎'} {m.nomBar}</span>
+                          </div>
+                          <span className="text-xs text-neutral-500">{formatHeure(m.horodatage)}</span>
+                        </div>
+                        {m.commentaire && (
+                          <p className="text-xs text-neutral-400 mt-1 italic">💬 {m.commentaire}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Bars Bière */}
+            {barsBiere.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-amber-400 font-bold mb-2">🍺 Bars Bière ({barsBiere.length})</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                  {barsBiere.map(bar => (
+                    <div key={bar.id} className="bg-neutral-900 rounded-xl border-2 border-amber-500 overflow-hidden">
+                      <div className="bg-amber-600 px-3 py-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-white text-sm">🍺 {bar.nom}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-xs ${(bar.futs?.length || 0) >= config.maxFutsParBar ? 'bg-red-600' : 'bg-white/20'} text-white`}>
+                            {bar.futs?.length || 0}/{config.maxFutsParBar}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="p-3">
+                        <div className="space-y-1 mb-3 min-h-[40px]">
+                          {(!bar.futs || bar.futs.length === 0) ? (
+                            <p className="text-neutral-500 text-sm text-center py-2">Aucun fût</p>
+                          ) : (
+                            bar.futs.map((fut, idx) => (
+                              <div key={fut.id} className="flex items-center justify-between p-2 bg-amber-900/30 rounded border border-amber-700">
+                                <span className="text-amber-300 text-sm">
+                                  🍺 Fût {fut.isReutilisable && '♻️'}
+                                </span>
+                                <button onClick={() => ouvrirModalRetour(bar.id, idx)} className="p-1 bg-neutral-700 rounded hover:bg-neutral-600">
+                                  <span className="text-white text-xs">↩️</span>
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <button
+                          onClick={() => attribuerFut(bar.id)}
+                          disabled={(bar.futs?.length || 0) >= config.maxFutsParBar || (stockBiere + stockReutilisablesBiere) <= 0}
+                          className="w-full py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded font-medium text-sm transition-colors"
+                        >
+                          ➕ Attribuer
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Bars Cidre */}
+            {barsCidre.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-orange-400 font-bold mb-2">🍎 Bars Cidre ({barsCidre.length})</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                  {barsCidre.map(bar => (
+                    <div key={bar.id} className="bg-neutral-900 rounded-xl border-2 border-orange-500 overflow-hidden">
+                      <div className="bg-orange-600 px-3 py-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-white text-sm">🍎 {bar.nom}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-xs ${(bar.futs?.length || 0) >= config.maxFutsParBar ? 'bg-red-600' : 'bg-white/20'} text-white`}>
+                            {bar.futs?.length || 0}/{config.maxFutsParBar}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="p-3">
+                        <div className="space-y-1 mb-3 min-h-[40px]">
+                          {(!bar.futs || bar.futs.length === 0) ? (
+                            <p className="text-neutral-500 text-sm text-center py-2">Aucun fût</p>
+                          ) : (
+                            bar.futs.map((fut, idx) => (
+                              <div key={fut.id} className="flex items-center justify-between p-2 bg-orange-900/30 rounded border border-orange-700">
+                                <span className="text-orange-300 text-sm">
+                                  🍎 Fût {fut.isReutilisable && '♻️'}
+                                </span>
+                                <button onClick={() => ouvrirModalRetour(bar.id, idx)} className="p-1 bg-neutral-700 rounded hover:bg-neutral-600">
+                                  <span className="text-white text-xs">↩️</span>
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <button
+                          onClick={() => attribuerFut(bar.id)}
+                          disabled={(bar.futs?.length || 0) >= config.maxFutsParBar || (stockCidre + stockReutilisablesCidre) <= 0}
+                          className="w-full py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded font-medium text-sm transition-colors"
+                        >
+                          ➕ Attribuer
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ========== MODALS ========== */}
+          
+          {/* Modal Admin */}
+          {showModalAdmin && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-6 w-full max-w-sm">
+                <h3 className="text-xl font-bold text-white mb-4">🔐 Accès Admin</h3>
+                <input
+                  type={showAdminPassword ? 'text' : 'password'}
+                  value={adminPasswordInput}
+                  onChange={(e) => { setAdminPasswordInput(e.target.value); setAdminPasswordError(false); }}
+                  placeholder="Mot de passe"
+                  className="w-full px-4 py-3 bg-neutral-800 border border-neutral-600 rounded-xl text-white mb-3"
+                  onKeyPress={(e) => e.key === 'Enter' && validerAccesAdmin()}
+                />
+                {adminPasswordError && (
+                  <p className="text-red-400 text-sm mb-3">Mot de passe incorrect</p>
+                )}
+                <div className="flex gap-2">
+                  <button onClick={() => setShowModalAdmin(false)} className="flex-1 py-2 bg-neutral-700 text-white rounded-lg">
+                    Annuler
+                  </button>
+                  <button onClick={validerAccesAdmin} className="flex-1 py-2 bg-red-600 text-white rounded-lg">
+                    Valider
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Retour */}
+          {showModalRetour && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-6 w-full max-w-sm">
+                <h3 className="text-xl font-bold text-white mb-4">↩️ Retour de fût</h3>
+                <textarea
+                  value={commentaireRetour}
+                  onChange={(e) => setCommentaireRetour(e.target.value)}
+                  placeholder="Commentaire (optionnel)"
+                  className="w-full px-4 py-3 bg-neutral-800 border border-neutral-600 rounded-xl text-white mb-4 h-20"
+                />
+                <div className="space-y-2">
+                  <button onClick={() => retournerFut('vide')} className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium">
+                    📥 Vide (terminé)
+                  </button>
+                  <button onClick={() => retournerFut('nonTermine')} className="w-full py-3 bg-purple-600 text-white rounded-lg font-medium">
+                    ♻️ Non terminé
+                  </button>
+                  <button onClick={() => retournerFut('casse')} className="w-full py-3 bg-red-600 text-white rounded-lg font-medium">
+                    ⚠️ Cassé / Défectueux
+                  </button>
+                  <button onClick={fermerModalRetour} className="w-full py-2 text-neutral-400 hover:text-white">
+                    Annuler
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Ventes */}
+          {showModalVentes && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+                <h3 className="text-xl font-bold text-white mb-4">💰 Enregistrer une vente</h3>
+                
+                <div className="mb-4">
+                  <label className="text-neutral-400 text-sm">Bar</label>
+                  <select
+                    value={venteBarId || ''}
+                    onChange={(e) => setVenteBarId(e.target.value)}
+                    className="w-full px-4 py-3 bg-neutral-800 border border-neutral-600 rounded-xl text-white mt-1"
+                  >
+                    <option value="">-- Sélectionner --</option>
+                    {barsNomades.map(bar => (
+                      <option key={bar.id} value={bar.id}>{bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3 mb-4">
+                  <div>
+                    <label className="text-neutral-400 text-xs">Pintes ({config.prixPinte}€)</label>
+                    <input type="number" min="0" value={ventePintes} onChange={(e) => setVentePintes(parseInt(e.target.value) || 0)}
+                      className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white text-center" />
+                  </div>
+                  <div>
+                    <label className="text-neutral-400 text-xs">Pichets ({config.prixPichet}€)</label>
+                    <input type="number" min="0" value={ventePichets} onChange={(e) => setVentePichets(parseInt(e.target.value) || 0)}
+                      className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white text-center" />
+                  </div>
+                  <div>
+                    <label className="text-neutral-400 text-xs">Gobelets ({config.prixGobelet}€)</label>
+                    <input type="number" min="0" value={venteGobelets} onChange={(e) => setVenteGobelets(parseInt(e.target.value) || 0)}
+                      className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white text-center" />
+                  </div>
+                </div>
+
+                <div className="bg-neutral-800 rounded-lg p-3 mb-4">
+                  <p className="text-neutral-400 text-sm">Total</p>
+                  <p className="text-2xl font-bold text-white">
+                    {formatMontant((ventePintes * config.prixPinte) + (ventePichets * config.prixPichet) + (venteGobelets * config.prixGobelet))}
+                  </p>
+                </div>
+
+                <label className="flex items-center gap-2 mb-4 text-neutral-300">
+                  <input type="checkbox" checked={venteEquipementDefaillant} onChange={(e) => setVenteEquipementDefaillant(e.target.checked)}
+                    className="w-5 h-5 rounded" />
+                  ⚠️ Équipement défaillant
+                </label>
+
+                <div className="flex gap-2">
+                  <button onClick={() => { setShowModalVentes(false); resetVenteForm(); }} className="flex-1 py-3 bg-neutral-700 text-white rounded-lg">
+                    Annuler
+                  </button>
+                  <button onClick={() => { enregistrerVente(); setShowModalVentes(false); }} disabled={!venteBarId}
+                    className="flex-1 py-3 bg-emerald-600 disabled:bg-neutral-700 text-white rounded-lg font-medium">
+                    Enregistrer
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Bénévoles */}
+          {showModalBenevoles && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+                <h3 className="text-xl font-bold text-white mb-4">👥 Bénévoles</h3>
+                
+                <div className="flex gap-2 mb-4">
+                  <input
+                    type="text"
+                    value={newBenevoleName}
+                    onChange={(e) => setNewBenevoleName(e.target.value)}
+                    placeholder="Nom du bénévole"
+                    className="flex-1 px-4 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white"
+                  />
+                  <button onClick={ajouterBenevole} className="px-4 py-2 bg-indigo-600 text-white rounded-lg">
+                    ➕
+                  </button>
+                </div>
+
+                <div className="space-y-2 mb-4">
+                  {benevoles.map(b => (
+                    <div key={b.id} className="flex items-center gap-2 p-2 bg-neutral-800 rounded-lg">
+                      <span className="flex-1 text-white">{b.nom}</span>
+                      <select
+                        value={b.barId || ''}
+                        onChange={(e) => affecterBenevole(b.id, e.target.value)}
+                        className="px-2 py-1 bg-neutral-700 border border-neutral-600 rounded text-white text-sm"
+                      >
+                        <option value="">Non affecté</option>
+                        {barsNomades.map(bar => (
+                          <option key={bar.id} value={bar.id}>{bar.nom}</option>
+                        ))}
+                      </select>
+                      <button onClick={() => supprimerBenevole(b.id)} className="p-1 text-red-400 hover:text-red-300">
+                        🗑️
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <button onClick={() => setShowModalBenevoles(false)} className="w-full py-2 bg-neutral-700 text-white rounded-lg">
+                  Fermer
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Paramètres */}
+          {showParametres && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+                <h3 className="text-xl font-bold text-white mb-4">⚙️ Paramètres</h3>
+                
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-neutral-400 text-sm">Nombre de jours</label>
+                      <input type="number" min="1" max="10" value={tempConfig.nombreJours}
+                        onChange={(e) => setTempConfig({...tempConfig, nombreJours: parseInt(e.target.value) || 1})}
+                        className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
+                    </div>
+                    <div>
+                      <label className="text-neutral-400 text-sm">Max fûts/bar</label>
+                      <input type="number" min="1" max="10" value={tempConfig.maxFutsParBar}
+                        onChange={(e) => setTempConfig({...tempConfig, maxFutsParBar: parseInt(e.target.value) || 1})}
+                        className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
+                    </div>
+                    <div>
+                      <label className="text-neutral-400 text-sm">Stock initial Bière</label>
+                      <input type="number" min="0" value={tempConfig.stockInitialBiere}
+                        onChange={(e) => setTempConfig({...tempConfig, stockInitialBiere: parseInt(e.target.value) || 0})}
+                        className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
+                    </div>
+                    <div>
+                      <label className="text-neutral-400 text-sm">Stock initial Cidre</label>
+                      <input type="number" min="0" value={tempConfig.stockInitialCidre}
+                        onChange={(e) => setTempConfig({...tempConfig, stockInitialCidre: parseInt(e.target.value) || 0})}
+                        className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
+                    </div>
+                    <div>
+                      <label className="text-neutral-400 text-sm">Prix Pinte (€)</label>
+                      <input type="number" min="0" step="0.5" value={tempConfig.prixPinte}
+                        onChange={(e) => setTempConfig({...tempConfig, prixPinte: parseFloat(e.target.value) || 0})}
+                        className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
+                    </div>
+                    <div>
+                      <label className="text-neutral-400 text-sm">Prix Pichet (€)</label>
+                      <input type="number" min="0" step="0.5" value={tempConfig.prixPichet}
+                        onChange={(e) => setTempConfig({...tempConfig, prixPichet: parseFloat(e.target.value) || 0})}
+                        className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
+                    </div>
+                    <div>
+                      <label className="text-neutral-400 text-sm">Prix Gobelet (€)</label>
+                      <input type="number" min="0" step="0.5" value={tempConfig.prixGobelet}
+                        onChange={(e) => setTempConfig({...tempConfig, prixGobelet: parseFloat(e.target.value) || 0})}
+                        className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
+                    </div>
+                  </div>
+
+                  {/* Gestion des bars */}
+                  <div className="border-t border-neutral-700 pt-4">
+                    <h4 className="text-white font-medium mb-2">Bars nomades</h4>
+                    <div className="flex gap-2 mb-3">
+                      <input type="text" value={newBarName} onChange={(e) => setNewBarName(e.target.value)}
+                        placeholder="Nom du bar" className="flex-1 px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
+                      <select value={newBarType} onChange={(e) => setNewBarType(e.target.value)}
+                        className="px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white">
+                        <option value="biere">🍺 Bière</option>
+                        <option value="cidre">🍎 Cidre</option>
+                      </select>
+                      <button onClick={ajouterBar} className="px-4 py-2 bg-red-600 text-white rounded-lg">➕</button>
+                    </div>
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                      {barsNomades.map(bar => (
+                        <div key={bar.id} className="flex items-center justify-between p-2 bg-neutral-800 rounded">
+                          <span className="text-white text-sm">{bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom}</span>
+                          <button onClick={() => supprimerBar(bar.id)} className="text-red-400 hover:text-red-300 text-sm">🗑️</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 mt-6">
+                  <button onClick={() => setShowParametres(false)} className="flex-1 py-3 bg-neutral-700 text-white rounded-lg">
+                    Annuler
+                  </button>
+                  <button onClick={sauvegarderConfig} className="flex-1 py-3 bg-red-600 text-white rounded-lg font-medium">
+                    Sauvegarder
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Session Info */}
+          {showSessionInfo && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-6 w-full max-w-sm">
+                <h3 className="text-xl font-bold text-white mb-4">📱 Session</h3>
+                
+                <div className="bg-neutral-800 rounded-lg p-4 mb-4 text-center">
+                  <p className="text-neutral-400 text-sm mb-1">Code à partager</p>
+                  <p className="text-3xl font-mono font-bold text-red-500">{sessionCode}</p>
+                </div>
+
+                <div className="mb-4">
+                  <p className="text-neutral-400 text-sm mb-2">Utilisateurs connectés ({connectedUsers.length})</p>
+                  <div className="space-y-1">
+                    {connectedUsers.map(u => (
+                      <div key={u.id} className="flex items-center gap-2 text-white text-sm">
+                        <div className="w-2 h-2 bg-green-500 rounded-full" />
+                        {u.name} {u.id === userId && '(vous)'}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <button onClick={() => setShowSessionInfo(false)} className="flex-1 py-2 bg-neutral-700 text-white rounded-lg">
+                    Fermer
+                  </button>
+                  <button onClick={quitterSession} className="flex-1 py-2 bg-red-600 text-white rounded-lg">
+                    Quitter
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // ==================== RENDER ====================
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
