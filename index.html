@@ -295,6 +295,9 @@
       const [venteNbPichets, setVenteNbPichets] = useState('');
       const [venteNbGobelets, setVenteNbGobelets] = useState('');
       const [venteCommentaire, setVenteCommentaire] = useState('');
+      const [venteEquipDefaillant, setVenteEquipDefaillant] = useState(false);
+      const [venteNumEquipement, setVenteNumEquipement] = useState('');
+      const [venteDonneesPartielles, setVenteDonneesPartielles] = useState(false);
 
       const ADMIN_PASSWORD = "Hellfest26";
 
@@ -574,6 +577,9 @@
           nbPintes: parseInt(venteNbPintes) || 0,
           nbPichets: parseInt(venteNbPichets) || 0,
           nbGobelets: parseInt(venteNbGobelets) || 0,
+          equipementDefaillant: venteEquipDefaillant,
+          numEquipement: venteEquipDefaillant ? venteNumEquipement.trim() : '',
+          donneesPartielles: venteEquipDefaillant ? venteDonneesPartielles : false,
           commentaire: venteCommentaire,
           jour: jourActuel,
           timestamp: Date.now(),
@@ -585,6 +591,9 @@
         setVenteNbPintes('');
         setVenteNbPichets('');
         setVenteNbGobelets('');
+        setVenteEquipDefaillant(false);
+        setVenteNumEquipement('');
+        setVenteDonneesPartielles(false);
         setVenteCommentaire('');
       };
 
@@ -700,7 +709,7 @@
 
       const exporterHistoriqueVentes = () => {
         if (historiqueVentes.length === 0) return;
-        const headers = ['Date/Heure', 'Bar', 'Montant', 'Pintes', 'Pichets', 'Gobelets', 'Jour', 'Commentaire'];
+        const headers = ['Date/Heure', 'Bar', 'Montant', 'Pintes', 'Pichets', 'Gobelets', 'Jour', 'Équip. défaillant', 'N° équipement', 'Données partielles', 'Commentaire'];
         const rows = historiqueVentes.filter(v => !v.annule).map(v => [
           `"${formatDate(v.timestamp)}"`,
           `"${v.barNom}"`,
@@ -709,6 +718,9 @@
           v.nbPichets || 0,
           v.nbGobelets || 0,
           v.jour,
+          v.equipementDefaillant ? 'Oui' : 'Non',
+          `"${v.numEquipement || ''}"`,
+          v.donneesPartielles ? 'Oui' : 'Non',
           `"${v.commentaire || ''}"`
         ].join(';'));
         const total = historiqueVentes.filter(v => !v.annule).reduce((a, v) => a + (v.montant || 0), 0);
@@ -870,6 +882,11 @@
                         <span>🍺{v.nbPintes || 0} 🍶{v.nbPichets || 0} 🥤{v.nbGobelets || 0}</span>
                         <span>J{v.jour} • {new Date(v.timestamp).toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'})}</span>
                       </div>
+                      {v.equipementDefaillant && (
+                        <div className="mt-1 text-xs text-orange-400 bg-orange-900/30 px-2 py-1 rounded">
+                          ⚠️ Équip. défaillant{v.numEquipement ? ` - N°${v.numEquipement}` : ''}{v.donneesPartielles ? ' (données partielles)' : ''}
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
@@ -1054,10 +1071,51 @@
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-sm text-neutral-400 mb-1">Commentaire</label>
-                    <textarea value={venteCommentaire} onChange={(e) => setVenteCommentaire(e.target.value)} className="w-full px-4 py-2 bg-neutral-800 rounded-lg" rows="2" />
+                  {/* Équipement défaillant */}
+                  <div className="flex items-center gap-3 mt-2">
+                    <input 
+                      type="checkbox" 
+                      checked={venteEquipDefaillant} 
+                      onChange={(e) => setVenteEquipDefaillant(e.target.checked)}
+                      className="w-5 h-5 rounded accent-orange-500"
+                    />
+                    <span className="text-orange-400 font-medium">⚠️ Équipement défaillant</span>
                   </div>
+
+                  {venteEquipDefaillant && (
+                    <div className="bg-neutral-800 rounded-lg p-4 space-y-3 border border-orange-500/30">
+                      <input 
+                        type="text" 
+                        value={venteNumEquipement} 
+                        onChange={(e) => setVenteNumEquipement(e.target.value)}
+                        placeholder="N° équipement"
+                        className="w-full px-4 py-2 bg-neutral-700 rounded-lg"
+                      />
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="checkbox" 
+                          checked={venteDonneesPartielles} 
+                          onChange={(e) => setVenteDonneesPartielles(e.target.checked)}
+                          className="w-4 h-4 rounded"
+                        />
+                        <span className="text-orange-400 text-sm">Données partielles</span>
+                      </div>
+                      <textarea 
+                        value={venteCommentaire} 
+                        onChange={(e) => setVenteCommentaire(e.target.value)} 
+                        placeholder="Commentaire..."
+                        className="w-full px-4 py-2 bg-neutral-700 rounded-lg" 
+                        rows="2" 
+                      />
+                    </div>
+                  )}
+
+                  {!venteEquipDefaillant && (
+                    <div>
+                      <label className="block text-sm text-neutral-400 mb-1">Commentaire</label>
+                      <textarea value={venteCommentaire} onChange={(e) => setVenteCommentaire(e.target.value)} className="w-full px-4 py-2 bg-neutral-800 rounded-lg" rows="2" />
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex gap-2 mt-6">
