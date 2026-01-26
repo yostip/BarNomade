@@ -395,12 +395,31 @@
           sessionRef.child(`users/${userName}/lastActive`).set(Date.now());
         }, 30000);
 
+        // Détecter si on a été éjecté
+        sessionRef.child(`users/${userName}`).on('value', (snap) => {
+          if (!snap.exists() && session) {
+            // L'utilisateur a été supprimé = éjecté
+            alert('Vous avez été déconnecté par un administrateur.');
+            setSession(null);
+            setUserName('');
+            setIsAdmin(false);
+          }
+        });
+
         return () => {
           sessionRef.off();
           connectedRef.off();
           clearInterval(interval);
         };
       }, [session, userName]);
+
+      // Fonction pour éjecter un utilisateur (admin only)
+      const ejecterUtilisateur = async (user) => {
+        if (!isAdmin || user === userName) return;
+        if (confirm(`Êtes-vous sûr de vouloir éjecter ${user} ?`)) {
+          await database.ref(`sessions/${session}/users/${user}`).remove();
+        }
+      };
 
       // ==================== COMPUTED VALUES ====================
       const stockBiere = config.stockInitialBiere - historique.filter(h => h.type === 'SORTIE' && h.typeFut === 'biere').length;
@@ -779,6 +798,16 @@
               <button onClick={() => setShowModalVentes(true)} className="flex-1 py-2 bg-emerald-600 rounded-lg text-sm font-medium">
                 💰 Ventes
               </button>
+              {isAdmin && (
+                <>
+                  <button onClick={() => setShowHistoriqueVentes(!showHistoriqueVentes)} className={`py-2 px-3 rounded-lg text-sm ${showHistoriqueVentes ? 'bg-teal-500' : 'bg-teal-700'}`}>
+                    📊 {historiqueVentes.length}
+                  </button>
+                  <button onClick={() => setShowHistorique(!showHistorique)} className={`py-2 px-3 rounded-lg text-sm ${showHistorique ? 'bg-purple-500' : 'bg-purple-700'}`}>
+                    📋 {historique.length}
+                  </button>
+                </>
+              )}
               <button onClick={() => demanderAccesAdmin('export')} className="py-2 px-3 bg-green-700 rounded-lg text-sm">
                 📥
               </button>
@@ -817,6 +846,71 @@
             <div className="mx-2 mt-2 p-3 bg-emerald-900/50 rounded-lg flex items-center justify-between">
               <span className="text-emerald-300">💰 Total Ventes</span>
               <span className="text-xl font-bold text-emerald-400">{totalVentes.toFixed(2)} €</span>
+            </div>
+          )}
+
+          {/* Historique Ventes (Admin) */}
+          {isAdmin && showHistoriqueVentes && (
+            <div className="mx-2 mt-2 bg-teal-900/30 rounded-xl border border-teal-700 overflow-hidden">
+              <div className="bg-teal-900/50 px-3 py-2 flex items-center justify-between">
+                <span className="font-bold text-teal-300">📊 Historique Ventes</span>
+                <button onClick={() => setShowHistoriqueVentes(false)} className="text-teal-400">✕</button>
+              </div>
+              <div className="max-h-48 overflow-y-auto">
+                {historiqueVentes.filter(v => !v.annule).length === 0 ? (
+                  <p className="text-neutral-500 text-sm text-center py-4">Aucune vente</p>
+                ) : (
+                  historiqueVentes.filter(v => !v.annule).map(v => (
+                    <div key={v.id} className="px-3 py-2 border-b border-teal-800 last:border-0">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-teal-300">{(v.montant || 0).toFixed(2)} €</span>
+                        <span className="text-xs text-neutral-400">{v.barNom}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-neutral-500">
+                        <span>🍺{v.nbPintes || 0} 🍶{v.nbPichets || 0} 🥤{v.nbGobelets || 0}</span>
+                        <span>J{v.jour} • {new Date(v.timestamp).toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'})}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Historique Fûts (Admin) */}
+          {isAdmin && showHistorique && (
+            <div className="mx-2 mt-2 bg-purple-900/30 rounded-xl border border-purple-700 overflow-hidden">
+              <div className="bg-purple-900/50 px-3 py-2 flex items-center justify-between">
+                <span className="font-bold text-purple-300">📋 Historique Fûts</span>
+                <button onClick={() => setShowHistorique(false)} className="text-purple-400">✕</button>
+              </div>
+              <div className="max-h-48 overflow-y-auto">
+                {historique.length === 0 ? (
+                  <p className="text-neutral-500 text-sm text-center py-4">Aucun mouvement</p>
+                ) : (
+                  historique.map(h => {
+                    const typeLabels = {
+                      'SORTIE': { icon: '📤', label: 'Sortie', color: 'text-green-400' },
+                      'RETOUR_VIDE': { icon: '📦', label: 'Vide', color: 'text-blue-400' },
+                      'RETOUR_CASSE': { icon: '💥', label: 'Cassé', color: 'text-red-400' },
+                      'RETOUR_REUTILISABLE': { icon: '♻️', label: 'Réutil.', color: 'text-purple-400' }
+                    };
+                    const t = typeLabels[h.type] || { icon: '•', label: h.type, color: 'text-neutral-400' };
+                    return (
+                      <div key={h.id} className="px-3 py-2 border-b border-purple-800 last:border-0">
+                        <div className="flex items-center justify-between">
+                          <span className={`font-medium ${t.color}`}>{t.icon} {t.label}</span>
+                          <span className="text-xs text-neutral-400">{h.barNom}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-neutral-500">
+                          <span>{h.typeFut === 'biere' ? '🍺' : '🍎'} {h.user}</span>
+                          <span>J{h.jour} • {new Date(h.timestamp).toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'})}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </div>
           )}
 
@@ -1068,12 +1162,25 @@
                   <p className="text-2xl font-mono font-bold text-red-400">{session}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-neutral-400 mb-2">Utilisateurs connectés ({connectedUsers.length})</p>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm text-neutral-400">Utilisateurs connectés ({connectedUsers.length})</p>
+                    {isAdmin && <span className="text-xs text-green-400 bg-green-900/50 px-2 py-0.5 rounded">🔓 Admin</span>}
+                  </div>
                   <div className="space-y-1">
                     {connectedUsers.map(user => (
-                      <div key={user} className="flex items-center gap-2 bg-neutral-800 px-3 py-2 rounded">
-                        <div className="w-2 h-2 bg-green-500 rounded-full" />
-                        <span>{user} {user === userName && '(vous)'}</span>
+                      <div key={user} className="flex items-center justify-between bg-neutral-800 px-3 py-2 rounded">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 bg-green-500 rounded-full" />
+                          <span>{user} {user === userName && '(vous)'}</span>
+                        </div>
+                        {isAdmin && user !== userName && (
+                          <button 
+                            onClick={() => ejecterUtilisateur(user)}
+                            className="px-2 py-1 bg-red-600/50 hover:bg-red-600 rounded text-xs font-medium transition-colors"
+                          >
+                            ❌ Éjecter
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
