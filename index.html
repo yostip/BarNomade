@@ -86,6 +86,7 @@
       const [superAdminAuth, setSuperAdminAuth] = useState(false);
       const [allSessions, setAllSessions] = useState([]);
       const [loadingSessions, setLoadingSessions] = useState(false);
+      const [createPassword, setCreatePassword] = useState('');
       
       const SUPER_ADMIN_PASSWORD = "HF2026Admin";
 
@@ -143,6 +144,10 @@
       const createSession = async () => {
         if (!userName.trim()) {
           setError('Entre ton prénom');
+          return;
+        }
+        if (createPassword !== SUPER_ADMIN_PASSWORD) {
+          setError('Mot de passe incorrect. Seul un administrateur peut créer une session.');
           return;
         }
         setLoading(true);
@@ -335,7 +340,7 @@
       return (
         <div className="min-h-screen bg-black flex items-center justify-center p-4">
           <div className="w-full max-w-sm">
-            <button onClick={() => { setMode('choice'); setError(''); }} className="text-neutral-400 mb-6 flex items-center gap-2">
+            <button onClick={() => { setMode('choice'); setError(''); setCreatePassword(''); }} className="text-neutral-400 mb-6 flex items-center gap-2">
               <Icon name="ArrowLeft" className="w-4 h-4" /> Retour
             </button>
             
@@ -354,6 +359,20 @@
                   placeholder="Ex: Kevin"
                 />
               </div>
+
+              {mode === 'create' && (
+                <div>
+                  <label className="block text-neutral-400 text-sm mb-2">🔐 Mot de passe administrateur</label>
+                  <input
+                    type="password"
+                    value={createPassword}
+                    onChange={(e) => setCreatePassword(e.target.value)}
+                    className="w-full px-4 py-3 bg-neutral-900 border border-neutral-700 rounded-xl text-white text-lg"
+                    placeholder="Mot de passe..."
+                  />
+                  <p className="text-neutral-500 text-xs mt-1">Requis pour créer une nouvelle session</p>
+                </div>
+              )}
 
               {mode === 'join' && (
                 <div>
