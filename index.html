@@ -821,10 +821,17 @@
       };
 
       const annulerMouvementFut = async (mouvementId) => {
-        if (!confirm('Annuler ce mouvement de fût ?')) return;
-        
         const mouvement = historique.find(h => h.id === mouvementId);
         if (!mouvement) return;
+
+        let confirmMessage = 'Annuler ce mouvement de fût ?\n\n';
+        if (mouvement.type === 'SORTIE') {
+          confirmMessage += `→ Le fût ${mouvement.typeFut === 'biere' ? '🍺 Bière' : '🍎 Cidre'} sera RETIRÉ du bar "${mouvement.barNom}"`;
+        } else {
+          confirmMessage += `→ Le fût ${mouvement.typeFut === 'biere' ? '🍺 Bière' : '🍎 Cidre'} sera REMIS dans le bar "${mouvement.barNom}"`;
+        }
+
+        if (!confirm(confirmMessage)) return;
 
         // Marquer comme annulé
         await database.ref(`sessions/${session}/historique/${mouvementId}`).update({
@@ -833,17 +840,21 @@
           annuleLe: Date.now()
         });
 
-        // Si c'était une sortie, on doit retirer le fût du bar
-        if (mouvement.type === 'SORTIE' && mouvement.barId) {
-          const barRef = database.ref(`sessions/${session}/bars/${mouvement.barId}/futs`);
-          const snapshot = await barRef.once('value');
-          const futs = snapshot.val() || [];
-          // Retirer le dernier fût du type correspondant
+        const barRef = database.ref(`sessions/${session}/bars/${mouvement.barId}/futs`);
+        const snapshot = await barRef.once('value');
+        const futs = snapshot.val() || [];
+
+        if (mouvement.type === 'SORTIE') {
+          // Annuler une SORTIE → Retirer le fût du bar
           const index = futs.findLastIndex(f => f.type === mouvement.typeFut);
           if (index !== -1) {
             futs.splice(index, 1);
             await barRef.set(futs);
           }
+        } else if (mouvement.type === 'RETOUR_VIDE' || mouvement.type === 'RETOUR_CASSE' || mouvement.type === 'RETOUR_REUTILISABLE') {
+          // Annuler un RETOUR → Remettre le fût dans le bar
+          futs.push({ type: mouvement.typeFut, addedAt: Date.now() });
+          await barRef.set(futs);
         }
       };
 
