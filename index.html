@@ -539,31 +539,18 @@
 
       // ==================== ACTIONS ====================
       const attribuerFut = async (barId) => {
-        console.log('attribuerFut appelé avec barId:', barId);
-        alert('Fonction attribuerFut appelée ! barId: ' + barId);
-        
         try {
           const bar = barsNomades.find(b => b.id === barId);
-          console.log('Bar trouvé:', bar);
+          if (!bar) return;
           
-          if (!bar) {
-            alert('Erreur: Bar non trouvé');
-            return;
-          }
           const currentFuts = bar.futs || [];
-          if (currentFuts.length >= config.maxFutsParBar) {
-            alert('Erreur: Max fûts atteint');
-            return;
-          }
+          if (currentFuts.length >= config.maxFutsParBar) return;
 
           const isBiere = bar.type === 'biere';
           const stockNeuf = isBiere ? stockBiere : stockCidre;
           const stockReutil = isBiere ? stockReutilisablesBiere : stockReutilisablesCidre;
 
-          if (stockNeuf <= 0 && stockReutil <= 0) {
-            alert('Erreur: Stock vide (Neuf: ' + stockNeuf + ', Réutil: ' + stockReutil + ')');
-            return;
-          }
+          if (stockNeuf <= 0 && stockReutil <= 0) return;
 
           const useReutilisable = stockReutil > 0;
           const newFut = {
@@ -575,9 +562,7 @@
 
           // Mise à jour du bar
           const updatedFuts = [...(bar.futs || []), newFut];
-          console.log('Mise à jour Firebase:', `barsNomades/${barId}/futs`, updatedFuts);
           await updateFirebase(`barsNomades/${barId}/futs`, updatedFuts);
-          alert('Fût attribué avec succès !');
 
           // Historique
           await pushToFirebase('historique', {
@@ -592,7 +577,6 @@
           });
         } catch (error) {
           console.error('Erreur attribuerFut:', error);
-          alert('Erreur: ' + error.message);
         }
       };
 
@@ -938,15 +922,6 @@
                 </div>
               </div>
             )}
-
-            {/* Debug stocks */}
-            <div className="bg-red-900 border border-red-500 rounded-lg p-3 mb-4">
-              <p className="text-white text-sm font-mono">
-                DEBUG: stockBiere={stockBiere}, stockCidre={stockCidre}, 
-                config.stockInitialBiere={config.stockInitialBiere}, 
-                config.stockInitialCidre={config.stockInitialCidre}
-              </p>
-            </div>
 
             {/* Stocks */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
