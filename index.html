@@ -422,6 +422,7 @@
         nombreJours: 4
       });
       const [barsNomades, setBarsNomades] = useState([]);
+      const [futsEnAttente, setFutsEnAttente] = useState([]);
       const [historique, setHistorique] = useState([]);
       const [historiqueVentes, setHistoriqueVentes] = useState([]);
       const [benevoles, setBenevoles] = useState([]);
@@ -447,6 +448,9 @@
       const [showHistoriqueVentes, setShowHistoriqueVentes] = useState(false);
       const [showModalExport, setShowModalExport] = useState(false);
       const [showModalRetour, setShowModalRetour] = useState(null);
+      const [retourEtape, setRetourEtape] = useState('choix'); // 'choix' ou 'commentaire'
+      const [retourType, setRetourType] = useState('');
+      const [retourCommentaire, setRetourCommentaire] = useState('');
       const [showModalVentes, setShowModalVentes] = useState(false);
       const [showModalBenevoles, setShowModalBenevoles] = useState(false);
       const [showModalAffectation, setShowModalAffectation] = useState(false);
@@ -559,6 +563,16 @@
             setAffectations(snap.val());
           } else {
             setAffectations({});
+          }
+        });
+
+        // Sync fûts en attente (non terminés)
+        sessionRef.child('futsEnAttente').on('value', (snap) => {
+          if (snap.val()) {
+            const arr = Object.entries(snap.val()).map(([id, data]) => ({ id, ...data }));
+            setFutsEnAttente(arr);
+          } else {
+            setFutsEnAttente([]);
           }
         });
 
@@ -717,7 +731,7 @@
         });
       };
 
-      const retournerFut = async (barId, futIndex, typeRetour) => {
+      const retournerFut = async (barId, futIndex, typeRetour, commentaire = '') => {
         const bar = barsNomades.find(b => b.id === barId);
         if (!bar) return;
 
@@ -728,7 +742,8 @@
         const updatedFuts = currentFuts.filter((_, i) => i !== futIndex);
         await database.ref(`sessions/${session}/barsNomades/${barId}/futs`).set(updatedFuts.length > 0 ? updatedFuts : null);
 
-        await database.ref(`sessions/${session}/historique`).push({
+        // Enregistrer dans l'historique
+        const historiqueData = {
           type: typeRetour,
           typeFut: fut.type,
           barId,
@@ -736,9 +751,64 @@
           jour: jourActuel,
           timestamp: Date.now(),
           user: userName
+        };
+
+        // Ajouter le commentaire si présent (obligatoire pour cassé)
+        if (commentaire.trim()) {
+          historiqueData.commentaire = commentaire.trim();
+        }
+
+        await database.ref(`sessions/${session}/historique`).push(historiqueData);
+
+        // Si fût non terminé, le mettre en attente pour le jour suivant
+        if (typeRetour === 'RETOUR_REUTILISABLE') {
+          await database.ref(`sessions/${session}/futsEnAttente`).push({
+            typeFut: fut.type,
+            barId,
+            barNom: bar.nom,
+            jourOrigine: jourActuel,
+            timestamp: Date.now(),
+            user: userName
+          });
+        }
+
+        // Reset modal
+        setShowModalRetour(null);
+        setRetourEtape('choix');
+        setRetourType('');
+        setRetourCommentaire('');
+      };
+
+      // Fonction pour reprendre un fût en attente
+      const reprendreFutEnAttente = async (futAttenteId, barId) => {
+        const bar = barsNomades.find(b => b.id === barId);
+        if (!bar) return;
+
+        // Récupérer le fût en attente
+        const snapshot = await database.ref(`sessions/${session}/futsEnAttente/${futAttenteId}`).once('value');
+        const futAttente = snapshot.val();
+        if (!futAttente) return;
+
+        // Ajouter le fût au bar
+        const currentFuts = bar.futs || [];
+        const newFut = { type: futAttente.typeFut, addedAt: Date.now(), reprisDe: futAttente.jourOrigine };
+        const updatedFuts = [...currentFuts, newFut];
+        await database.ref(`sessions/${session}/barsNomades/${barId}/futs`).set(updatedFuts);
+
+        // Enregistrer dans l'historique
+        await database.ref(`sessions/${session}/historique`).push({
+          type: 'REPRISE',
+          typeFut: futAttente.typeFut,
+          barId,
+          barNom: bar.nom,
+          jour: jourActuel,
+          timestamp: Date.now(),
+          user: userName,
+          commentaire: `Reprise du J${futAttente.jourOrigine}`
         });
 
-        setShowModalRetour(null);
+        // Supprimer de la liste d'attente
+        await database.ref(`sessions/${session}/futsEnAttente/${futAttenteId}`).remove();
       };
 
       const enregistrerVente = async () => {
@@ -791,18 +861,15 @@
           exporterBenevoles();
         }
 
-        // Supprimer les données (garder config et bars)
-        await database.ref(`sessions/${session}/bars`).remove();
+        // Supprimer les données (garder config et liste des bars)
         await database.ref(`sessions/${session}/historique`).remove();
         await database.ref(`sessions/${session}/historiqueVentes`).remove();
         await database.ref(`sessions/${session}/affectations`).remove();
+        await database.ref(`sessions/${session}/futsEnAttente`).remove();
 
         // Réinitialiser les bars avec 0 fûts
         for (const bar of barsNomades) {
-          await database.ref(`sessions/${session}/bars/${bar.id}`).set({
-            ...bar,
-            futs: []
-          });
+          await database.ref(`sessions/${session}/barsNomades/${bar.id}/futs`).set(null);
         }
 
         setShowModalReinit(false);
@@ -825,7 +892,7 @@
         if (!mouvement) return;
 
         let confirmMessage = 'Annuler ce mouvement de fût ?\n\n';
-        if (mouvement.type === 'SORTIE') {
+        if (mouvement.type === 'SORTIE' || mouvement.type === 'REPRISE') {
           confirmMessage += `→ Le fût ${mouvement.typeFut === 'biere' ? '🍺 Bière' : '🍎 Cidre'} sera RETIRÉ du bar "${mouvement.barNom}"`;
         } else {
           confirmMessage += `→ Le fût ${mouvement.typeFut === 'biere' ? '🍺 Bière' : '🍎 Cidre'} sera REMIS dans le bar "${mouvement.barNom}"`;
@@ -840,16 +907,39 @@
           annuleLe: Date.now()
         });
 
-        const barRef = database.ref(`sessions/${session}/bars/${mouvement.barId}/futs`);
+        // Récupérer les fûts du bar
+        const barRef = database.ref(`sessions/${session}/barsNomades/${mouvement.barId}/futs`);
         const snapshot = await barRef.once('value');
-        const futs = snapshot.val() || [];
+        let futs = snapshot.val() || [];
+        
+        // Convertir en tableau si c'est un objet (Firebase peut transformer les tableaux en objets)
+        if (!Array.isArray(futs)) {
+          futs = Object.values(futs);
+        }
 
-        if (mouvement.type === 'SORTIE') {
-          // Annuler une SORTIE → Retirer le fût du bar
-          const index = futs.findLastIndex(f => f.type === mouvement.typeFut);
-          if (index !== -1) {
-            futs.splice(index, 1);
-            await barRef.set(futs);
+        if (mouvement.type === 'SORTIE' || mouvement.type === 'REPRISE') {
+          // Annuler une SORTIE ou REPRISE → Retirer le fût du bar
+          let lastIndex = -1;
+          for (let i = futs.length - 1; i >= 0; i--) {
+            if (futs[i] && futs[i].type === mouvement.typeFut) {
+              lastIndex = i;
+              break;
+            }
+          }
+          if (lastIndex !== -1) {
+            futs.splice(lastIndex, 1);
+            await barRef.set(futs.length > 0 ? futs : null);
+          }
+          // Si c'était une REPRISE, remettre en attente
+          if (mouvement.type === 'REPRISE') {
+            await database.ref(`sessions/${session}/futsEnAttente`).push({
+              typeFut: mouvement.typeFut,
+              barId: mouvement.barId,
+              barNom: mouvement.barNom,
+              jourOrigine: jourActuel,
+              timestamp: Date.now(),
+              user: userName
+            });
           }
         } else if (mouvement.type === 'RETOUR_VIDE' || mouvement.type === 'RETOUR_CASSE' || mouvement.type === 'RETOUR_REUTILISABLE') {
           // Annuler un RETOUR → Remettre le fût dans le bar
@@ -951,7 +1041,7 @@
 
       const exporterHistoriqueFuts = () => {
         if (historique.length === 0) return;
-        const headers = ['Date/Heure', 'Type', 'Fût', 'Bar', 'Jour', 'Utilisateur', 'Annulé', 'Annulé par', 'Date annulation'];
+        const headers = ['Date/Heure', 'Type', 'Fût', 'Bar', 'Jour', 'Utilisateur', 'Commentaire', 'Annulé', 'Annulé par', 'Date annulation'];
         const rows = historique.map(h => [
           `"${formatDate(h.timestamp)}"`,
           `"${h.type}"`,
@@ -959,6 +1049,7 @@
           `"${h.barNom}"`,
           h.jour,
           `"${h.user}"`,
+          `"${h.commentaire || ''}"`,
           h.annule ? 'Oui' : 'Non',
           `"${h.annulePar || ''}"`,
           h.annuleLe ? `"${formatDate(h.annuleLe)}"` : '""'
@@ -1119,6 +1210,39 @@
             </div>
           </div>
 
+          {/* Fûts en attente (non terminés à reprendre) */}
+          {futsEnAttente.length > 0 && (
+            <div className="mx-2 mt-2 bg-purple-900/50 rounded-xl border-2 border-purple-500 overflow-hidden">
+              <div className="bg-purple-800 px-3 py-2">
+                <span className="font-bold text-purple-100">⚠️ Fûts à reprendre en PRIORITÉ ({futsEnAttente.length})</span>
+              </div>
+              <div className="p-2 space-y-2">
+                {futsEnAttente.map(fut => (
+                  <div key={fut.id} className="bg-purple-900/30 rounded-lg p-3 flex items-center justify-between">
+                    <div>
+                      <span className="font-medium">{fut.typeFut === 'biere' ? '🍺' : '🍎'} Non terminé du J{fut.jourOrigine}</span>
+                      <p className="text-xs text-purple-300">Venant de : {fut.barNom}</p>
+                    </div>
+                    <select 
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          reprendreFutEnAttente(fut.id, e.target.value);
+                          e.target.value = '';
+                        }
+                      }}
+                      className="px-3 py-2 bg-purple-700 rounded-lg text-sm"
+                    >
+                      <option value="">Attribuer à...</option>
+                      {barsNomades.filter(b => b.type === fut.typeFut && (b.futs?.length || 0) < config.maxFutsParBar).map(bar => (
+                        <option key={bar.id} value={bar.id}>{bar.nom}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Total ventes */}
           {totalVentes > 0 && (
             <div className="mx-2 mt-2 p-3 bg-emerald-900/50 rounded-lg flex items-center justify-between">
@@ -1194,7 +1318,8 @@
                       'SORTIE': { icon: '📤', label: 'Sortie', color: 'text-green-400' },
                       'RETOUR_VIDE': { icon: '📦', label: 'Vide', color: 'text-blue-400' },
                       'RETOUR_CASSE': { icon: '💥', label: 'Cassé', color: 'text-red-400' },
-                      'RETOUR_REUTILISABLE': { icon: '♻️', label: 'Réutil.', color: 'text-purple-400' }
+                      'RETOUR_REUTILISABLE': { icon: '♻️', label: 'Non terminé', color: 'text-purple-400' },
+                      'REPRISE': { icon: '🔄', label: 'Reprise', color: 'text-cyan-400' }
                     };
                     const t = typeLabels[h.type] || { icon: '•', label: h.type, color: 'text-neutral-400' };
                     return (
@@ -1218,6 +1343,11 @@
                           <span className={h.annule ? 'line-through' : ''}>{h.typeFut === 'biere' ? '🍺' : '🍎'} {h.user}</span>
                           <span>J{h.jour} • {new Date(h.timestamp).toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'})}</span>
                         </div>
+                        {h.commentaire && !h.annule && (
+                          <div className="mt-1 text-xs text-yellow-400 bg-yellow-900/30 px-2 py-1 rounded">
+                            💬 {h.commentaire}
+                          </div>
+                        )}
                         {h.annule && (
                           <div className="mt-1 text-xs text-red-400">
                             ❌ Annulé par {h.annulePar} le {new Date(h.annuleLe).toLocaleString('fr-FR')}
@@ -1320,12 +1450,74 @@
               <div className="bg-neutral-900 rounded-2xl w-full max-w-sm p-6">
                 <h3 className="text-xl font-bold mb-4">↩️ Retour de Fût</h3>
                 <p className="text-neutral-400 mb-4">{showModalRetour.barNom}</p>
-                <div className="space-y-2">
-                  <button onClick={() => retournerFut(showModalRetour.barId, showModalRetour.futIndex, 'RETOUR_VIDE')} className="w-full py-3 bg-blue-600 rounded-lg">📦 Fût Vide</button>
-                  <button onClick={() => retournerFut(showModalRetour.barId, showModalRetour.futIndex, 'RETOUR_CASSE')} className="w-full py-3 bg-red-600 rounded-lg">💥 Fût Cassé</button>
-                  <button onClick={() => retournerFut(showModalRetour.barId, showModalRetour.futIndex, 'RETOUR_REUTILISABLE')} className="w-full py-3 bg-purple-600 rounded-lg">♻️ Non Terminé</button>
-                  <button onClick={() => setShowModalRetour(null)} className="w-full py-3 bg-neutral-700 rounded-lg mt-4">Annuler</button>
-                </div>
+                
+                {retourEtape === 'choix' && (
+                  <div className="space-y-2">
+                    <button 
+                      onClick={() => retournerFut(showModalRetour.barId, showModalRetour.futIndex, 'RETOUR_VIDE')} 
+                      className="w-full py-3 bg-blue-600 rounded-lg"
+                    >
+                      📦 Fût Vide
+                    </button>
+                    <button 
+                      onClick={() => { setRetourType('RETOUR_CASSE'); setRetourEtape('commentaire'); }} 
+                      className="w-full py-3 bg-red-600 rounded-lg"
+                    >
+                      💥 Fût Cassé / Endommagé
+                    </button>
+                    <button 
+                      onClick={() => retournerFut(showModalRetour.barId, showModalRetour.futIndex, 'RETOUR_REUTILISABLE')} 
+                      className="w-full py-3 bg-purple-600 rounded-lg"
+                    >
+                      ♻️ Non Terminé (reprendre demain)
+                    </button>
+                    <button 
+                      onClick={() => { setShowModalRetour(null); setRetourEtape('choix'); setRetourType(''); setRetourCommentaire(''); }} 
+                      className="w-full py-3 bg-neutral-700 rounded-lg mt-4"
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                )}
+
+                {retourEtape === 'commentaire' && (
+                  <div className="space-y-4">
+                    <div className="bg-red-900/30 border border-red-700 rounded-lg p-3">
+                      <p className="text-red-400 text-sm">⚠️ Commentaire obligatoire pour un fût cassé/endommagé</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-neutral-400 mb-1">Décrivez le problème *</label>
+                      <textarea 
+                        value={retourCommentaire}
+                        onChange={(e) => setRetourCommentaire(e.target.value)}
+                        className="w-full px-4 py-2 bg-neutral-800 rounded-lg"
+                        rows="3"
+                        placeholder="Ex: Fût percé, valve cassée, chute..."
+                        autoFocus
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => { setRetourEtape('choix'); setRetourCommentaire(''); }}
+                        className="flex-1 py-3 bg-neutral-700 rounded-lg"
+                      >
+                        Retour
+                      </button>
+                      <button 
+                        onClick={() => {
+                          if (!retourCommentaire.trim()) {
+                            alert('Le commentaire est obligatoire pour un fût cassé');
+                            return;
+                          }
+                          retournerFut(showModalRetour.barId, showModalRetour.futIndex, retourType, retourCommentaire);
+                        }}
+                        className="flex-1 py-3 bg-red-600 rounded-lg font-medium"
+                      >
+                        Confirmer
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
