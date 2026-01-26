@@ -178,7 +178,7 @@
         };
 
         await sessionRef.set(initialData);
-        onJoinSession(newCode, userName.trim());
+        onJoinSession(newCode, userName.trim(), true); // true = créateur = Super Admin
       };
 
       const joinSession = async () => {
@@ -639,9 +639,13 @@
       const nbAffectations = compterAffectations();
 
       // ==================== ACTIONS ====================
-      const handleJoinSession = (code, name) => {
+      const handleJoinSession = (code, name, isCreator = false) => {
         setSession(code);
         setUserName(name);
+        // Si c'est le créateur de la session (Super Admin), il est automatiquement admin
+        if (isCreator) {
+          setIsAdmin(true);
+        }
       };
 
       const demanderAccesAdmin = (action) => {
