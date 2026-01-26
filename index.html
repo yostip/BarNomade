@@ -600,11 +600,11 @@
       };
 
       // ==================== COMPUTED VALUES ====================
-      const stockBiere = config.stockInitialBiere - historique.filter(h => h.type === 'SORTIE' && h.typeFut === 'biere').length;
-      const stockCidre = config.stockInitialCidre - historique.filter(h => h.type === 'SORTIE' && h.typeFut === 'cidre').length;
-      const stockVides = historique.filter(h => h.type === 'RETOUR_VIDE').length;
-      const stockCasse = historique.filter(h => h.type === 'RETOUR_CASSE').length;
-      const stockReutilisables = historique.filter(h => h.type === 'RETOUR_REUTILISABLE').length;
+      const stockBiere = config.stockInitialBiere - historique.filter(h => !h.annule && h.type === 'SORTIE' && h.typeFut === 'biere').length;
+      const stockCidre = config.stockInitialCidre - historique.filter(h => !h.annule && h.type === 'SORTIE' && h.typeFut === 'cidre').length;
+      const stockVides = historique.filter(h => !h.annule && h.type === 'RETOUR_VIDE').length;
+      const stockCasse = historique.filter(h => !h.annule && h.type === 'RETOUR_CASSE').length;
+      const stockReutilisables = historique.filter(h => !h.annule && h.type === 'RETOUR_REUTILISABLE').length;
 
       const totalVentes = historiqueVentes
         .filter(v => !v.annule)
@@ -810,6 +810,43 @@
         alert('Réinitialisation effectuée !');
       };
 
+      // ==================== FONCTIONS ANNULATION ====================
+      const annulerVente = async (venteId) => {
+        if (!confirm('Annuler cette vente ?')) return;
+        await database.ref(`sessions/${session}/historiqueVentes/${venteId}`).update({
+          annule: true,
+          annulePar: userName,
+          annuleLe: Date.now()
+        });
+      };
+
+      const annulerMouvementFut = async (mouvementId) => {
+        if (!confirm('Annuler ce mouvement de fût ?')) return;
+        
+        const mouvement = historique.find(h => h.id === mouvementId);
+        if (!mouvement) return;
+
+        // Marquer comme annulé
+        await database.ref(`sessions/${session}/historique/${mouvementId}`).update({
+          annule: true,
+          annulePar: userName,
+          annuleLe: Date.now()
+        });
+
+        // Si c'était une sortie, on doit retirer le fût du bar
+        if (mouvement.type === 'SORTIE' && mouvement.barId) {
+          const barRef = database.ref(`sessions/${session}/bars/${mouvement.barId}/futs`);
+          const snapshot = await barRef.once('value');
+          const futs = snapshot.val() || [];
+          // Retirer le dernier fût du type correspondant
+          const index = futs.findLastIndex(f => f.type === mouvement.typeFut);
+          if (index !== -1) {
+            futs.splice(index, 1);
+            await barRef.set(futs);
+          }
+        }
+      };
+
       // ==================== FONCTIONS BÉNÉVOLES ====================
       const ouvrirModalBenevoles = () => {
         setBenevoleOnglet('planning');
@@ -903,22 +940,25 @@
 
       const exporterHistoriqueFuts = () => {
         if (historique.length === 0) return;
-        const headers = ['Date/Heure', 'Type', 'Fût', 'Bar', 'Jour', 'Utilisateur'];
+        const headers = ['Date/Heure', 'Type', 'Fût', 'Bar', 'Jour', 'Utilisateur', 'Annulé', 'Annulé par', 'Date annulation'];
         const rows = historique.map(h => [
           `"${formatDate(h.timestamp)}"`,
           `"${h.type}"`,
           `"${h.typeFut}"`,
           `"${h.barNom}"`,
           h.jour,
-          `"${h.user}"`
+          `"${h.user}"`,
+          h.annule ? 'Oui' : 'Non',
+          `"${h.annulePar || ''}"`,
+          h.annuleLe ? `"${formatDate(h.annuleLe)}"` : '""'
         ].join(';'));
         exportCSV(`Historique_Futs_${formatDateFilename()}.csv`, headers.join(';') + '\n' + rows.join('\n'));
       };
 
       const exporterHistoriqueVentes = () => {
         if (historiqueVentes.length === 0) return;
-        const headers = ['Date/Heure', 'Bar', 'Montant', 'Pintes', 'Pichets', 'Gobelets', 'Jour', 'Équip. défaillant', 'N° équipement', 'Données partielles', 'Commentaire'];
-        const rows = historiqueVentes.filter(v => !v.annule).map(v => [
+        const headers = ['Date/Heure', 'Bar', 'Montant', 'Pintes', 'Pichets', 'Gobelets', 'Jour', 'Équip. défaillant', 'N° équipement', 'Données partielles', 'Commentaire', 'Annulé', 'Annulé par', 'Date annulation'];
+        const rows = historiqueVentes.map(v => [
           `"${formatDate(v.timestamp)}"`,
           `"${v.barNom}"`,
           (v.montant || 0).toFixed(2).replace('.', ','),
@@ -929,7 +969,10 @@
           v.equipementDefaillant ? 'Oui' : 'Non',
           `"${v.numEquipement || ''}"`,
           v.donneesPartielles ? 'Oui' : 'Non',
-          `"${v.commentaire || ''}"`
+          `"${v.commentaire || ''}"`,
+          v.annule ? 'Oui' : 'Non',
+          `"${v.annulePar || ''}"`,
+          v.annuleLe ? `"${formatDate(v.annuleLe)}"` : '""'
         ].join(';'));
         const total = historiqueVentes.filter(v => !v.annule).reduce((a, v) => a + (v.montant || 0), 0);
         exportCSV(`Historique_Ventes_${formatDateFilename()}.csv`, 
@@ -1080,21 +1123,39 @@
                 <span className="font-bold text-teal-300">📊 Historique Ventes</span>
                 <button onClick={() => setShowHistoriqueVentes(false)} className="text-teal-400">✕</button>
               </div>
-              <div className="max-h-48 overflow-y-auto">
-                {historiqueVentes.filter(v => !v.annule).length === 0 ? (
+              <div className="max-h-64 overflow-y-auto">
+                {historiqueVentes.length === 0 ? (
                   <p className="text-neutral-500 text-sm text-center py-4">Aucune vente</p>
                 ) : (
-                  historiqueVentes.filter(v => !v.annule).map(v => (
-                    <div key={v.id} className="px-3 py-2 border-b border-teal-800 last:border-0">
+                  historiqueVentes.map(v => (
+                    <div key={v.id} className={`px-3 py-2 border-b border-teal-800 last:border-0 ${v.annule ? 'opacity-50 bg-red-900/20' : ''}`}>
                       <div className="flex items-center justify-between">
-                        <span className="font-medium text-teal-300">{(v.montant || 0).toFixed(2)} €</span>
-                        <span className="text-xs text-neutral-400">{v.barNom}</span>
+                        <span className={`font-medium ${v.annule ? 'line-through text-red-400' : 'text-teal-300'}`}>
+                          {(v.montant || 0).toFixed(2)} €
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-neutral-400">{v.barNom}</span>
+                          {!v.annule && (
+                            <button 
+                              onClick={() => annulerVente(v.id)}
+                              className="text-xs text-red-400 hover:text-red-300 px-1"
+                              title="Annuler cette vente"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="flex items-center justify-between text-xs text-neutral-500">
-                        <span>🍺{v.nbPintes || 0} 🍶{v.nbPichets || 0} 🥤{v.nbGobelets || 0}</span>
+                        <span className={v.annule ? 'line-through' : ''}>🍺{v.nbPintes || 0} 🍶{v.nbPichets || 0} 🥤{v.nbGobelets || 0}</span>
                         <span>J{v.jour} • {new Date(v.timestamp).toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'})}</span>
                       </div>
-                      {v.equipementDefaillant && (
+                      {v.annule && (
+                        <div className="mt-1 text-xs text-red-400">
+                          ❌ Annulé par {v.annulePar} le {new Date(v.annuleLe).toLocaleString('fr-FR')}
+                        </div>
+                      )}
+                      {!v.annule && v.equipementDefaillant && (
                         <div className="mt-1 text-xs text-orange-400 bg-orange-900/30 px-2 py-1 rounded">
                           ⚠️ Équip. défaillant{v.numEquipement ? ` - N°${v.numEquipement}` : ''}{v.donneesPartielles ? ' (données partielles)' : ''}
                         </div>
@@ -1113,7 +1174,7 @@
                 <span className="font-bold text-purple-300">📋 Historique Fûts</span>
                 <button onClick={() => setShowHistorique(false)} className="text-purple-400">✕</button>
               </div>
-              <div className="max-h-48 overflow-y-auto">
+              <div className="max-h-64 overflow-y-auto">
                 {historique.length === 0 ? (
                   <p className="text-neutral-500 text-sm text-center py-4">Aucun mouvement</p>
                 ) : (
@@ -1126,15 +1187,31 @@
                     };
                     const t = typeLabels[h.type] || { icon: '•', label: h.type, color: 'text-neutral-400' };
                     return (
-                      <div key={h.id} className="px-3 py-2 border-b border-purple-800 last:border-0">
+                      <div key={h.id} className={`px-3 py-2 border-b border-purple-800 last:border-0 ${h.annule ? 'opacity-50 bg-red-900/20' : ''}`}>
                         <div className="flex items-center justify-between">
-                          <span className={`font-medium ${t.color}`}>{t.icon} {t.label}</span>
-                          <span className="text-xs text-neutral-400">{h.barNom}</span>
+                          <span className={`font-medium ${h.annule ? 'line-through text-red-400' : t.color}`}>{t.icon} {t.label}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-neutral-400">{h.barNom}</span>
+                            {!h.annule && (
+                              <button 
+                                onClick={() => annulerMouvementFut(h.id)}
+                                className="text-xs text-red-400 hover:text-red-300 px-1"
+                                title="Annuler ce mouvement"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
                         </div>
                         <div className="flex items-center justify-between text-xs text-neutral-500">
-                          <span>{h.typeFut === 'biere' ? '🍺' : '🍎'} {h.user}</span>
+                          <span className={h.annule ? 'line-through' : ''}>{h.typeFut === 'biere' ? '🍺' : '🍎'} {h.user}</span>
                           <span>J{h.jour} • {new Date(h.timestamp).toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'})}</span>
                         </div>
+                        {h.annule && (
+                          <div className="mt-1 text-xs text-red-400">
+                            ❌ Annulé par {h.annulePar} le {new Date(h.annuleLe).toLocaleString('fr-FR')}
+                          </div>
+                        )}
                       </div>
                     );
                   })
