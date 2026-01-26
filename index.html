@@ -52,7 +52,6 @@
       appId: "1:107509834680:web:3a58295d3268b5d19f654d"
     };
 
-    // Initialize Firebase
     const app = firebase.initializeApp(firebaseConfig);
     const database = firebase.database();
 
@@ -71,7 +70,7 @@
 
     // ==================== SESSION SCREEN ====================
     const SessionScreen = ({ onJoinSession }) => {
-      const [mode, setMode] = useState('choice'); // choice, create, join
+      const [mode, setMode] = useState('choice');
       const [sessionCode, setSessionCode] = useState('');
       const [userName, setUserName] = useState('');
       const [error, setError] = useState('');
@@ -97,40 +96,29 @@
         const newCode = generateSessionCode();
         const sessionRef = database.ref(`sessions/${newCode}`);
         
-        // Données initiales de la session
         const initialData = {
-          createdAt: Date.now(),
           config: {
-            nombreJours: 4,
-            maxFutsParBar: 2,
             stockInitialBiere: 50,
             stockInitialCidre: 20,
-            prixPinte: 7,
-            prixPichet: 16,
-            prixGobelet: 5
+            maxFutsParBar: 3,
+            nombreJours: 4,
+            createdAt: Date.now()
           },
-          barsNomades: [],
-          historique: [],
-          historiqueVentes: [],
-          benevoles: [],
-          jourActuel: 1
+          creneaux: [
+            { id: 'c1', label: '11h30-13h' },
+            { id: 'c2', label: '13h-15h' },
+            { id: 'c3', label: '15h-18h' },
+            { id: 'c4', label: '18h-22h30' },
+            { id: 'c5', label: '22h30-00h30' }
+          ],
+          jourActuel: 1,
+          users: {
+            [userName.trim()]: { joinedAt: Date.now(), lastActive: Date.now() }
+          }
         };
 
-        try {
-          await sessionRef.set(initialData);
-          // Ajouter l'utilisateur
-          const userRef = sessionRef.child('users').push();
-          await userRef.set({
-            name: userName.trim(),
-            joinedAt: Date.now(),
-            lastActive: Date.now()
-          });
-          
-          onJoinSession(newCode, userName.trim(), userRef.key);
-        } catch (err) {
-          setError('Erreur de création: ' + err.message);
-          setLoading(false);
-        }
+        await sessionRef.set(initialData);
+        onJoinSession(newCode, userName.trim());
       };
 
       const joinSession = async () => {
@@ -147,104 +135,102 @@
 
         const code = sessionCode.trim().toUpperCase();
         const sessionRef = database.ref(`sessions/${code}`);
-
-        try {
-          const snapshot = await sessionRef.once('value');
-          if (!snapshot.exists()) {
-            setError('Session introuvable');
-            setLoading(false);
-            return;
-          }
-          
-          // Ajouter l'utilisateur
-          const userRef = sessionRef.child('users').push();
-          await userRef.set({
-            name: userName.trim(),
-            joinedAt: Date.now(),
-            lastActive: Date.now()
-          });
-          
-          onJoinSession(code, userName.trim(), userRef.key);
-        } catch (err) {
-          setError('Erreur de connexion: ' + err.message);
+        const snapshot = await sessionRef.once('value');
+        
+        if (!snapshot.exists()) {
+          setError('Session introuvable');
           setLoading(false);
+          return;
         }
+
+        await sessionRef.child(`users/${userName.trim()}`).set({
+          joinedAt: Date.now(),
+          lastActive: Date.now()
+        });
+
+        onJoinSession(code, userName.trim());
       };
 
-      return (
-        <div className="min-h-screen bg-black flex items-center justify-center p-4">
-          <div className="bg-neutral-900 rounded-2xl border-2 border-red-600 p-6 w-full max-w-md">
-            <div className="text-center mb-6">
-              <div className="text-4xl mb-2">🍺</div>
-              <h1 className="text-2xl font-bold text-white">Gestion Fûts</h1>
-              <p className="text-red-500 font-semibold">Hellfest 2026</p>
-            </div>
-
-            {mode === 'choice' && (
+      if (mode === 'choice') {
+        return (
+          <div className="min-h-screen bg-black flex items-center justify-center p-4">
+            <div className="w-full max-w-sm">
+              <div className="text-center mb-8">
+                <div className="text-6xl mb-4">🍺</div>
+                <h1 className="text-2xl font-bold text-white mb-2">Gestion Fûts</h1>
+                <p className="text-red-500 font-bold">HELLFEST 2026</p>
+              </div>
+              
               <div className="space-y-4">
                 <button
                   onClick={() => setMode('create')}
-                  className="w-full py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-lg border border-orange-500 transition-colors"
+                  className="w-full py-4 bg-red-600 text-white rounded-xl font-bold text-lg hover:bg-red-700 transition-colors"
                 >
                   🆕 Créer une session
                 </button>
                 <button
                   onClick={() => setMode('join')}
-                  className="w-full py-4 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl font-bold text-lg border border-neutral-600 transition-colors"
+                  className="w-full py-4 bg-neutral-800 text-white rounded-xl font-bold text-lg hover:bg-neutral-700 transition-colors border border-neutral-700"
                 >
                   🔗 Rejoindre une session
                 </button>
               </div>
-            )}
+            </div>
+          </div>
+        );
+      }
 
-            {(mode === 'create' || mode === 'join') && (
-              <div className="space-y-4">
+      return (
+        <div className="min-h-screen bg-black flex items-center justify-center p-4">
+          <div className="w-full max-w-sm">
+            <button onClick={() => { setMode('choice'); setError(''); }} className="text-neutral-400 mb-6 flex items-center gap-2">
+              <Icon name="ArrowLeft" className="w-4 h-4" /> Retour
+            </button>
+            
+            <h2 className="text-xl font-bold text-white mb-6">
+              {mode === 'create' ? '🆕 Nouvelle session' : '🔗 Rejoindre'}
+            </h2>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-neutral-400 text-sm mb-2">Ton prénom</label>
+                <input
+                  type="text"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                  className="w-full px-4 py-3 bg-neutral-900 border border-neutral-700 rounded-xl text-white text-lg"
+                  placeholder="Ex: Kevin"
+                />
+              </div>
+
+              {mode === 'join' && (
                 <div>
-                  <label className="block text-neutral-400 text-sm mb-1">Ton prénom</label>
+                  <label className="block text-neutral-400 text-sm mb-2">Code de session</label>
                   <input
                     type="text"
-                    value={userName}
-                    onChange={(e) => setUserName(e.target.value)}
-                    placeholder="Ex: Marie"
-                    className="w-full px-4 py-3 bg-neutral-800 border border-neutral-600 rounded-xl text-white placeholder-neutral-500 focus:border-red-500 focus:outline-none"
+                    value={sessionCode}
+                    onChange={(e) => setSessionCode(e.target.value.toUpperCase())}
+                    className="w-full px-4 py-3 bg-neutral-900 border border-neutral-700 rounded-xl text-white text-lg text-center tracking-widest"
+                    placeholder="HF26-XXXX"
+                    maxLength={9}
                   />
                 </div>
+              )}
 
-                {mode === 'join' && (
-                  <div>
-                    <label className="block text-neutral-400 text-sm mb-1">Code de session</label>
-                    <input
-                      type="text"
-                      value={sessionCode}
-                      onChange={(e) => setSessionCode(e.target.value.toUpperCase())}
-                      placeholder="Ex: HF26-A1B2"
-                      className="w-full px-4 py-3 bg-neutral-800 border border-neutral-600 rounded-xl text-white placeholder-neutral-500 focus:border-red-500 focus:outline-none text-center text-xl tracking-widest"
-                    />
-                  </div>
-                )}
+              {error && (
+                <div className="p-3 bg-red-900/50 border border-red-700 rounded-xl text-red-300 text-sm">
+                  {error}
+                </div>
+              )}
 
-                {error && (
-                  <div className="bg-red-900/50 border border-red-600 text-red-400 px-4 py-2 rounded-lg text-sm">
-                    {error}
-                  </div>
-                )}
-
-                <button
-                  onClick={mode === 'create' ? createSession : joinSession}
-                  disabled={loading}
-                  className="w-full py-4 bg-red-600 hover:bg-red-700 disabled:bg-neutral-700 text-white rounded-xl font-bold text-lg border border-orange-500 disabled:border-neutral-600 transition-colors"
-                >
-                  {loading ? '⏳ Connexion...' : (mode === 'create' ? '🚀 Créer' : '🔗 Rejoindre')}
-                </button>
-
-                <button
-                  onClick={() => { setMode('choice'); setError(''); }}
-                  className="w-full py-2 text-neutral-400 hover:text-white transition-colors"
-                >
-                  ← Retour
-                </button>
-              </div>
-            )}
+              <button
+                onClick={mode === 'create' ? createSession : joinSession}
+                disabled={loading}
+                className="w-full py-4 bg-red-600 text-white rounded-xl font-bold text-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? '⏳ Connexion...' : (mode === 'create' ? '✨ Créer' : '🚀 Rejoindre')}
+              </button>
+            </div>
           </div>
         </div>
       );
@@ -252,871 +238,682 @@
 
     // ==================== MAIN APP ====================
     const App = () => {
-      // Session state
-      const [sessionCode, setSessionCode] = useState(null);
+      const [session, setSession] = useState(null);
       const [userName, setUserName] = useState('');
-      const [userId, setUserId] = useState(null);
-      const [connectedUsers, setConnectedUsers] = useState([]);
       const [isOnline, setIsOnline] = useState(true);
-      const [lastSync, setLastSync] = useState(null);
+      const [connectedUsers, setConnectedUsers] = useState([]);
 
-      // App state
-      const [isAdmin, setIsAdmin] = useState(false);
-      const [showModalAdmin, setShowModalAdmin] = useState(false);
-      const [adminPasswordInput, setAdminPasswordInput] = useState('');
-      const [showAdminPassword, setShowAdminPassword] = useState(false);
-      const [adminPasswordError, setAdminPasswordError] = useState(false);
-      const [pendingAdminAction, setPendingAdminAction] = useState(null);
-
-      // Data state
+      // Config & Data
       const [config, setConfig] = useState({
-        nombreJours: 4,
-        maxFutsParBar: 2,
         stockInitialBiere: 50,
         stockInitialCidre: 20,
-        prixPinte: 7,
-        prixPichet: 16,
-        prixGobelet: 5
+        maxFutsParBar: 3,
+        nombreJours: 4
       });
-      const [jourActuel, setJourActuel] = useState(1);
       const [barsNomades, setBarsNomades] = useState([]);
       const [historique, setHistorique] = useState([]);
       const [historiqueVentes, setHistoriqueVentes] = useState([]);
       const [benevoles, setBenevoles] = useState([]);
+      const [jourActuel, setJourActuel] = useState(1);
+      
+      // Créneaux et Affectations
+      const [creneaux, setCreneaux] = useState([
+        { id: 'c1', label: '11h30-13h' },
+        { id: 'c2', label: '13h-15h' },
+        { id: 'c3', label: '15h-18h' },
+        { id: 'c4', label: '18h-22h30' },
+        { id: 'c5', label: '22h30-00h30' }
+      ]);
+      const [affectations, setAffectations] = useState({});
 
-      // UI state
+      // UI States
+      const [isAdmin, setIsAdmin] = useState(false);
+      const [showModalAdmin, setShowModalAdmin] = useState(false);
+      const [adminPassword, setAdminPassword] = useState('');
+      const [pendingAdminAction, setPendingAdminAction] = useState(null);
       const [showParametres, setShowParametres] = useState(false);
       const [showHistorique, setShowHistorique] = useState(false);
       const [showHistoriqueVentes, setShowHistoriqueVentes] = useState(false);
-      const [showModalRetour, setShowModalRetour] = useState(false);
+      const [showModalExport, setShowModalExport] = useState(false);
+      const [showModalRetour, setShowModalRetour] = useState(null);
       const [showModalVentes, setShowModalVentes] = useState(false);
       const [showModalBenevoles, setShowModalBenevoles] = useState(false);
-      const [showModalAnnulation, setShowModalAnnulation] = useState(false);
+      const [showModalAffectation, setShowModalAffectation] = useState(false);
       const [showSessionInfo, setShowSessionInfo] = useState(false);
-      const [filtreHistoriqueJour, setFiltreHistoriqueJour] = useState(0);
-      const [filtreVentesJour, setFiltreVentesJour] = useState(0);
+      
+      // Bénévoles UI
+      const [benevoleOnglet, setBenevoleOnglet] = useState('planning');
+      const [selectedBarPlanning, setSelectedBarPlanning] = useState(null);
+      const [editAffectation, setEditAffectation] = useState(null);
+      const [tempCreneaux, setTempCreneaux] = useState([]);
+      const [nouveauCreneau, setNouveauCreneau] = useState('');
 
-      // Modal state
-      const [retourBarId, setRetourBarId] = useState(null);
-      const [retourFutIndex, setRetourFutIndex] = useState(null);
-      const [commentaireRetour, setCommentaireRetour] = useState('');
-
-      // Ventes state
-      const [venteBarId, setVenteBarId] = useState(null);
-      const [ventePintes, setVentePintes] = useState(0);
-      const [ventePichets, setVentePichets] = useState(0);
-      const [venteGobelets, setVenteGobelets] = useState(0);
-      const [venteEquipementDefaillant, setVenteEquipementDefaillant] = useState(false);
-
-      // Config temp
-      const [tempConfig, setTempConfig] = useState(config);
-      const [newBarName, setNewBarName] = useState('');
-      const [newBarType, setNewBarType] = useState('biere');
-      const [newBenevoleName, setNewBenevoleName] = useState('');
-      const [editingBenevoleId, setEditingBenevoleId] = useState(null);
-      const [editingBenevoleName, setEditingBenevoleName] = useState('');
-      const [editingBarId, setEditingBarId] = useState(null);
-      const [editingBarName, setEditingBarName] = useState('');
+      // Ventes form
+      const [venteBarId, setVenteBarId] = useState('');
+      const [venteMontant, setVenteMontant] = useState('');
+      const [venteNbPintes, setVenteNbPintes] = useState('');
+      const [venteNbPichets, setVenteNbPichets] = useState('');
+      const [venteNbGobelets, setVenteNbGobelets] = useState('');
+      const [venteCommentaire, setVenteCommentaire] = useState('');
 
       const ADMIN_PASSWORD = "Hellfest26";
-      const UNDO_LIMIT = 50;
 
       // ==================== FIREBASE SYNC ====================
       useEffect(() => {
-        if (!sessionCode) return;
+        if (!session) return;
 
-        const sessionRef = database.ref(`sessions/${sessionCode}`);
-
-        // Écouter les changements de données
-        const unsubscribeConfig = sessionRef.child('config').on('value', (snapshot) => {
-          if (snapshot.exists()) {
-            setConfig(snapshot.val());
-            setTempConfig(snapshot.val());
-          }
-          setLastSync(new Date());
+        const sessionRef = database.ref(`sessions/${session}`);
+        
+        // Sync config
+        sessionRef.child('config').on('value', (snap) => {
+          if (snap.val()) setConfig(snap.val());
         });
 
-        const unsubscribeJour = sessionRef.child('jourActuel').on('value', (snapshot) => {
-          if (snapshot.exists()) {
-            setJourActuel(snapshot.val());
-          }
-        });
-
-        const unsubscribeBars = sessionRef.child('barsNomades').on('value', (snapshot) => {
-          if (snapshot.exists()) {
-            const data = snapshot.val();
-            const barsArray = Object.keys(data).map(key => ({ ...data[key], id: key }));
-            setBarsNomades(barsArray);
+        // Sync bars
+        sessionRef.child('barsNomades').on('value', (snap) => {
+          if (snap.val()) {
+            const bars = Object.entries(snap.val()).map(([id, data]) => ({ id, ...data }));
+            setBarsNomades(bars);
+            if (bars.length > 0 && !selectedBarPlanning) {
+              setSelectedBarPlanning(bars[0].id);
+            }
           } else {
             setBarsNomades([]);
           }
         });
 
-        const unsubscribeHistorique = sessionRef.child('historique').on('value', (snapshot) => {
-          if (snapshot.exists()) {
-            const data = snapshot.val();
-            const arr = Object.keys(data).map(key => ({ ...data[key], id: key }));
-            arr.sort((a, b) => b.horodatage - a.horodatage);
-            setHistorique(arr);
+        // Sync historique
+        sessionRef.child('historique').on('value', (snap) => {
+          if (snap.val()) {
+            const hist = Object.entries(snap.val()).map(([id, data]) => ({ id, ...data }));
+            hist.sort((a, b) => b.timestamp - a.timestamp);
+            setHistorique(hist);
           } else {
             setHistorique([]);
           }
         });
 
-        const unsubscribeVentes = sessionRef.child('historiqueVentes').on('value', (snapshot) => {
-          if (snapshot.exists()) {
-            const data = snapshot.val();
-            const arr = Object.keys(data).map(key => ({ ...data[key], id: key }));
-            arr.sort((a, b) => b.horodatage - a.horodatage);
-            setHistoriqueVentes(arr);
+        // Sync ventes
+        sessionRef.child('historiqueVentes').on('value', (snap) => {
+          if (snap.val()) {
+            const ventes = Object.entries(snap.val()).map(([id, data]) => ({ id, ...data }));
+            ventes.sort((a, b) => b.timestamp - a.timestamp);
+            setHistoriqueVentes(ventes);
           } else {
             setHistoriqueVentes([]);
           }
         });
 
-        const unsubscribeBenevoles = sessionRef.child('benevoles').on('value', (snapshot) => {
-          if (snapshot.exists()) {
-            const data = snapshot.val();
-            const arr = Object.keys(data).map(key => ({ ...data[key], id: key }));
-            setBenevoles(arr);
+        // Sync benevoles
+        sessionRef.child('benevoles').on('value', (snap) => {
+          if (snap.val()) {
+            const ben = Object.entries(snap.val()).map(([id, data]) => ({ id, ...data }));
+            setBenevoles(ben);
           } else {
             setBenevoles([]);
           }
         });
 
-        const unsubscribeUsers = sessionRef.child('users').on('value', (snapshot) => {
-          if (snapshot.exists()) {
-            const data = snapshot.val();
-            const users = Object.keys(data).map(key => ({ ...data[key], id: key }));
+        // Sync users
+        sessionRef.child('users').on('value', (snap) => {
+          if (snap.val()) {
+            const users = Object.keys(snap.val());
             setConnectedUsers(users);
+          }
+        });
+
+        // Sync jour
+        sessionRef.child('jourActuel').on('value', (snap) => {
+          if (snap.val()) setJourActuel(snap.val());
+        });
+
+        // Sync créneaux
+        sessionRef.child('creneaux').on('value', (snap) => {
+          if (snap.val()) {
+            const cren = Array.isArray(snap.val()) ? snap.val() : Object.values(snap.val());
+            setCreneaux(cren);
+          }
+        });
+
+        // Sync affectations
+        sessionRef.child('affectations').on('value', (snap) => {
+          if (snap.val()) {
+            setAffectations(snap.val());
           } else {
-            setConnectedUsers([]);
+            setAffectations({});
           }
         });
 
-        // Mise à jour du lastActive
-        const updateActivity = () => {
-          if (userId) {
-            sessionRef.child(`users/${userId}/lastActive`).set(Date.now());
-          }
-        };
-        const activityInterval = setInterval(updateActivity, 30000);
+        // Online status
+        const connectedRef = database.ref('.info/connected');
+        connectedRef.on('value', (snap) => {
+          setIsOnline(snap.val() === true);
+        });
 
-        // Détection online/offline
-        const handleOnline = () => setIsOnline(true);
-        const handleOffline = () => setIsOnline(false);
-        window.addEventListener('online', handleOnline);
-        window.addEventListener('offline', handleOffline);
+        // Update lastActive
+        const interval = setInterval(() => {
+          sessionRef.child(`users/${userName}/lastActive`).set(Date.now());
+        }, 30000);
 
-        // Cleanup
         return () => {
-          sessionRef.child('config').off('value', unsubscribeConfig);
-          sessionRef.child('jourActuel').off('value', unsubscribeJour);
-          sessionRef.child('barsNomades').off('value', unsubscribeBars);
-          sessionRef.child('historique').off('value', unsubscribeHistorique);
-          sessionRef.child('historiqueVentes').off('value', unsubscribeVentes);
-          sessionRef.child('benevoles').off('value', unsubscribeBenevoles);
-          sessionRef.child('users').off('value', unsubscribeUsers);
-          clearInterval(activityInterval);
-          window.removeEventListener('online', handleOnline);
-          window.removeEventListener('offline', handleOffline);
+          sessionRef.off();
+          connectedRef.off();
+          clearInterval(interval);
         };
-      }, [sessionCode, userId]);
+      }, [session, userName]);
 
-      // ==================== FIREBASE WRITE FUNCTIONS ====================
-      const updateFirebase = async (path, data) => {
-        if (!sessionCode) return;
-        try {
-          await database.ref(`sessions/${sessionCode}/${path}`).set(data);
-        } catch (err) {
-          console.error('Firebase write error:', err);
-        }
-      };
+      // ==================== COMPUTED VALUES ====================
+      const stockBiere = config.stockInitialBiere - historique.filter(h => h.type === 'SORTIE' && h.typeFut === 'biere').length;
+      const stockCidre = config.stockInitialCidre - historique.filter(h => h.type === 'SORTIE' && h.typeFut === 'cidre').length;
+      const stockVides = historique.filter(h => h.type === 'RETOUR_VIDE').length;
+      const stockCasse = historique.filter(h => h.type === 'RETOUR_CASSE').length;
+      const stockReutilisables = historique.filter(h => h.type === 'RETOUR_REUTILISABLE').length;
 
-      const pushToFirebase = async (path, data) => {
-        if (!sessionCode) return;
-        try {
-          const ref = database.ref(`sessions/${sessionCode}/${path}`).push();
-          await ref.set(data);
-          return ref.key;
-        } catch (err) {
-          console.error('Firebase push error:', err);
-        }
-      };
+      const totalVentes = historiqueVentes
+        .filter(v => !v.annule)
+        .reduce((acc, v) => acc + (v.montant || 0), 0);
 
-      const removeFromFirebase = async (path) => {
-        if (!sessionCode) return;
-        try {
-          await database.ref(`sessions/${sessionCode}/${path}`).remove();
-        } catch (err) {
-          console.error('Firebase remove error:', err);
-        }
-      };
-
-      // ==================== CALCULATIONS ====================
-      const calculerStocks = () => {
-        let biere = config.stockInitialBiere;
-        let cidre = config.stockInitialCidre;
-        let vides = 0;
-        let casse = 0;
-        let reutilBiere = 0;
-        let reutilCidre = 0;
-
-        historique.forEach(m => {
-          const isBiere = m.typeFut === 'biere';
-          switch (m.typeMouvement) {
-            case 'SORTIE':
-              if (isBiere) biere--; else cidre--;
-              break;
-            case 'SORTIE_REUTILISABLE':
-              if (isBiere) reutilBiere--; else reutilCidre--;
-              break;
-            case 'RETOUR_VIDE':
-              vides++;
-              break;
-            case 'RETOUR_CASSE':
-              casse++;
-              break;
-            case 'RETOUR_REUTILISABLE':
-              if (isBiere) reutilBiere++; else reutilCidre++;
-              break;
-            case 'ANNULATION_SORTIE':
-              if (isBiere) biere++; else cidre++;
-              break;
-            case 'ANNULATION_SORTIE_REUTILISABLE':
-              if (isBiere) reutilBiere++; else reutilCidre++;
-              break;
-            case 'ANNULATION_RETOUR_VIDE':
-              vides--;
-              break;
-            case 'ANNULATION_RETOUR_CASSE':
-              casse--;
-              break;
-            case 'ANNULATION_RETOUR_REUTILISABLE':
-              if (isBiere) reutilBiere--; else reutilCidre--;
-              break;
-          }
+      const compterAffectations = () => {
+        let total = 0;
+        Object.values(affectations).forEach(bar => {
+          Object.values(bar || {}).forEach(creneau => {
+            if (creneau && (creneau.vendeur?.nom || creneau.serveur?.nom || creneau.runner?.nom)) {
+              total++;
+            }
+          });
         });
-
-        return {
-          stockBiere: biere,
-          stockCidre: cidre,
-          stockVides: vides,
-          stockCasse: casse,
-          stockReutilisablesBiere: reutilBiere,
-          stockReutilisablesCidre: reutilCidre
-        };
+        return total;
       };
 
-      const stocks = calculerStocks();
-      const { stockBiere, stockCidre, stockVides, stockCasse, stockReutilisablesBiere, stockReutilisablesCidre } = stocks;
-
-      const compterBarsParType = () => {
-        const biereCount = barsNomades.filter(b => b.type === 'biere').length;
-        const cidreCount = barsNomades.filter(b => b.type === 'cidre').length;
-        return { biereCount, cidreCount };
-      };
-
-      const { biereCount, cidreCount } = compterBarsParType();
-      const barsBiere = barsNomades.filter(b => b.type === 'biere');
-      const barsCidre = barsNomades.filter(b => b.type === 'cidre');
-
-      const calculerTotauxVentes = () => {
-        let montantTotal = 0, nbPintes = 0, nbPichets = 0, nbGobelets = 0, nbDefaillances = 0;
-        historiqueVentes.forEach(v => {
-          const mult = v.estAnnulation ? -1 : 1;
-          montantTotal += v.montantTotal * mult;
-          nbPintes += (v.nbPintes || 0) * mult;
-          nbPichets += (v.nbPichets || 0) * mult;
-          nbGobelets += (v.nbGobelets || 0) * mult;
-          if (v.equipementDefaillant && !v.estAnnulation) nbDefaillances++;
-        });
-        return { montantTotal, nbPintes, nbPichets, nbGobelets, nbDefaillances };
-      };
-
-      const totauxVentes = calculerTotauxVentes();
-      const hasData = historique.length > 0 || historiqueVentes.length > 0;
+      const nbAffectations = compterAffectations();
 
       // ==================== ACTIONS ====================
-      const attribuerFut = async (barId) => {
-        try {
-          const bar = barsNomades.find(b => b.id === barId);
-          if (!bar) return;
-          
-          const currentFuts = bar.futs || [];
-          if (currentFuts.length >= config.maxFutsParBar) return;
-
-          const isBiere = bar.type === 'biere';
-          const stockNeuf = isBiere ? stockBiere : stockCidre;
-          const stockReutil = isBiere ? stockReutilisablesBiere : stockReutilisablesCidre;
-
-          if (stockNeuf <= 0 && stockReutil <= 0) return;
-
-          const useReutilisable = stockReutil > 0;
-          const newFut = {
-            id: Date.now().toString(),
-            type: bar.type,
-            isReutilisable: useReutilisable,
-            attribueA: Date.now()
-          };
-
-          // Mise à jour du bar
-          const updatedFuts = [...(bar.futs || []), newFut];
-          await updateFirebase(`barsNomades/${barId}/futs`, updatedFuts);
-
-          // Historique
-          await pushToFirebase('historique', {
-            typeMouvement: useReutilisable ? 'SORTIE_REUTILISABLE' : 'SORTIE',
-            typeFut: bar.type,
-            barId: barId,
-            nomBar: bar.nom,
-            horodatage: Date.now(),
-            jour: jourActuel,
-            isReutilisable: useReutilisable,
-            user: userName
-          });
-        } catch (error) {
-          console.error('Erreur attribuerFut:', error);
-        }
+      const handleJoinSession = (code, name) => {
+        setSession(code);
+        setUserName(name);
       };
 
-      const retournerFut = async (typeRetour) => {
-        if (retourBarId === null || retourFutIndex === null) return;
-
-        const bar = barsNomades.find(b => b.id === retourBarId);
-        if (!bar) return;
-
-        const currentFuts = bar.futs || [];
-        const fut = currentFuts[retourFutIndex];
-        if (!fut) return;
-
-        // Retirer le fût
-        const updatedFuts = currentFuts.filter((_, i) => i !== retourFutIndex);
-        await updateFirebase(`barsNomades/${retourBarId}/futs`, updatedFuts.length > 0 ? updatedFuts : null);
-
-        // Type de mouvement
-        let typeMouvement;
-        if (typeRetour === 'vide') typeMouvement = 'RETOUR_VIDE';
-        else if (typeRetour === 'casse') typeMouvement = 'RETOUR_CASSE';
-        else typeMouvement = 'RETOUR_REUTILISABLE';
-
-        // Historique
-        await pushToFirebase('historique', {
-          typeMouvement,
-          typeFut: bar.type,
-          barId: retourBarId,
-          nomBar: bar.nom,
-          horodatage: Date.now(),
-          jour: jourActuel,
-          isReutilisable: fut.isReutilisable,
-          commentaire: commentaireRetour.trim(),
-          user: userName
-        });
-
-        fermerModalRetour();
-      };
-
-      const enregistrerVente = async () => {
-        if (!venteBarId) return;
-        const bar = barsNomades.find(b => b.id === venteBarId);
-        if (!bar) return;
-
-        const montant = (ventePintes * config.prixPinte) + (ventePichets * config.prixPichet) + (venteGobelets * config.prixGobelet);
-        if (montant <= 0 && !venteEquipementDefaillant) return;
-
-        await pushToFirebase('historiqueVentes', {
-          barId: venteBarId,
-          nomBar: bar.nom,
-          typeBoisson: bar.type,
-          nbPintes: ventePintes,
-          nbPichets: ventePichets,
-          nbGobelets: venteGobelets,
-          montantTotal: montant,
-          equipementDefaillant: venteEquipementDefaillant,
-          horodatage: Date.now(),
-          jour: jourActuel,
-          user: userName
-        });
-
-        resetVenteForm();
-      };
-
-      // ==================== CONFIG ====================
-      const sauvegarderConfig = async () => {
-        await updateFirebase('config', tempConfig);
-        setShowParametres(false);
-      };
-
-      const ajouterBar = async () => {
-        if (!newBarName.trim()) return;
-        await pushToFirebase('barsNomades', {
-          nom: newBarName.trim(),
-          type: newBarType,
-          futs: []
-        });
-        setNewBarName('');
-      };
-
-      const supprimerBar = async (barId) => {
-        const bar = barsNomades.find(b => b.id === barId);
-        if (bar && bar.futs && (bar.futs?.length || 0) > 0) {
-          alert('Impossible de supprimer un bar avec des fûts en cours');
-          return;
-        }
-        await removeFromFirebase(`barsNomades/${barId}`);
-      };
-
-      const ajouterBenevole = async () => {
-        if (!newBenevoleName.trim()) return;
-        await pushToFirebase('benevoles', {
-          nom: newBenevoleName.trim(),
-          barId: null
-        });
-        setNewBenevoleName('');
-      };
-
-      const supprimerBenevole = async (benevoleId) => {
-        await removeFromFirebase(`benevoles/${benevoleId}`);
-      };
-
-      const affecterBenevole = async (benevoleId, barId) => {
-        await updateFirebase(`benevoles/${benevoleId}/barId`, barId || null);
-      };
-
-      const changerJour = async (newJour) => {
-        await updateFirebase('jourActuel', newJour);
-      };
-
-      // ==================== UI HELPERS ====================
-      const ouvrirModalRetour = (barId, futIndex) => {
-        setRetourBarId(barId);
-        setRetourFutIndex(futIndex);
-        setCommentaireRetour('');
-        setShowModalRetour(true);
-      };
-
-      const fermerModalRetour = () => {
-        setShowModalRetour(false);
-        setRetourBarId(null);
-        setRetourFutIndex(null);
-        setCommentaireRetour('');
-      };
-
-      const resetVenteForm = () => {
-        setVenteBarId(null);
-        setVentePintes(0);
-        setVentePichets(0);
-        setVenteGobelets(0);
-        setVenteEquipementDefaillant(false);
-      };
-
-      const formatMontant = (montant) => `${montant.toFixed(2)} €`;
-      const formatHeure = (timestamp) => new Date(timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-
-      // Admin
       const demanderAccesAdmin = (action) => {
         if (isAdmin) {
           executerActionAdmin(action);
         } else {
           setPendingAdminAction(action);
+          setAdminPassword('');
           setShowModalAdmin(true);
-          setAdminPasswordInput('');
-          setAdminPasswordError(false);
         }
       };
 
-      const validerAccesAdmin = () => {
-        if (adminPasswordInput === ADMIN_PASSWORD) {
+      const validerAdmin = () => {
+        if (adminPassword === ADMIN_PASSWORD) {
           setIsAdmin(true);
           setShowModalAdmin(false);
           if (pendingAdminAction) {
             executerActionAdmin(pendingAdminAction);
             setPendingAdminAction(null);
           }
-        } else {
-          setAdminPasswordError(true);
         }
       };
 
       const executerActionAdmin = (action) => {
         switch (action) {
-          case 'parametres': setShowParametres(true); setTempConfig(config); break;
+          case 'parametres': setShowParametres(true); break;
+          case 'export': setShowModalExport(true); break;
           case 'historique': setShowHistorique(!showHistorique); break;
           case 'ventes': setShowHistoriqueVentes(!showHistoriqueVentes); break;
-          case 'jour_precedent': if (jourActuel > 1) changerJour(jourActuel - 1); break;
-          case 'jour_suivant': if (jourActuel < config.nombreJours) changerJour(jourActuel + 1); break;
+          case 'jour_prev': 
+            if (jourActuel > 1) {
+              database.ref(`sessions/${session}/jourActuel`).set(jourActuel - 1);
+            }
+            break;
+          case 'jour_next':
+            if (jourActuel < config.nombreJours) {
+              database.ref(`sessions/${session}/jourActuel`).set(jourActuel + 1);
+            }
+            break;
         }
       };
 
-      const getMouvementStyle = (type) => {
-        switch (type) {
-          case 'SORTIE': return { bg: 'bg-green-900/50', text: 'text-green-400', label: '📤 Sortie' };
-          case 'SORTIE_REUTILISABLE': return { bg: 'bg-green-900/50', text: 'text-green-400', label: '📤♻️' };
-          case 'RETOUR_VIDE': return { bg: 'bg-blue-900/50', text: 'text-blue-400', label: '📥 Vide' };
-          case 'RETOUR_CASSE': return { bg: 'bg-red-900/50', text: 'text-red-400', label: '⚠️ Casse' };
-          case 'RETOUR_REUTILISABLE': return { bg: 'bg-purple-900/50', text: 'text-purple-400', label: '♻️ N.term' };
-          case 'ANNULATION_SORTIE': return { bg: 'bg-orange-900/50', text: 'text-orange-400', label: '↩️ Ann.' };
-          default: return { bg: 'bg-neutral-800', text: 'text-neutral-400', label: type };
+      const ajouterBar = async (nom, type) => {
+        const newRef = database.ref(`sessions/${session}/barsNomades`).push();
+        await newRef.set({ nom, type, futs: [] });
+      };
+
+      const supprimerBar = async (barId) => {
+        const bar = barsNomades.find(b => b.id === barId);
+        if (bar?.futs?.length > 0) {
+          alert('Impossible de supprimer un bar avec des fûts en cours');
+          return;
+        }
+        await database.ref(`sessions/${session}/barsNomades/${barId}`).remove();
+        // Supprimer aussi les affectations de ce bar
+        await database.ref(`sessions/${session}/affectations/${barId}`).remove();
+      };
+
+      const attribuerFut = async (barId) => {
+        const bar = barsNomades.find(b => b.id === barId);
+        if (!bar) return;
+
+        const currentFuts = bar.futs || [];
+        if (currentFuts.length >= config.maxFutsParBar) return;
+
+        const typeFut = bar.type;
+        if (typeFut === 'biere' && stockBiere <= 0) return;
+        if (typeFut === 'cidre' && stockCidre <= 0) return;
+
+        const newFut = {
+          id: Date.now().toString(),
+          type: typeFut,
+          dateAttribution: Date.now()
+        };
+
+        const updatedFuts = [...currentFuts, newFut];
+        await database.ref(`sessions/${session}/barsNomades/${barId}/futs`).set(updatedFuts);
+
+        await database.ref(`sessions/${session}/historique`).push({
+          type: 'SORTIE',
+          typeFut,
+          barId,
+          barNom: bar.nom,
+          jour: jourActuel,
+          timestamp: Date.now(),
+          user: userName
+        });
+      };
+
+      const retournerFut = async (barId, futIndex, typeRetour) => {
+        const bar = barsNomades.find(b => b.id === barId);
+        if (!bar) return;
+
+        const currentFuts = bar.futs || [];
+        const fut = currentFuts[futIndex];
+        if (!fut) return;
+
+        const updatedFuts = currentFuts.filter((_, i) => i !== futIndex);
+        await database.ref(`sessions/${session}/barsNomades/${barId}/futs`).set(updatedFuts.length > 0 ? updatedFuts : null);
+
+        await database.ref(`sessions/${session}/historique`).push({
+          type: typeRetour,
+          typeFut: fut.type,
+          barId,
+          barNom: bar.nom,
+          jour: jourActuel,
+          timestamp: Date.now(),
+          user: userName
+        });
+
+        setShowModalRetour(null);
+      };
+
+      const enregistrerVente = async () => {
+        if (!venteBarId) return;
+        const bar = barsNomades.find(b => b.id === venteBarId);
+
+        await database.ref(`sessions/${session}/historiqueVentes`).push({
+          barId: venteBarId,
+          barNom: bar?.nom || 'Bar inconnu',
+          montant: parseFloat(venteMontant) || 0,
+          nbPintes: parseInt(venteNbPintes) || 0,
+          nbPichets: parseInt(venteNbPichets) || 0,
+          nbGobelets: parseInt(venteNbGobelets) || 0,
+          commentaire: venteCommentaire,
+          jour: jourActuel,
+          timestamp: Date.now(),
+          user: userName
+        });
+
+        setShowModalVentes(false);
+        setVenteMontant('');
+        setVenteNbPintes('');
+        setVenteNbPichets('');
+        setVenteNbGobelets('');
+        setVenteCommentaire('');
+      };
+
+      const sauvegarderConfig = async (newConfig) => {
+        await database.ref(`sessions/${session}/config`).update(newConfig);
+        setShowParametres(false);
+      };
+
+      // ==================== FONCTIONS BÉNÉVOLES ====================
+      const ouvrirModalBenevoles = () => {
+        setBenevoleOnglet('planning');
+        if (barsNomades.length > 0 && !selectedBarPlanning) {
+          setSelectedBarPlanning(barsNomades[0].id);
+        }
+        setShowModalBenevoles(true);
+      };
+
+      const getAffectation = (barId, creneauId) => {
+        return affectations[barId]?.[creneauId] || null;
+      };
+
+      const ouvrirEditionAffectation = (barId, creneauId) => {
+        const existante = getAffectation(barId, creneauId) || {
+          vendeur: { nom: '', prenom: '' },
+          serveur: { nom: '', prenom: '' },
+          runner: { nom: '', prenom: '' }
+        };
+        setEditAffectation({
+          barId,
+          creneauId,
+          vendeur: { ...existante.vendeur },
+          serveur: { ...existante.serveur },
+          runner: { ...existante.runner }
+        });
+        setShowModalAffectation(true);
+      };
+
+      const sauvegarderAffectation = async () => {
+        if (!editAffectation) return;
+        const { barId, creneauId, vendeur, serveur, runner } = editAffectation;
+        
+        await database.ref(`sessions/${session}/affectations/${barId}/${creneauId}`).set({
+          vendeur, serveur, runner
+        });
+        
+        setShowModalAffectation(false);
+        setEditAffectation(null);
+      };
+
+      const supprimerAffectation = async (barId, creneauId) => {
+        await database.ref(`sessions/${session}/affectations/${barId}/${creneauId}`).remove();
+      };
+
+      const ouvrirParametresCreneaux = () => {
+        setTempCreneaux([...creneaux]);
+        setNouveauCreneau('');
+        setBenevoleOnglet('parametres');
+      };
+
+      const ajouterCreneau = () => {
+        if (nouveauCreneau.trim() && tempCreneaux.length < 10) {
+          const newId = 'c' + Date.now();
+          setTempCreneaux([...tempCreneaux, { id: newId, label: nouveauCreneau.trim() }]);
+          setNouveauCreneau('');
         }
       };
 
-      const historiqueFiltres = filtreHistoriqueJour === 0 ? historique : historique.filter(m => m.jour === filtreHistoriqueJour);
-      const ventesFiltrees = filtreVentesJour === 0 ? historiqueVentes : historiqueVentes.filter(v => v.jour === filtreVentesJour);
-
-      // ==================== JOIN SESSION ====================
-      const handleJoinSession = (code, name, uId) => {
-        setSessionCode(code);
-        setUserName(name);
-        setUserId(uId);
+      const supprimerCreneauTemp = (id) => {
+        setTempCreneaux(tempCreneaux.filter(c => c.id !== id));
       };
 
-      const quitterSession = async () => {
-        if (userId && sessionCode) {
-          await removeFromFirebase(`users/${userId}`);
-        }
-        setSessionCode(null);
-        setUserName('');
-        setUserId(null);
-        setIsAdmin(false);
+      const sauvegarderCreneaux = async () => {
+        await database.ref(`sessions/${session}/creneaux`).set(tempCreneaux);
+        setBenevoleOnglet('planning');
+      };
+
+      const getNomComplet = (personne) => {
+        if (!personne || (!personne.nom && !personne.prenom)) return '-';
+        return `${personne.prenom || ''} ${personne.nom || ''}`.trim();
+      };
+
+      // ==================== EXPORTS ====================
+      const formatDate = (ts) => new Date(ts).toLocaleString('fr-FR');
+      const formatDateFilename = () => {
+        const now = new Date();
+        return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+      };
+
+      const exportCSV = (filename, content) => {
+        const BOM = '\uFEFF';
+        const blob = new Blob([BOM + content], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+
+      const exporterHistoriqueFuts = () => {
+        if (historique.length === 0) return;
+        const headers = ['Date/Heure', 'Type', 'Fût', 'Bar', 'Jour', 'Utilisateur'];
+        const rows = historique.map(h => [
+          `"${formatDate(h.timestamp)}"`,
+          `"${h.type}"`,
+          `"${h.typeFut}"`,
+          `"${h.barNom}"`,
+          h.jour,
+          `"${h.user}"`
+        ].join(';'));
+        exportCSV(`Historique_Futs_${formatDateFilename()}.csv`, headers.join(';') + '\n' + rows.join('\n'));
+      };
+
+      const exporterHistoriqueVentes = () => {
+        if (historiqueVentes.length === 0) return;
+        const headers = ['Date/Heure', 'Bar', 'Montant', 'Pintes', 'Pichets', 'Gobelets', 'Jour', 'Commentaire'];
+        const rows = historiqueVentes.filter(v => !v.annule).map(v => [
+          `"${formatDate(v.timestamp)}"`,
+          `"${v.barNom}"`,
+          (v.montant || 0).toFixed(2).replace('.', ','),
+          v.nbPintes || 0,
+          v.nbPichets || 0,
+          v.nbGobelets || 0,
+          v.jour,
+          `"${v.commentaire || ''}"`
+        ].join(';'));
+        const total = historiqueVentes.filter(v => !v.annule).reduce((a, v) => a + (v.montant || 0), 0);
+        exportCSV(`Historique_Ventes_${formatDateFilename()}.csv`, 
+          headers.join(';') + '\n' + rows.join('\n') + '\n\nTOTAL;' + total.toFixed(2).replace('.', ',') + ' €');
+      };
+
+      const exporterBenevoles = () => {
+        if (nbAffectations === 0) return;
+        const headers = ['Bar Nomade', 'Créneau', 'Vendeur', 'Serveur', 'Runner'];
+        const rows = [];
+        
+        barsNomades.forEach(bar => {
+          creneaux.forEach(creneau => {
+            const aff = getAffectation(bar.id, creneau.id);
+            rows.push([
+              `"${bar.nom}"`,
+              `"${creneau.label}"`,
+              `"${aff ? getNomComplet(aff.vendeur) : '-'}"`,
+              `"${aff ? getNomComplet(aff.serveur) : '-'}"`,
+              `"${aff ? getNomComplet(aff.runner) : '-'}"`
+            ].join(';'));
+          });
+        });
+
+        exportCSV(`Planning_Benevoles_${formatDateFilename()}.csv`, 
+          headers.join(';') + '\n' + rows.join('\n') + '\n\nTotal affectations;' + nbAffectations);
       };
 
       // ==================== RENDER ====================
-      if (!sessionCode) {
+      if (!session) {
         return <SessionScreen onJoinSession={handleJoinSession} />;
       }
 
       return (
-        <div className="min-h-screen bg-black p-2 sm:p-4">
-          {/* Connection Status Bar */}
-          <div className="max-w-7xl mx-auto mb-2">
-            <div className="flex items-center justify-between bg-neutral-900 rounded-lg px-3 py-2 border border-neutral-800">
+        <div className="min-h-screen bg-black text-white">
+          {/* Header */}
+          <div className="bg-neutral-900 border-b border-red-900 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">🍺</span>
+                <div>
+                  <h1 className="font-bold text-red-500">HELLFEST 2026</h1>
+                  <p className="text-xs text-neutral-400">Gestion des Fûts</p>
+                </div>
+              </div>
+              
               <div className="flex items-center gap-2">
                 <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`} />
-                <span className="text-sm text-neutral-400">
-                  {isOnline ? 'Connecté' : 'Hors ligne'}
-                </span>
-                <span className="text-neutral-600">|</span>
-                <span className="text-sm font-mono text-red-500">{sessionCode}</span>
-                <button 
-                  onClick={() => setShowSessionInfo(true)}
-                  className="text-neutral-500 hover:text-white"
-                >
-                  ℹ️
+                <button onClick={() => setShowSessionInfo(true)} className="text-xs bg-neutral-800 px-2 py-1 rounded">
+                  {session}
                 </button>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-neutral-500">👥 {connectedUsers.length}</span>
-                <span className="text-sm text-amber-500">{userName}</span>
+            </div>
+
+            {/* Jour selector + Admin */}
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${isAdmin ? 'bg-red-900' : 'bg-neutral-800'}`}>
+                <span className="text-sm">Jour</span>
+                <button 
+                  onClick={() => demanderAccesAdmin('jour_prev')}
+                  disabled={isAdmin && jourActuel <= 1}
+                  className="w-8 h-8 bg-neutral-700 rounded disabled:opacity-50"
+                >◀</button>
+                <span className="text-xl font-bold w-8 text-center">{jourActuel}</span>
+                <button 
+                  onClick={() => demanderAccesAdmin('jour_next')}
+                  disabled={isAdmin && jourActuel >= config.nombreJours}
+                  className="w-8 h-8 bg-neutral-700 rounded disabled:opacity-50"
+                >▶</button>
+                <span className="text-xs text-neutral-400">/{config.nombreJours}</span>
               </div>
+              
+              <button 
+                onClick={() => isAdmin ? setIsAdmin(false) : demanderAccesAdmin('parametres')}
+                className={`px-3 py-2 rounded-lg text-sm font-medium ${isAdmin ? 'bg-green-600' : 'bg-neutral-800'}`}
+              >
+                {isAdmin ? '🔓 Admin' : '🔒 Admin'}
+              </button>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex flex-wrap gap-2">
+              <button onClick={ouvrirModalBenevoles} className="flex-1 py-2 bg-indigo-600 rounded-lg text-sm font-medium flex items-center justify-center gap-1">
+                👥 Bénévoles {nbAffectations > 0 && <span className="bg-white/20 px-1.5 rounded">{nbAffectations}</span>}
+              </button>
+              <button onClick={() => setShowModalVentes(true)} className="flex-1 py-2 bg-emerald-600 rounded-lg text-sm font-medium">
+                💰 Ventes
+              </button>
+              <button onClick={() => demanderAccesAdmin('export')} className="py-2 px-3 bg-green-700 rounded-lg text-sm">
+                📥
+              </button>
+              <button onClick={() => demanderAccesAdmin('parametres')} className="py-2 px-3 bg-neutral-700 rounded-lg text-sm">
+                ⚙️
+              </button>
             </div>
           </div>
 
-          {/* Header */}
-          <div className="max-w-7xl mx-auto mb-4">
-            <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-3 sm:p-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div>
-                  <h1 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
-                    🍺 Gestion des Fûts
-                  </h1>
-                  <p className="text-neutral-400 text-xs sm:text-sm">
-                    🍺 {biereCount} bar(s) | 🍎 {cidreCount} bar(s) | Max {config.maxFutsParBar}/bar
-                  </p>
-                </div>
-                
-                {/* Sélecteur de jour */}
-                <div className={`flex items-center gap-2 rounded-lg px-3 py-2 ${isAdmin ? 'bg-red-600' : 'bg-neutral-800'} border border-red-600`}>
-                  <span className="text-white text-sm">Jour</span>
-                  <button 
-                    onClick={() => demanderAccesAdmin('jour_precedent')}
-                    disabled={isAdmin && jourActuel === 1}
-                    className="w-7 h-7 flex items-center justify-center bg-white/20 hover:bg-white/30 rounded disabled:opacity-50"
-                  >
-                    <span className="text-white">◀</span>
-                  </button>
-                  <span className="w-8 text-center text-xl font-bold text-white">{jourActuel}</span>
-                  <button 
-                    onClick={() => demanderAccesAdmin('jour_suivant')}
-                    disabled={isAdmin && jourActuel === config.nombreJours}
-                    className="w-7 h-7 flex items-center justify-center bg-white/20 hover:bg-white/30 rounded disabled:opacity-50"
-                  >
-                    <span className="text-white">▶</span>
-                  </button>
-                  <span className="text-white/60 text-xs">/{config.nombreJours}</span>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {isAdmin ? (
-                    <button onClick={() => setIsAdmin(false)} className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm border border-orange-500">
-                      🔓 Admin
-                    </button>
-                  ) : (
-                    <button onClick={() => demanderAccesAdmin('parametres')} className="px-3 py-2 bg-neutral-800 text-neutral-400 rounded-lg text-sm border border-neutral-600">
-                      🔒 Admin
-                    </button>
-                  )}
-                  
-                  <button onClick={() => setShowModalVentes(true)} className="px-3 py-2 bg-emerald-700 text-white rounded-lg text-sm border border-emerald-500">
-                    💰 Ventes
-                  </button>
-                  
-                  <button onClick={() => setShowModalBenevoles(true)} className="px-3 py-2 bg-indigo-700 text-white rounded-lg text-sm border border-indigo-500">
-                    👥 Bénévoles
-                  </button>
-                  
-                  <button onClick={() => demanderAccesAdmin('ventes')} className="px-3 py-2 bg-teal-700 text-white rounded-lg text-sm border border-teal-500">
-                    📊 {historiqueVentes.length}
-                  </button>
-                  
-                  <button onClick={() => demanderAccesAdmin('historique')} className="px-3 py-2 bg-red-700 text-white rounded-lg text-sm border border-red-500">
-                    📋 {historique.length}
-                  </button>
-                  
-                  <button onClick={() => demanderAccesAdmin('parametres')} className="px-3 py-2 bg-neutral-700 text-white rounded-lg text-sm border border-red-600">
-                    ⚙️
-                  </button>
-                </div>
-              </div>
+          {/* Stocks */}
+          <div className="grid grid-cols-5 gap-1 p-2 bg-neutral-900">
+            <div className="bg-amber-900/50 p-2 rounded text-center">
+              <div className="text-lg font-bold text-amber-400">{stockBiere}</div>
+              <div className="text-xs text-amber-200">🍺 Bière</div>
+            </div>
+            <div className="bg-orange-900/50 p-2 rounded text-center">
+              <div className="text-lg font-bold text-orange-400">{stockCidre}</div>
+              <div className="text-xs text-orange-200">🍎 Cidre</div>
+            </div>
+            <div className="bg-blue-900/50 p-2 rounded text-center">
+              <div className="text-lg font-bold text-blue-400">{stockVides}</div>
+              <div className="text-xs text-blue-200">Vides</div>
+            </div>
+            <div className="bg-red-900/50 p-2 rounded text-center">
+              <div className="text-lg font-bold text-red-400">{stockCasse}</div>
+              <div className="text-xs text-red-200">Cassé</div>
+            </div>
+            <div className="bg-purple-900/50 p-2 rounded text-center">
+              <div className="text-lg font-bold text-purple-400">{stockReutilisables}</div>
+              <div className="text-xs text-purple-200">Réutil.</div>
             </div>
           </div>
 
-          <div className="max-w-7xl mx-auto">
-            {/* Résumé Ventes */}
-            {historiqueVentes.length > 0 && (
-              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-4 mb-4">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl">💰</span>
-                    <div>
-                      <p className="text-neutral-400 text-sm">Total (net)</p>
-                      <p className="text-2xl font-bold text-white">{formatMontant(totauxVentes.montantTotal)}</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-4 text-center">
-                    <div><p className="text-xl font-bold text-orange-400">{totauxVentes.nbPintes}</p><p className="text-xs text-neutral-400">Pintes</p></div>
-                    <div><p className="text-xl font-bold text-orange-400">{totauxVentes.nbPichets}</p><p className="text-xs text-neutral-400">Pichets</p></div>
-                    <div><p className="text-xl font-bold text-orange-400">{totauxVentes.nbGobelets}</p><p className="text-xs text-neutral-400">Gobelets</p></div>
-                  </div>
-                </div>
-              </div>
-            )}
+          {/* Total ventes */}
+          {totalVentes > 0 && (
+            <div className="mx-2 mt-2 p-3 bg-emerald-900/50 rounded-lg flex items-center justify-between">
+              <span className="text-emerald-300">💰 Total Ventes</span>
+              <span className="text-xl font-bold text-emerald-400">{totalVentes.toFixed(2)} €</span>
+            </div>
+          )}
 
-            {/* Historique Ventes */}
-            {showHistoriqueVentes && (
-              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-4 mb-4">
-                <h2 className="text-lg font-bold text-white mb-3">📊 Historique Ventes</h2>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {ventesFiltrees.map(v => (
-                    <div key={v.id} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs bg-red-600 text-white px-1.5 py-0.5 rounded">J{v.jour}</span>
-                          <span className="text-lg font-bold text-green-400">{formatMontant(v.montantTotal)}</span>
-                          <span className="text-sm text-neutral-300">{v.nomBar}</span>
-                          <span className="text-xs">{v.typeBoisson === 'biere' ? '🍺' : '🍎'}</span>
-                        </div>
-                        <span className="text-xs text-neutral-500">{formatHeure(v.horodatage)}</span>
+          {/* Bars */}
+          <div className="p-2 space-y-2">
+            {barsNomades.length === 0 ? (
+              <div className="text-center py-8 text-neutral-500">
+                <p>Aucun bar nomade configuré</p>
+                <p className="text-sm">Allez dans ⚙️ Paramètres pour en ajouter</p>
+              </div>
+            ) : (
+              barsNomades.map(bar => {
+                const isBiere = bar.type === 'biere';
+                const barFuts = bar.futs || [];
+                const canAdd = barFuts.length < config.maxFutsParBar && (isBiere ? stockBiere > 0 : stockCidre > 0);
+
+                return (
+                  <div key={bar.id} className={`rounded-xl border-2 overflow-hidden ${isBiere ? 'border-amber-600 bg-amber-950/30' : 'border-orange-600 bg-orange-950/30'}`}>
+                    <div className={`px-3 py-2 flex items-center justify-between ${isBiere ? 'bg-amber-900/50' : 'bg-orange-900/50'}`}>
+                      <div className="flex items-center gap-2">
+                        <span>{isBiere ? '🍺' : '🍎'}</span>
+                        <span className="font-bold">{bar.nom}</span>
                       </div>
+                      <span className={`text-sm px-2 py-0.5 rounded ${barFuts.length >= config.maxFutsParBar ? 'bg-red-600' : 'bg-white/20'}`}>
+                        {barFuts.length}/{config.maxFutsParBar}
+                      </span>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
-            {/* Stocks */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-              <div className="bg-neutral-900 rounded-xl border-2 border-blue-500 p-3">
-                <p className="text-neutral-400 text-xs">Vides</p>
-                <p className="text-2xl font-bold text-white">{stockVides}</p>
-              </div>
-              <div className="bg-neutral-900 rounded-xl border-2 border-red-500 p-3">
-                <p className="text-neutral-400 text-xs">Casse</p>
-                <p className="text-2xl font-bold text-white">{stockCasse}</p>
-              </div>
-              <div className="bg-neutral-900 rounded-xl border-2 border-amber-500 p-3">
-                <p className="text-neutral-400 text-xs">♻️ Bière</p>
-                <p className="text-2xl font-bold text-white">{stockReutilisablesBiere}</p>
-              </div>
-              <div className="bg-neutral-900 rounded-xl border-2 border-orange-500 p-3">
-                <p className="text-neutral-400 text-xs">♻️ Cidre</p>
-                <p className="text-2xl font-bold text-white">{stockReutilisablesCidre}</p>
-              </div>
-            </div>
-
-            {/* Historique Fûts */}
-            {showHistorique && (
-              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-4 mb-4">
-                <h2 className="text-lg font-bold text-white mb-3">📋 Historique Fûts</h2>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {historiqueFiltres.map(m => {
-                    const style = getMouvementStyle(m.typeMouvement);
-                    return (
-                      <div key={m.id} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs bg-red-600 text-white px-1.5 py-0.5 rounded">J{m.jour}</span>
-                            <span className={`px-2 py-0.5 rounded text-xs ${style.bg} ${style.text}`}>{style.label}</span>
-                            <span className="text-sm text-neutral-300">{m.typeFut === 'biere' ? '🍺' : '🍎'} {m.nomBar}</span>
+                    <div className="p-3 space-y-2">
+                      {barFuts.length === 0 ? (
+                        <p className="text-neutral-500 text-sm text-center py-2">Aucun fût</p>
+                      ) : (
+                        barFuts.map((fut, idx) => (
+                          <div key={fut.id} className="flex items-center justify-between bg-black/30 p-2 rounded-lg">
+                            <span className="text-sm">{isBiere ? '🍺' : '🍎'} Fût {idx + 1}</span>
+                            <button 
+                              onClick={() => setShowModalRetour({ barId: bar.id, futIndex: idx, barNom: bar.nom })}
+                              className="px-3 py-1 bg-neutral-700 rounded text-sm hover:bg-neutral-600"
+                            >
+                              ↩️ Retour
+                            </button>
                           </div>
-                          <span className="text-xs text-neutral-500">{formatHeure(m.horodatage)}</span>
-                        </div>
-                        {m.commentaire && (
-                          <p className="text-xs text-neutral-400 mt-1 italic">💬 {m.commentaire}</p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+                        ))
+                      )}
 
-            {/* Bars Bière */}
-            {barsBiere.length > 0 && (
-              <div className="mb-4">
-                <h3 className="text-amber-400 font-bold mb-2">🍺 Bars Bière ({barsBiere.length})</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                  {barsBiere.map(bar => (
-                    <div key={bar.id} className="bg-neutral-900 rounded-xl border-2 border-amber-500 overflow-hidden">
-                      <div className="bg-amber-600 px-3 py-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-white text-sm">🍺 {bar.nom}</span>
-                          <span className={`px-2 py-0.5 rounded-full text-xs ${(bar.futs?.length || 0) >= config.maxFutsParBar ? 'bg-red-600' : 'bg-white/20'} text-white`}>
-                            {bar.futs?.length || 0}/{config.maxFutsParBar}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="p-3">
-                        <div className="space-y-1 mb-3 min-h-[40px]">
-                          {(!bar.futs || (bar.futs?.length || 0) === 0) ? (
-                            <p className="text-neutral-500 text-sm text-center py-2">Aucun fût</p>
-                          ) : (
-                            bar.futs.map((fut, idx) => (
-                              <div key={fut.id} className="flex items-center justify-between p-2 bg-amber-900/30 rounded border border-amber-700">
-                                <span className="text-amber-300 text-sm">
-                                  🍺 Fût {fut.isReutilisable && '♻️'}
-                                </span>
-                                <button onClick={() => ouvrirModalRetour(bar.id, idx)} className="p-1 bg-neutral-700 rounded hover:bg-neutral-600">
-                                  <span className="text-white text-xs">↩️</span>
-                                </button>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                        <button
-                          onClick={() => attribuerFut(bar.id)}
-                          disabled={(bar.futs?.length || 0) >= config.maxFutsParBar || (stockBiere + stockReutilisablesBiere) <= 0}
-                          className="w-full py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded font-medium text-sm transition-colors"
-                        >
-                          ➕ Attribuer
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => attribuerFut(bar.id)}
+                        disabled={!canAdd}
+                        className={`w-full py-3 rounded-lg font-medium transition-all ${
+                          canAdd 
+                            ? (isBiere ? 'bg-amber-600 hover:bg-amber-500' : 'bg-orange-600 hover:bg-orange-500')
+                            : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+                        }`}
+                      >
+                        ➕ Attribuer un fût
+                      </button>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Bars Cidre */}
-            {barsCidre.length > 0 && (
-              <div className="mb-4">
-                <h3 className="text-orange-400 font-bold mb-2">🍎 Bars Cidre ({barsCidre.length})</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                  {barsCidre.map(bar => (
-                    <div key={bar.id} className="bg-neutral-900 rounded-xl border-2 border-orange-500 overflow-hidden">
-                      <div className="bg-orange-600 px-3 py-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-white text-sm">🍎 {bar.nom}</span>
-                          <span className={`px-2 py-0.5 rounded-full text-xs ${(bar.futs?.length || 0) >= config.maxFutsParBar ? 'bg-red-600' : 'bg-white/20'} text-white`}>
-                            {bar.futs?.length || 0}/{config.maxFutsParBar}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="p-3">
-                        <div className="space-y-1 mb-3 min-h-[40px]">
-                          {(!bar.futs || (bar.futs?.length || 0) === 0) ? (
-                            <p className="text-neutral-500 text-sm text-center py-2">Aucun fût</p>
-                          ) : (
-                            bar.futs.map((fut, idx) => (
-                              <div key={fut.id} className="flex items-center justify-between p-2 bg-orange-900/30 rounded border border-orange-700">
-                                <span className="text-orange-300 text-sm">
-                                  🍎 Fût {fut.isReutilisable && '♻️'}
-                                </span>
-                                <button onClick={() => ouvrirModalRetour(bar.id, idx)} className="p-1 bg-neutral-700 rounded hover:bg-neutral-600">
-                                  <span className="text-white text-xs">↩️</span>
-                                </button>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                        <button
-                          onClick={() => attribuerFut(bar.id)}
-                          disabled={(bar.futs?.length || 0) >= config.maxFutsParBar || (stockCidre + stockReutilisablesCidre) <= 0}
-                          className="w-full py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded font-medium text-sm transition-colors"
-                        >
-                          ➕ Attribuer
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+                  </div>
+                );
+              })
             )}
           </div>
 
-          {/* ========== MODALS ========== */}
-          
+          {/* ==================== MODALS ==================== */}
+
           {/* Modal Admin */}
           {showModalAdmin && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-6 w-full max-w-sm">
-                <h3 className="text-xl font-bold text-white mb-4">🔐 Accès Admin</h3>
+              <div className="bg-neutral-900 rounded-2xl w-full max-w-sm p-6">
+                <h3 className="text-xl font-bold mb-4">🔐 Accès Admin</h3>
                 <input
-                  type={showAdminPassword ? 'text' : 'password'}
-                  value={adminPasswordInput}
-                  onChange={(e) => { setAdminPasswordInput(e.target.value); setAdminPasswordError(false); }}
+                  type="password"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
                   placeholder="Mot de passe"
-                  className="w-full px-4 py-3 bg-neutral-800 border border-neutral-600 rounded-xl text-white mb-3"
-                  onKeyPress={(e) => e.key === 'Enter' && validerAccesAdmin()}
+                  className="w-full px-4 py-3 bg-neutral-800 rounded-lg mb-4"
+                  onKeyDown={(e) => e.key === 'Enter' && validerAdmin()}
                 />
-                {adminPasswordError && (
-                  <p className="text-red-400 text-sm mb-3">Mot de passe incorrect</p>
-                )}
                 <div className="flex gap-2">
-                  <button onClick={() => setShowModalAdmin(false)} className="flex-1 py-2 bg-neutral-700 text-white rounded-lg">
-                    Annuler
-                  </button>
-                  <button onClick={validerAccesAdmin} className="flex-1 py-2 bg-red-600 text-white rounded-lg">
-                    Valider
-                  </button>
+                  <button onClick={() => setShowModalAdmin(false)} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
+                  <button onClick={validerAdmin} className="flex-1 py-3 bg-red-600 rounded-lg font-medium">Valider</button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Modal Retour */}
+          {/* Modal Retour Fût */}
           {showModalRetour && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-6 w-full max-w-sm">
-                <h3 className="text-xl font-bold text-white mb-4">↩️ Retour de fût</h3>
-                <textarea
-                  value={commentaireRetour}
-                  onChange={(e) => setCommentaireRetour(e.target.value)}
-                  placeholder="Commentaire (optionnel)"
-                  className="w-full px-4 py-3 bg-neutral-800 border border-neutral-600 rounded-xl text-white mb-4 h-20"
-                />
+              <div className="bg-neutral-900 rounded-2xl w-full max-w-sm p-6">
+                <h3 className="text-xl font-bold mb-4">↩️ Retour de Fût</h3>
+                <p className="text-neutral-400 mb-4">{showModalRetour.barNom}</p>
                 <div className="space-y-2">
-                  <button onClick={() => retournerFut('vide')} className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium">
-                    📥 Vide (terminé)
-                  </button>
-                  <button onClick={() => retournerFut('nonTermine')} className="w-full py-3 bg-purple-600 text-white rounded-lg font-medium">
-                    ♻️ Non terminé
-                  </button>
-                  <button onClick={() => retournerFut('casse')} className="w-full py-3 bg-red-600 text-white rounded-lg font-medium">
-                    ⚠️ Cassé / Défectueux
-                  </button>
-                  <button onClick={fermerModalRetour} className="w-full py-2 text-neutral-400 hover:text-white">
-                    Annuler
-                  </button>
+                  <button onClick={() => retournerFut(showModalRetour.barId, showModalRetour.futIndex, 'RETOUR_VIDE')} className="w-full py-3 bg-blue-600 rounded-lg">📦 Fût Vide</button>
+                  <button onClick={() => retournerFut(showModalRetour.barId, showModalRetour.futIndex, 'RETOUR_CASSE')} className="w-full py-3 bg-red-600 rounded-lg">💥 Fût Cassé</button>
+                  <button onClick={() => retournerFut(showModalRetour.barId, showModalRetour.futIndex, 'RETOUR_REUTILISABLE')} className="w-full py-3 bg-purple-600 rounded-lg">♻️ Non Terminé</button>
+                  <button onClick={() => setShowModalRetour(null)} className="w-full py-3 bg-neutral-700 rounded-lg mt-4">Annuler</button>
                 </div>
               </div>
             </div>
@@ -1125,110 +922,54 @@
           {/* Modal Ventes */}
           {showModalVentes && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
-                <h3 className="text-xl font-bold text-white mb-4">💰 Enregistrer une vente</h3>
+              <div className="bg-neutral-900 rounded-2xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto">
+                <h3 className="text-xl font-bold mb-4">💰 Saisie Vente</h3>
                 
-                <div className="mb-4">
-                  <label className="text-neutral-400 text-sm">Bar</label>
-                  <select
-                    value={venteBarId || ''}
-                    onChange={(e) => setVenteBarId(e.target.value)}
-                    className="w-full px-4 py-3 bg-neutral-800 border border-neutral-600 rounded-xl text-white mt-1"
-                  >
-                    <option value="">-- Sélectionner --</option>
-                    {barsNomades.map(bar => (
-                      <option key={bar.id} value={bar.id}>{bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="space-y-4">
                   <div>
-                    <label className="text-neutral-400 text-xs">Pintes ({config.prixPinte}€)</label>
-                    <input type="number" min="0" value={ventePintes} onChange={(e) => setVentePintes(parseInt(e.target.value) || 0)}
-                      className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white text-center" />
+                    <label className="block text-sm text-neutral-400 mb-1">Bar</label>
+                    <select 
+                      value={venteBarId} 
+                      onChange={(e) => setVenteBarId(e.target.value)}
+                      className="w-full px-4 py-3 bg-neutral-800 rounded-lg"
+                    >
+                      <option value="">Sélectionner...</option>
+                      {barsNomades.map(bar => (
+                        <option key={bar.id} value={bar.id}>{bar.nom}</option>
+                      ))}
+                    </select>
                   </div>
+
                   <div>
-                    <label className="text-neutral-400 text-xs">Pichets ({config.prixPichet}€)</label>
-                    <input type="number" min="0" value={ventePichets} onChange={(e) => setVentePichets(parseInt(e.target.value) || 0)}
-                      className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white text-center" />
+                    <label className="block text-sm text-neutral-400 mb-1">Montant (€)</label>
+                    <input type="number" step="0.01" value={venteMontant} onChange={(e) => setVenteMontant(e.target.value)} className="w-full px-4 py-3 bg-neutral-800 rounded-lg text-xl" placeholder="0.00" />
                   </div>
-                  <div>
-                    <label className="text-neutral-400 text-xs">Gobelets ({config.prixGobelet}€)</label>
-                    <input type="number" min="0" value={venteGobelets} onChange={(e) => setVenteGobelets(parseInt(e.target.value) || 0)}
-                      className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white text-center" />
-                  </div>
-                </div>
 
-                <div className="bg-neutral-800 rounded-lg p-3 mb-4">
-                  <p className="text-neutral-400 text-sm">Total</p>
-                  <p className="text-2xl font-bold text-white">
-                    {formatMontant((ventePintes * config.prixPinte) + (ventePichets * config.prixPichet) + (venteGobelets * config.prixGobelet))}
-                  </p>
-                </div>
-
-                <label className="flex items-center gap-2 mb-4 text-neutral-300">
-                  <input type="checkbox" checked={venteEquipementDefaillant} onChange={(e) => setVenteEquipementDefaillant(e.target.checked)}
-                    className="w-5 h-5 rounded" />
-                  ⚠️ Équipement défaillant
-                </label>
-
-                <div className="flex gap-2">
-                  <button onClick={() => { setShowModalVentes(false); resetVenteForm(); }} className="flex-1 py-3 bg-neutral-700 text-white rounded-lg">
-                    Annuler
-                  </button>
-                  <button onClick={() => { enregistrerVente(); setShowModalVentes(false); }} disabled={!venteBarId}
-                    className="flex-1 py-3 bg-emerald-600 disabled:bg-neutral-700 text-white rounded-lg font-medium">
-                    Enregistrer
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Modal Bénévoles */}
-          {showModalBenevoles && (
-            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
-                <h3 className="text-xl font-bold text-white mb-4">👥 Bénévoles</h3>
-                
-                <div className="flex gap-2 mb-4">
-                  <input
-                    type="text"
-                    value={newBenevoleName}
-                    onChange={(e) => setNewBenevoleName(e.target.value)}
-                    placeholder="Nom du bénévole"
-                    className="flex-1 px-4 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white"
-                  />
-                  <button onClick={ajouterBenevole} className="px-4 py-2 bg-indigo-600 text-white rounded-lg">
-                    ➕
-                  </button>
-                </div>
-
-                <div className="space-y-2 mb-4">
-                  {benevoles.map(b => (
-                    <div key={b.id} className="flex items-center gap-2 p-2 bg-neutral-800 rounded-lg">
-                      <span className="flex-1 text-white">{b.nom}</span>
-                      <select
-                        value={b.barId || ''}
-                        onChange={(e) => affecterBenevole(b.id, e.target.value)}
-                        className="px-2 py-1 bg-neutral-700 border border-neutral-600 rounded text-white text-sm"
-                      >
-                        <option value="">Non affecté</option>
-                        {barsNomades.map(bar => (
-                          <option key={bar.id} value={bar.id}>{bar.nom}</option>
-                        ))}
-                      </select>
-                      <button onClick={() => supprimerBenevole(b.id)} className="p-1 text-red-400 hover:text-red-300">
-                        🗑️
-                      </button>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-sm text-neutral-400 mb-1">Pintes</label>
+                      <input type="number" value={venteNbPintes} onChange={(e) => setVenteNbPintes(e.target.value)} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-center" />
                     </div>
-                  ))}
+                    <div>
+                      <label className="block text-sm text-neutral-400 mb-1">Pichets</label>
+                      <input type="number" value={venteNbPichets} onChange={(e) => setVenteNbPichets(e.target.value)} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-center" />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-neutral-400 mb-1">Gobelets</label>
+                      <input type="number" value={venteNbGobelets} onChange={(e) => setVenteNbGobelets(e.target.value)} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-center" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-neutral-400 mb-1">Commentaire</label>
+                    <textarea value={venteCommentaire} onChange={(e) => setVenteCommentaire(e.target.value)} className="w-full px-4 py-2 bg-neutral-800 rounded-lg" rows="2" />
+                  </div>
                 </div>
 
-                <button onClick={() => setShowModalBenevoles(false)} className="w-full py-2 bg-neutral-700 text-white rounded-lg">
-                  Fermer
-                </button>
+                <div className="flex gap-2 mt-6">
+                  <button onClick={() => setShowModalVentes(false)} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
+                  <button onClick={enregistrerVente} className="flex-1 py-3 bg-emerald-600 rounded-lg font-medium">✓ Enregistrer</button>
+                </div>
               </div>
             </div>
           )}
@@ -1236,86 +977,82 @@
           {/* Modal Paramètres */}
           {showParametres && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
-                <h3 className="text-xl font-bold text-white mb-4">⚙️ Paramètres</h3>
+              <div className="bg-neutral-900 rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+                <h3 className="text-xl font-bold mb-4">⚙️ Paramètres</h3>
                 
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-neutral-400 text-sm">Nombre de jours</label>
-                      <input type="number" min="1" max="10" value={tempConfig.nombreJours}
-                        onChange={(e) => setTempConfig({...tempConfig, nombreJours: parseInt(e.target.value) || 1})}
-                        className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
-                    </div>
-                    <div>
-                      <label className="text-neutral-400 text-sm">Max fûts/bar</label>
-                      <input type="number" min="1" max="10" value={tempConfig.maxFutsParBar}
-                        onChange={(e) => setTempConfig({...tempConfig, maxFutsParBar: parseInt(e.target.value) || 1})}
-                        className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
-                    </div>
-                    <div>
-                      <label className="text-neutral-400 text-sm">Stock initial Bière</label>
-                      <input type="number" min="0" value={tempConfig.stockInitialBiere}
-                        onChange={(e) => setTempConfig({...tempConfig, stockInitialBiere: parseInt(e.target.value) || 0})}
-                        className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
-                    </div>
-                    <div>
-                      <label className="text-neutral-400 text-sm">Stock initial Cidre</label>
-                      <input type="number" min="0" value={tempConfig.stockInitialCidre}
-                        onChange={(e) => setTempConfig({...tempConfig, stockInitialCidre: parseInt(e.target.value) || 0})}
-                        className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
-                    </div>
-                    <div>
-                      <label className="text-neutral-400 text-sm">Prix Pinte (€)</label>
-                      <input type="number" min="0" step="0.5" value={tempConfig.prixPinte}
-                        onChange={(e) => setTempConfig({...tempConfig, prixPinte: parseFloat(e.target.value) || 0})}
-                        className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
-                    </div>
-                    <div>
-                      <label className="text-neutral-400 text-sm">Prix Pichet (€)</label>
-                      <input type="number" min="0" step="0.5" value={tempConfig.prixPichet}
-                        onChange={(e) => setTempConfig({...tempConfig, prixPichet: parseFloat(e.target.value) || 0})}
-                        className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
-                    </div>
-                    <div>
-                      <label className="text-neutral-400 text-sm">Prix Gobelet (€)</label>
-                      <input type="number" min="0" step="0.5" value={tempConfig.prixGobelet}
-                        onChange={(e) => setTempConfig({...tempConfig, prixGobelet: parseFloat(e.target.value) || 0})}
-                        className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
-                    </div>
+                  <div>
+                    <label className="block text-sm text-neutral-400 mb-1">Stock initial Bière</label>
+                    <input type="number" defaultValue={config.stockInitialBiere} id="stockBiere" className="w-full px-4 py-2 bg-neutral-800 rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-neutral-400 mb-1">Stock initial Cidre</label>
+                    <input type="number" defaultValue={config.stockInitialCidre} id="stockCidre" className="w-full px-4 py-2 bg-neutral-800 rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-neutral-400 mb-1">Max fûts par bar</label>
+                    <input type="number" defaultValue={config.maxFutsParBar} id="maxFuts" className="w-full px-4 py-2 bg-neutral-800 rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-neutral-400 mb-1">Nombre de jours</label>
+                    <input type="number" defaultValue={config.nombreJours} id="nbJours" className="w-full px-4 py-2 bg-neutral-800 rounded-lg" />
                   </div>
 
-                  {/* Gestion des bars */}
-                  <div className="border-t border-neutral-700 pt-4">
-                    <h4 className="text-white font-medium mb-2">Bars nomades</h4>
-                    <div className="flex gap-2 mb-3">
-                      <input type="text" value={newBarName} onChange={(e) => setNewBarName(e.target.value)}
-                        placeholder="Nom du bar" className="flex-1 px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white" />
-                      <select value={newBarType} onChange={(e) => setNewBarType(e.target.value)}
-                        className="px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-white">
+                  <hr className="border-neutral-700" />
+
+                  <div>
+                    <h4 className="font-bold mb-2">Bars Nomades</h4>
+                    <div className="space-y-2 mb-4">
+                      {barsNomades.map(bar => (
+                        <div key={bar.id} className="flex items-center justify-between bg-neutral-800 p-2 rounded">
+                          <span>{bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom}</span>
+                          <button onClick={() => supprimerBar(bar.id)} className="text-red-400 text-sm">✕</button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <input type="text" id="newBarNom" placeholder="Nom du bar" className="flex-1 px-3 py-2 bg-neutral-800 rounded-lg text-sm" />
+                      <select id="newBarType" className="px-3 py-2 bg-neutral-800 rounded-lg text-sm">
                         <option value="biere">🍺 Bière</option>
                         <option value="cidre">🍎 Cidre</option>
                       </select>
-                      <button onClick={ajouterBar} className="px-4 py-2 bg-red-600 text-white rounded-lg">➕</button>
-                    </div>
-                    <div className="space-y-1 max-h-40 overflow-y-auto">
-                      {barsNomades.map(bar => (
-                        <div key={bar.id} className="flex items-center justify-between p-2 bg-neutral-800 rounded">
-                          <span className="text-white text-sm">{bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom}</span>
-                          <button onClick={() => supprimerBar(bar.id)} className="text-red-400 hover:text-red-300 text-sm">🗑️</button>
-                        </div>
-                      ))}
+                      <button onClick={() => {
+                        const nom = document.getElementById('newBarNom').value;
+                        const type = document.getElementById('newBarType').value;
+                        if (nom) {
+                          ajouterBar(nom, type);
+                          document.getElementById('newBarNom').value = '';
+                        }
+                      }} className="px-4 py-2 bg-red-600 rounded-lg text-sm">+</button>
                     </div>
                   </div>
                 </div>
 
                 <div className="flex gap-2 mt-6">
-                  <button onClick={() => setShowParametres(false)} className="flex-1 py-3 bg-neutral-700 text-white rounded-lg">
-                    Annuler
-                  </button>
-                  <button onClick={sauvegarderConfig} className="flex-1 py-3 bg-red-600 text-white rounded-lg font-medium">
-                    Sauvegarder
-                  </button>
+                  <button onClick={() => setShowParametres(false)} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
+                  <button onClick={() => {
+                    sauvegarderConfig({
+                      stockInitialBiere: parseInt(document.getElementById('stockBiere').value) || 50,
+                      stockInitialCidre: parseInt(document.getElementById('stockCidre').value) || 20,
+                      maxFutsParBar: parseInt(document.getElementById('maxFuts').value) || 3,
+                      nombreJours: parseInt(document.getElementById('nbJours').value) || 4
+                    });
+                  }} className="flex-1 py-3 bg-red-600 rounded-lg font-medium">💾 Sauvegarder</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Export */}
+          {showModalExport && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+              <div className="bg-neutral-900 rounded-2xl w-full max-w-sm p-6">
+                <h3 className="text-xl font-bold mb-4">📥 Exporter</h3>
+                <div className="space-y-2">
+                  <button onClick={() => { exporterHistoriqueFuts(); setShowModalExport(false); }} disabled={historique.length === 0} className="w-full py-3 bg-purple-600 rounded-lg disabled:opacity-50">📋 Historique Fûts ({historique.length})</button>
+                  <button onClick={() => { exporterHistoriqueVentes(); setShowModalExport(false); }} disabled={historiqueVentes.length === 0} className="w-full py-3 bg-emerald-600 rounded-lg disabled:opacity-50">💰 Historique Ventes ({historiqueVentes.length})</button>
+                  <button onClick={() => { exporterBenevoles(); setShowModalExport(false); }} disabled={nbAffectations === 0} className="w-full py-3 bg-indigo-600 rounded-lg disabled:opacity-50">👥 Planning Bénévoles ({nbAffectations})</button>
+                  <button onClick={() => setShowModalExport(false)} className="w-full py-3 bg-neutral-700 rounded-lg mt-4">Fermer</button>
                 </div>
               </div>
             </div>
@@ -1324,44 +1061,403 @@
           {/* Modal Session Info */}
           {showSessionInfo && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-neutral-900 rounded-xl border-2 border-red-600 p-6 w-full max-w-sm">
-                <h3 className="text-xl font-bold text-white mb-4">📱 Session</h3>
-                
-                <div className="bg-neutral-800 rounded-lg p-4 mb-4 text-center">
-                  <p className="text-neutral-400 text-sm mb-1">Code à partager</p>
-                  <p className="text-3xl font-mono font-bold text-red-500">{sessionCode}</p>
+              <div className="bg-neutral-900 rounded-2xl w-full max-w-sm p-6">
+                <h3 className="text-xl font-bold mb-4">📡 Session</h3>
+                <div className="bg-neutral-800 p-4 rounded-xl mb-4 text-center">
+                  <p className="text-sm text-neutral-400">Code à partager</p>
+                  <p className="text-2xl font-mono font-bold text-red-400">{session}</p>
                 </div>
-
-                <div className="mb-4">
-                  <p className="text-neutral-400 text-sm mb-2">Utilisateurs connectés ({connectedUsers.length})</p>
+                <div>
+                  <p className="text-sm text-neutral-400 mb-2">Utilisateurs connectés ({connectedUsers.length})</p>
                   <div className="space-y-1">
-                    {connectedUsers.map(u => (
-                      <div key={u.id} className="flex items-center gap-2 text-white text-sm">
+                    {connectedUsers.map(user => (
+                      <div key={user} className="flex items-center gap-2 bg-neutral-800 px-3 py-2 rounded">
                         <div className="w-2 h-2 bg-green-500 rounded-full" />
-                        {u.name} {u.id === userId && '(vous)'}
+                        <span>{user} {user === userName && '(vous)'}</span>
                       </div>
                     ))}
                   </div>
                 </div>
+                <button onClick={() => setShowSessionInfo(false)} className="w-full py-3 bg-neutral-700 rounded-lg mt-4">Fermer</button>
+              </div>
+            </div>
+          )}
 
-                <div className="flex gap-2">
-                  <button onClick={() => setShowSessionInfo(false)} className="flex-1 py-2 bg-neutral-700 text-white rounded-lg">
-                    Fermer
-                  </button>
-                  <button onClick={quitterSession} className="flex-1 py-2 bg-red-600 text-white rounded-lg">
-                    Quitter
-                  </button>
+          {/* ==================== MODAL BÉNÉVOLES ==================== */}
+          {showModalBenevoles && (
+            <div className="fixed inset-0 bg-black/90 flex flex-col z-50">
+              {/* Header */}
+              <div className="bg-indigo-900 px-4 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">👥</span>
+                  <h3 className="font-bold">Gestion Bénévoles</h3>
+                </div>
+                <button onClick={() => setShowModalBenevoles(false)} className="text-2xl">✕</button>
+              </div>
+
+              {/* Onglets */}
+              <div className="flex border-b border-neutral-700">
+                <button 
+                  onClick={() => setBenevoleOnglet('planning')}
+                  className={`flex-1 py-3 text-sm font-medium ${benevoleOnglet === 'planning' ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400'}`}
+                >
+                  📅 Planning
+                </button>
+                <button 
+                  onClick={() => setBenevoleOnglet('synthese')}
+                  className={`flex-1 py-3 text-sm font-medium ${benevoleOnglet === 'synthese' ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400'}`}
+                >
+                  📊 Synthèse
+                </button>
+                <button 
+                  onClick={ouvrirParametresCreneaux}
+                  className={`flex-1 py-3 text-sm font-medium ${benevoleOnglet === 'parametres' ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400'}`}
+                >
+                  ⏰ Créneaux
+                </button>
+              </div>
+
+              {/* Contenu */}
+              <div className="flex-1 overflow-y-auto p-4">
+                
+                {/* ONGLET PLANNING */}
+                {benevoleOnglet === 'planning' && (
+                  <div>
+                    {barsNomades.length === 0 ? (
+                      <div className="text-center py-8 text-neutral-500">
+                        <p>Aucun bar configuré</p>
+                        <p className="text-sm">Ajoutez des bars dans les paramètres</p>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Sélecteur de bar */}
+                        <div className="flex items-center justify-center gap-4 mb-6">
+                          <button 
+                            onClick={() => {
+                              const idx = barsNomades.findIndex(b => b.id === selectedBarPlanning);
+                              if (idx > 0) setSelectedBarPlanning(barsNomades[idx - 1].id);
+                            }}
+                            disabled={barsNomades.findIndex(b => b.id === selectedBarPlanning) === 0}
+                            className="w-10 h-10 bg-neutral-700 rounded-full disabled:opacity-30"
+                          >◀</button>
+                          
+                          <div className="text-center">
+                            <h4 className="text-lg font-bold">{barsNomades.find(b => b.id === selectedBarPlanning)?.nom || 'Bar'}</h4>
+                            <p className="text-sm text-neutral-400">
+                              {barsNomades.find(b => b.id === selectedBarPlanning)?.type === 'biere' ? '🍺 Bière' : '🍎 Cidre'}
+                            </p>
+                          </div>
+                          
+                          <button 
+                            onClick={() => {
+                              const idx = barsNomades.findIndex(b => b.id === selectedBarPlanning);
+                              if (idx < barsNomades.length - 1) setSelectedBarPlanning(barsNomades[idx + 1].id);
+                            }}
+                            disabled={barsNomades.findIndex(b => b.id === selectedBarPlanning) === barsNomades.length - 1}
+                            className="w-10 h-10 bg-neutral-700 rounded-full disabled:opacity-30"
+                          >▶</button>
+                        </div>
+
+                        {/* Indicateurs bars */}
+                        <div className="flex justify-center gap-2 mb-6">
+                          {barsNomades.map(bar => {
+                            const hasAff = affectations[bar.id] && Object.keys(affectations[bar.id]).length > 0;
+                            return (
+                              <button
+                                key={bar.id}
+                                onClick={() => setSelectedBarPlanning(bar.id)}
+                                className={`w-10 h-10 rounded-full font-bold text-sm ${
+                                  selectedBarPlanning === bar.id
+                                    ? 'bg-indigo-600 text-white scale-110'
+                                    : hasAff
+                                      ? 'bg-green-600 text-white'
+                                      : 'bg-neutral-700 text-neutral-400'
+                                }`}
+                              >
+                                {barsNomades.indexOf(bar) + 1}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Créneaux */}
+                        <div className="space-y-3">
+                          {creneaux.map(creneau => {
+                            const aff = selectedBarPlanning ? getAffectation(selectedBarPlanning, creneau.id) : null;
+                            const hasAffectation = aff && (aff.vendeur?.nom || aff.serveur?.nom || aff.runner?.nom);
+
+                            return (
+                              <div key={creneau.id} className={`rounded-xl p-4 ${hasAffectation ? 'bg-green-900/30 border border-green-700' : 'bg-neutral-800'}`}>
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">⏰</span>
+                                    <span className="font-bold">{creneau.label}</span>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={() => ouvrirEditionAffectation(selectedBarPlanning, creneau.id)}
+                                      className="px-3 py-1.5 bg-indigo-600 rounded-lg text-sm"
+                                    >
+                                      {hasAffectation ? '✏️ Modifier' : '➕ Affecter'}
+                                    </button>
+                                    {hasAffectation && (
+                                      <button
+                                        onClick={() => supprimerAffectation(selectedBarPlanning, creneau.id)}
+                                        className="px-3 py-1.5 bg-red-600/50 rounded-lg text-sm"
+                                      >🗑️</button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {hasAffectation ? (
+                                  <div className="grid grid-cols-3 gap-2">
+                                    <div className="bg-amber-900/30 p-2 rounded-lg">
+                                      <p className="text-xs text-amber-400 mb-1">🛒 Vendeur</p>
+                                      <p className="text-sm font-medium">{getNomComplet(aff.vendeur)}</p>
+                                    </div>
+                                    <div className="bg-blue-900/30 p-2 rounded-lg">
+                                      <p className="text-xs text-blue-400 mb-1">🍺 Serveur</p>
+                                      <p className="text-sm font-medium">{getNomComplet(aff.serveur)}</p>
+                                    </div>
+                                    <div className="bg-purple-900/30 p-2 rounded-lg">
+                                      <p className="text-xs text-purple-400 mb-1">🏃 Runner</p>
+                                      <p className="text-sm font-medium">{getNomComplet(aff.runner)}</p>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className="text-neutral-500 text-sm text-center py-2">Aucun bénévole affecté</p>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* ONGLET SYNTHÈSE */}
+                {benevoleOnglet === 'synthese' && (
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="font-bold">Tableau de synthèse</h4>
+                      <button 
+                        onClick={exporterBenevoles}
+                        disabled={nbAffectations === 0}
+                        className="px-4 py-2 bg-green-600 rounded-lg text-sm disabled:opacity-50"
+                      >
+                        📥 Exporter CSV
+                      </button>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border-collapse">
+                        <thead>
+                          <tr className="bg-indigo-900">
+                            <th className="border border-indigo-700 px-2 py-2 text-left">Bar</th>
+                            <th className="border border-indigo-700 px-2 py-2 text-left">Créneau</th>
+                            <th className="border border-indigo-700 px-2 py-2 text-amber-400">🛒</th>
+                            <th className="border border-indigo-700 px-2 py-2 text-blue-400">🍺</th>
+                            <th className="border border-indigo-700 px-2 py-2 text-purple-400">🏃</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {barsNomades.map((bar, barIdx) => (
+                            creneaux.map((creneau, creneauIdx) => {
+                              const aff = getAffectation(bar.id, creneau.id);
+                              return (
+                                <tr key={`${bar.id}-${creneau.id}`} className={creneauIdx % 2 === 0 ? 'bg-neutral-900' : 'bg-neutral-800'}>
+                                  {creneauIdx === 0 && (
+                                    <td 
+                                      rowSpan={creneaux.length} 
+                                      className={`border border-neutral-700 px-2 py-1 font-medium ${bar.type === 'biere' ? 'bg-amber-900/30' : 'bg-orange-900/30'}`}
+                                    >
+                                      {bar.nom}
+                                    </td>
+                                  )}
+                                  <td className="border border-neutral-700 px-2 py-1 text-neutral-400">{creneau.label}</td>
+                                  <td className="border border-neutral-700 px-2 py-1 text-xs">{aff ? getNomComplet(aff.vendeur) : '-'}</td>
+                                  <td className="border border-neutral-700 px-2 py-1 text-xs">{aff ? getNomComplet(aff.serveur) : '-'}</td>
+                                  <td className="border border-neutral-700 px-2 py-1 text-xs">{aff ? getNomComplet(aff.runner) : '-'}</td>
+                                </tr>
+                              );
+                            })
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="mt-4 p-3 bg-indigo-900/30 rounded-xl">
+                      <p className="text-sm">
+                        <strong>Résumé :</strong> {nbAffectations} créneau(x) avec affectation(s) sur {barsNomades.length * creneaux.length} possibles
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* ONGLET PARAMÈTRES CRÉNEAUX */}
+                {benevoleOnglet === 'parametres' && (
+                  <div>
+                    <h4 className="font-bold mb-4">Configuration des créneaux horaires</h4>
+                    
+                    <div className="space-y-2 mb-6">
+                      {tempCreneaux.map((creneau, index) => (
+                        <div key={creneau.id} className="flex items-center gap-2 bg-neutral-800 p-3 rounded-lg">
+                          <span className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center text-sm font-bold">
+                            {index + 1}
+                          </span>
+                          <input
+                            type="text"
+                            value={creneau.label}
+                            onChange={(e) => {
+                              const updated = [...tempCreneaux];
+                              updated[index] = { ...creneau, label: e.target.value };
+                              setTempCreneaux(updated);
+                            }}
+                            className="flex-1 px-3 py-2 bg-neutral-700 rounded-lg"
+                          />
+                          <button
+                            onClick={() => supprimerCreneauTemp(creneau.id)}
+                            disabled={tempCreneaux.length <= 1}
+                            className="p-2 text-red-400 disabled:opacity-30"
+                          >🗑️</button>
+                        </div>
+                      ))}
+                    </div>
+
+                    {tempCreneaux.length < 10 && (
+                      <div className="flex gap-2 mb-6">
+                        <input
+                          type="text"
+                          value={nouveauCreneau}
+                          onChange={(e) => setNouveauCreneau(e.target.value)}
+                          placeholder="Nouveau créneau (ex: 14h-16h)"
+                          className="flex-1 px-4 py-2 bg-neutral-800 rounded-lg"
+                          onKeyDown={(e) => e.key === 'Enter' && ajouterCreneau()}
+                        />
+                        <button
+                          onClick={ajouterCreneau}
+                          disabled={!nouveauCreneau.trim()}
+                          className="px-4 py-2 bg-indigo-600 rounded-lg disabled:opacity-50"
+                        >➕</button>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <button onClick={() => setBenevoleOnglet('planning')} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
+                      <button onClick={sauvegarderCreneaux} className="flex-1 py-3 bg-indigo-600 rounded-lg font-medium">💾 Sauvegarder</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Modal Édition Affectation */}
+          {showModalAffectation && editAffectation && (
+            <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-[60]">
+              <div className="bg-neutral-900 rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+                <h3 className="text-xl font-bold mb-2">👥 Affecter les bénévoles</h3>
+                <p className="text-neutral-400 text-sm mb-4">
+                  {barsNomades.find(b => b.id === editAffectation.barId)?.nom} - {creneaux.find(c => c.id === editAffectation.creneauId)?.label}
+                </p>
+
+                <div className="space-y-4">
+                  {/* Vendeur */}
+                  <div className="bg-amber-900/20 p-4 rounded-xl border border-amber-700">
+                    <label className="block text-sm font-bold text-amber-400 mb-2">🛒 Vendeur</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Prénom"
+                        value={editAffectation.vendeur.prenom}
+                        onChange={(e) => setEditAffectation(prev => ({
+                          ...prev,
+                          vendeur: { ...prev.vendeur, prenom: e.target.value }
+                        }))}
+                        className="px-3 py-2 bg-neutral-800 rounded-lg"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Nom"
+                        value={editAffectation.vendeur.nom}
+                        onChange={(e) => setEditAffectation(prev => ({
+                          ...prev,
+                          vendeur: { ...prev.vendeur, nom: e.target.value }
+                        }))}
+                        className="px-3 py-2 bg-neutral-800 rounded-lg"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Serveur */}
+                  <div className="bg-blue-900/20 p-4 rounded-xl border border-blue-700">
+                    <label className="block text-sm font-bold text-blue-400 mb-2">🍺 Serveur</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Prénom"
+                        value={editAffectation.serveur.prenom}
+                        onChange={(e) => setEditAffectation(prev => ({
+                          ...prev,
+                          serveur: { ...prev.serveur, prenom: e.target.value }
+                        }))}
+                        className="px-3 py-2 bg-neutral-800 rounded-lg"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Nom"
+                        value={editAffectation.serveur.nom}
+                        onChange={(e) => setEditAffectation(prev => ({
+                          ...prev,
+                          serveur: { ...prev.serveur, nom: e.target.value }
+                        }))}
+                        className="px-3 py-2 bg-neutral-800 rounded-lg"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Runner */}
+                  <div className="bg-purple-900/20 p-4 rounded-xl border border-purple-700">
+                    <label className="block text-sm font-bold text-purple-400 mb-2">🏃 Runner</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Prénom"
+                        value={editAffectation.runner.prenom}
+                        onChange={(e) => setEditAffectation(prev => ({
+                          ...prev,
+                          runner: { ...prev.runner, prenom: e.target.value }
+                        }))}
+                        className="px-3 py-2 bg-neutral-800 rounded-lg"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Nom"
+                        value={editAffectation.runner.nom}
+                        onChange={(e) => setEditAffectation(prev => ({
+                          ...prev,
+                          runner: { ...prev.runner, nom: e.target.value }
+                        }))}
+                        className="px-3 py-2 bg-neutral-800 rounded-lg"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 mt-6">
+                  <button onClick={() => { setShowModalAffectation(false); setEditAffectation(null); }} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
+                  <button onClick={sauvegarderAffectation} className="flex-1 py-3 bg-indigo-600 rounded-lg font-medium">✓ Enregistrer</button>
                 </div>
               </div>
             </div>
           )}
+
         </div>
       );
     };
 
-    // ==================== RENDER ====================
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
 </body>
 </html>
