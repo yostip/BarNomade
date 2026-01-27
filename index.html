@@ -1684,7 +1684,7 @@
                     >
                       <option value="">Sélectionner...</option>
                       {barsNomades.map(bar => (
-                        <option key={bar.id} value={bar.id}>{bar.nom}</option>
+                        <option key={bar.id} value={bar.id}>{bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom}</option>
                       ))}
                     </select>
                   </div>
