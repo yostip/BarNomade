@@ -648,14 +648,8 @@
           }
         });
 
-        // Sync affectations
-        sessionRef.child('affectations').on('value', (snap) => {
-          if (snap.val()) {
-            setAffectations(snap.val());
-          } else {
-            setAffectations({});
-          }
-        });
+        // Sync affectations - dans le useEffect principal, on ne charge plus ici
+        // Les affectations sont maintenant chargées dans un useEffect séparé dépendant du jour
 
         // Sync fûts en attente (non terminés)
         sessionRef.child('futsEnAttente').on('value', (snap) => {
@@ -695,6 +689,25 @@
           clearInterval(interval);
         };
       }, [session, userName]);
+
+      // ==================== SYNC AFFECTATIONS PAR JOUR ====================
+      useEffect(() => {
+        if (!session || !jourActuel) return;
+        
+        const affectationsRef = database.ref(`sessions/${session}/affectations/jour${jourActuel}`);
+        
+        affectationsRef.on('value', (snap) => {
+          if (snap.val()) {
+            setAffectations(snap.val());
+          } else {
+            setAffectations({});
+          }
+        });
+
+        return () => {
+          affectationsRef.off();
+        };
+      }, [session, jourActuel]);
 
       // Fonction pour éjecter un utilisateur (admin only)
       const ejecterUtilisateur = async (user) => {
@@ -818,8 +831,10 @@
           return;
         }
         await database.ref(`sessions/${session}/barsNomades/${barId}`).remove();
-        // Supprimer aussi les affectations de ce bar
-        await database.ref(`sessions/${session}/affectations/${barId}`).remove();
+        // Supprimer aussi les affectations de ce bar pour tous les jours
+        for (let j = 1; j <= config.nombreJours; j++) {
+          await database.ref(`sessions/${session}/affectations/jour${j}/${barId}`).remove();
+        }
       };
 
       const attribuerFut = async (barId) => {
@@ -1119,7 +1134,7 @@
         if (!editAffectation) return;
         const { barId, creneauId, vendeur, serveur, runner } = editAffectation;
         
-        await database.ref(`sessions/${session}/affectations/${barId}/${creneauId}`).set({
+        await database.ref(`sessions/${session}/affectations/jour${jourActuel}/${barId}/${creneauId}`).set({
           vendeur, serveur, runner
         });
         
@@ -1128,7 +1143,7 @@
       };
 
       const supprimerAffectation = async (barId, creneauId) => {
-        await database.ref(`sessions/${session}/affectations/${barId}/${creneauId}`).remove();
+        await database.ref(`sessions/${session}/affectations/jour${jourActuel}/${barId}/${creneauId}`).remove();
       };
 
       const ouvrirParametresCreneaux = () => {
@@ -1221,13 +1236,14 @@
 
       const exporterBenevoles = () => {
         if (nbAffectations === 0) return;
-        const headers = ['Bar Nomade', 'Créneau', 'Vendeur', 'Serveur', 'Runner'];
+        const headers = ['Jour', 'Bar Nomade', 'Créneau', 'Vendeur', 'Serveur', 'Runner'];
         const rows = [];
         
         barsNomades.forEach(bar => {
           creneaux.forEach(creneau => {
             const aff = getAffectation(bar.id, creneau.id);
             rows.push([
+              `J${jourActuel}`,
               `"${bar.nom}"`,
               `"${creneau.label}"`,
               `"${aff ? getNomComplet(aff.vendeur) : '-'}"`,
@@ -1237,8 +1253,8 @@
           });
         });
 
-        exportCSV(`Planning_Benevoles_${formatDateFilename()}.csv`, 
-          headers.join(';') + '\n' + rows.join('\n') + '\n\nTotal affectations;' + nbAffectations);
+        exportCSV(`Planning_Benevoles_J${jourActuel}_${formatDateFilename()}.csv`, 
+          headers.join(';') + '\n' + rows.join('\n') + '\n\nJour;J' + jourActuel + '\nTotal affectations;' + nbAffectations);
       };
 
       // ==================== RENDER ====================
@@ -1965,6 +1981,7 @@
                 <div className="flex items-center gap-2">
                   <span className="text-xl">👥</span>
                   <h3 className="font-bold">Gestion Bénévoles</h3>
+                  <span className="ml-2 px-2 py-1 bg-indigo-700 rounded text-sm font-bold">J{jourActuel}</span>
                 </div>
                 <button onClick={() => setShowModalBenevoles(false)} className="text-2xl">✕</button>
               </div>
