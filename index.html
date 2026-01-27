@@ -99,6 +99,7 @@
         const savedSession = localStorage.getItem('gestionFuts_session');
         const savedUserName = localStorage.getItem('gestionFuts_userName');
         const savedIsAdmin = localStorage.getItem('gestionFuts_isAdmin');
+        const savedIsCreator = localStorage.getItem('gestionFuts_isCreator');
         
         if (savedSession && savedUserName) {
           // Vérifier que la session existe encore
@@ -107,13 +108,15 @@
               setRecentSession({
                 code: savedSession,
                 userName: savedUserName,
-                isAdmin: savedIsAdmin === 'true'
+                isAdmin: savedIsAdmin === 'true',
+                isCreator: savedIsCreator === 'true'
               });
             } else {
               // Session supprimée, nettoyer
               localStorage.removeItem('gestionFuts_session');
               localStorage.removeItem('gestionFuts_userName');
               localStorage.removeItem('gestionFuts_isAdmin');
+              localStorage.removeItem('gestionFuts_isCreator');
             }
             setCheckingRecent(false);
           });
@@ -132,7 +135,7 @@
           lastActive: Date.now()
         });
         
-        onJoinSession(recentSession.code, recentSession.userName, recentSession.isAdmin);
+        onJoinSession(recentSession.code, recentSession.userName, recentSession.isCreator);
       };
 
       // Oublier la session récente
@@ -140,6 +143,7 @@
         localStorage.removeItem('gestionFuts_session');
         localStorage.removeItem('gestionFuts_userName');
         localStorage.removeItem('gestionFuts_isAdmin');
+        localStorage.removeItem('gestionFuts_isCreator');
         setRecentSession(null);
       };
 
@@ -293,7 +297,8 @@
                     <p className="text-white font-mono text-lg">{recentSession.code}</p>
                     <p className="text-sm text-neutral-400">
                       Connecté en tant que <span className="text-green-300">{recentSession.userName}</span>
-                      {recentSession.isAdmin && <span className="ml-2 text-xs bg-green-800 px-2 py-0.5 rounded">Admin</span>}
+                      {recentSession.isCreator && <span className="ml-2 text-xs bg-red-800 px-2 py-0.5 rounded">Créateur</span>}
+                      {recentSession.isAdmin && !recentSession.isCreator && <span className="ml-2 text-xs bg-green-800 px-2 py-0.5 rounded">Admin</span>}
                     </p>
                   </div>
                   <button
@@ -525,6 +530,7 @@
 
       // UI States
       const [isAdmin, setIsAdmin] = useState(false);
+      const [isCreator, setIsCreator] = useState(false);
       const [showModalAdmin, setShowModalAdmin] = useState(false);
       const [adminPassword, setAdminPassword] = useState('');
       const [pendingAdminAction, setPendingAdminAction] = useState(null);
@@ -724,18 +730,20 @@
       const nbAffectations = compterAffectations();
 
       // ==================== ACTIONS ====================
-      const handleJoinSession = (code, name, isCreator = false) => {
+      const handleJoinSession = (code, name, isSessionCreator = false) => {
         setSession(code);
         setUserName(name);
-        // Si c'est le créateur de la session (Super Admin), il est automatiquement admin
-        if (isCreator) {
+        // Si c'est le créateur de la session (Super Admin), il est automatiquement admin ET créateur
+        if (isSessionCreator) {
           setIsAdmin(true);
+          setIsCreator(true);
         }
         // Sauvegarder dans localStorage pour proposer la reprise
         localStorage.setItem('gestionFuts_session', code);
         localStorage.setItem('gestionFuts_userName', name);
-        if (isCreator) {
+        if (isSessionCreator) {
           localStorage.setItem('gestionFuts_isAdmin', 'true');
+          localStorage.setItem('gestionFuts_isCreator', 'true');
         }
       };
 
@@ -745,6 +753,7 @@
           setSession(null);
           setUserName('');
           setIsAdmin(false);
+          setIsCreator(false);
           // On garde le localStorage pour proposer la reprise
         }
       };
@@ -754,6 +763,7 @@
         localStorage.removeItem('gestionFuts_session');
         localStorage.removeItem('gestionFuts_userName');
         localStorage.removeItem('gestionFuts_isAdmin');
+        localStorage.removeItem('gestionFuts_isCreator');
       };
 
       const demanderAccesAdmin = (action) => {
@@ -1973,12 +1983,22 @@
                 >
                   📊 Synthèse
                 </button>
-                <button 
-                  onClick={ouvrirParametresCreneaux}
-                  className={`flex-1 py-3 text-sm font-medium ${benevoleOnglet === 'parametres' ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400'}`}
-                >
-                  ⏰ Créneaux
-                </button>
+                {isCreator ? (
+                  <button 
+                    onClick={ouvrirParametresCreneaux}
+                    className={`flex-1 py-3 text-sm font-medium ${benevoleOnglet === 'parametres' ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400'}`}
+                  >
+                    ⏰ Créneaux
+                  </button>
+                ) : (
+                  <button 
+                    disabled
+                    className="flex-1 py-3 text-sm font-medium bg-neutral-900 text-neutral-600 cursor-not-allowed"
+                    title="Réservé au créateur de la session"
+                  >
+                    🔒 Créneaux
+                  </button>
+                )}
               </div>
 
               {/* Contenu */}
