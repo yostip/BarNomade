@@ -949,6 +949,22 @@
           // Annuler un RETOUR → Remettre le fût dans le bar
           futs.push({ type: mouvement.typeFut, addedAt: Date.now() });
           await barRef.set(futs);
+          
+          // Si c'était un RETOUR_REUTILISABLE, supprimer de la liste d'attente
+          if (mouvement.type === 'RETOUR_REUTILISABLE') {
+            // Chercher et supprimer le fût en attente correspondant
+            const futsAttenteSnapshot = await database.ref(`sessions/${session}/futsEnAttente`).once('value');
+            const futsAttenteData = futsAttenteSnapshot.val();
+            if (futsAttenteData) {
+              for (const [id, fut] of Object.entries(futsAttenteData)) {
+                // Correspondance par barId, typeFut et jour
+                if (fut.barId === mouvement.barId && fut.typeFut === mouvement.typeFut && fut.jourOrigine === mouvement.jour) {
+                  await database.ref(`sessions/${session}/futsEnAttente/${id}`).remove();
+                  break; // On n'en supprime qu'un
+                }
+              }
+            }
+          }
         }
       };
 
@@ -1214,14 +1230,22 @@
             </div>
           </div>
 
-          {/* Fûts en attente (non terminés à reprendre) */}
-          {futsEnAttente.length > 0 && (
+          {/* Fûts en attente du jour (info seulement - pas de reprise possible) */}
+          {futsEnAttente.filter(f => f.jourOrigine === jourActuel).length > 0 && (
+            <div className="mx-2 mt-2 p-3 bg-purple-900/30 rounded-lg border border-purple-700 flex items-center justify-between">
+              <span className="text-purple-300">♻️ Fûts non terminés aujourd'hui</span>
+              <span className="text-lg font-bold text-purple-400">{futsEnAttente.filter(f => f.jourOrigine === jourActuel).length}</span>
+            </div>
+          )}
+
+          {/* Fûts en attente des jours précédents (à reprendre en PRIORITÉ) */}
+          {futsEnAttente.filter(f => f.jourOrigine < jourActuel).length > 0 && (
             <div className="mx-2 mt-2 bg-purple-900/50 rounded-xl border-2 border-purple-500 overflow-hidden">
               <div className="bg-purple-800 px-3 py-2">
-                <span className="font-bold text-purple-100">⚠️ Fûts à reprendre en PRIORITÉ ({futsEnAttente.length})</span>
+                <span className="font-bold text-purple-100">⚠️ Fûts à reprendre en PRIORITÉ ({futsEnAttente.filter(f => f.jourOrigine < jourActuel).length})</span>
               </div>
               <div className="p-2 space-y-2">
-                {futsEnAttente.map(fut => (
+                {futsEnAttente.filter(f => f.jourOrigine < jourActuel).map(fut => (
                   <div key={fut.id} className="bg-purple-900/30 rounded-lg p-3 flex items-center justify-between">
                     <div>
                       <span className="font-medium">{fut.typeFut === 'biere' ? '🍺' : '🍎'} Non terminé du J{fut.jourOrigine}</span>
