@@ -80,6 +80,10 @@
       const [error, setError] = useState('');
       const [loading, setLoading] = useState(false);
       
+      // Session récente mémorisée
+      const [recentSession, setRecentSession] = useState(null);
+      const [checkingRecent, setCheckingRecent] = useState(true);
+      
       // Super Admin
       const [showSuperAdmin, setShowSuperAdmin] = useState(false);
       const [superAdminPassword, setSuperAdminPassword] = useState('');
@@ -89,6 +93,55 @@
       const [createPassword, setCreatePassword] = useState('');
       
       const SUPER_ADMIN_PASSWORD = "HF2026Admin";
+
+      // Vérifier s'il y a une session récente au chargement
+      React.useEffect(() => {
+        const savedSession = localStorage.getItem('gestionFuts_session');
+        const savedUserName = localStorage.getItem('gestionFuts_userName');
+        const savedIsAdmin = localStorage.getItem('gestionFuts_isAdmin');
+        
+        if (savedSession && savedUserName) {
+          // Vérifier que la session existe encore
+          database.ref(`sessions/${savedSession}`).once('value', (snap) => {
+            if (snap.exists()) {
+              setRecentSession({
+                code: savedSession,
+                userName: savedUserName,
+                isAdmin: savedIsAdmin === 'true'
+              });
+            } else {
+              // Session supprimée, nettoyer
+              localStorage.removeItem('gestionFuts_session');
+              localStorage.removeItem('gestionFuts_userName');
+              localStorage.removeItem('gestionFuts_isAdmin');
+            }
+            setCheckingRecent(false);
+          });
+        } else {
+          setCheckingRecent(false);
+        }
+      }, []);
+
+      // Reprendre la session récente
+      const reprendreSession = async () => {
+        if (!recentSession) return;
+        setLoading(true);
+        
+        // Mettre à jour lastActive dans Firebase
+        await database.ref(`sessions/${recentSession.code}/users/${recentSession.userName}`).update({
+          lastActive: Date.now()
+        });
+        
+        onJoinSession(recentSession.code, recentSession.userName, recentSession.isAdmin);
+      };
+
+      // Oublier la session récente
+      const oublierSession = () => {
+        localStorage.removeItem('gestionFuts_session');
+        localStorage.removeItem('gestionFuts_userName');
+        localStorage.removeItem('gestionFuts_isAdmin');
+        setRecentSession(null);
+      };
 
       const loadAllSessions = async () => {
         setLoadingSessions(true);
@@ -220,6 +273,38 @@
                 <h1 className="text-2xl font-bold text-white mb-2">Gestion Fûts</h1>
                 <p className="text-red-500 font-bold">HELLFEST 2026</p>
               </div>
+
+              {/* Session récente */}
+              {checkingRecent ? (
+                <div className="mb-6 p-4 bg-neutral-800 rounded-xl text-center">
+                  <p className="text-neutral-400">Chargement...</p>
+                </div>
+              ) : recentSession && (
+                <div className="mb-6 p-4 bg-green-900/30 border border-green-700 rounded-xl">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-green-400 font-bold">📂 Session récente</span>
+                    <button 
+                      onClick={oublierSession}
+                      className="text-xs text-neutral-500 hover:text-red-400"
+                      title="Oublier cette session"
+                    >✕</button>
+                  </div>
+                  <div className="mb-3">
+                    <p className="text-white font-mono text-lg">{recentSession.code}</p>
+                    <p className="text-sm text-neutral-400">
+                      Connecté en tant que <span className="text-green-300">{recentSession.userName}</span>
+                      {recentSession.isAdmin && <span className="ml-2 text-xs bg-green-800 px-2 py-0.5 rounded">Admin</span>}
+                    </p>
+                  </div>
+                  <button
+                    onClick={reprendreSession}
+                    disabled={loading}
+                    className="w-full py-3 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold transition-colors disabled:opacity-50"
+                  >
+                    {loading ? '⏳ Connexion...' : '🔄 Reprendre cette session'}
+                  </button>
+                </div>
+              )}
               
               <div className="space-y-4">
                 <button
@@ -646,6 +731,29 @@
         if (isCreator) {
           setIsAdmin(true);
         }
+        // Sauvegarder dans localStorage pour proposer la reprise
+        localStorage.setItem('gestionFuts_session', code);
+        localStorage.setItem('gestionFuts_userName', name);
+        if (isCreator) {
+          localStorage.setItem('gestionFuts_isAdmin', 'true');
+        }
+      };
+
+      // Fonction de déconnexion (retour à l'accueil)
+      const deconnexion = () => {
+        if (confirm('Voulez-vous vous déconnecter de cette session ?')) {
+          setSession(null);
+          setUserName('');
+          setIsAdmin(false);
+          // On garde le localStorage pour proposer la reprise
+        }
+      };
+
+      // Effacer la session mémorisée
+      const effacerSessionMemorisee = () => {
+        localStorage.removeItem('gestionFuts_session');
+        localStorage.removeItem('gestionFuts_userName');
+        localStorage.removeItem('gestionFuts_isAdmin');
       };
 
       const demanderAccesAdmin = (action) => {
@@ -1826,7 +1934,15 @@
                     ))}
                   </div>
                 </div>
-                <button onClick={() => setShowSessionInfo(false)} className="w-full py-3 bg-neutral-700 rounded-lg mt-4">Fermer</button>
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setShowSessionInfo(false)} className="flex-1 py-3 bg-neutral-700 rounded-lg">Fermer</button>
+                  <button 
+                    onClick={deconnexion} 
+                    className="flex-1 py-3 bg-red-900 hover:bg-red-800 rounded-lg text-red-300 border border-red-700"
+                  >
+                    🚪 Déconnexion
+                  </button>
+                </div>
               </div>
             </div>
           )}
