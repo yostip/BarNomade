@@ -624,6 +624,14 @@
       // Raccourcis rapides
       const [showQuickFut, setShowQuickFut] = useState(false);
 
+      // Tutoriel
+      const [showTutoriel, setShowTutoriel] = useState(false);
+      const [tutorielStep, setTutorielStep] = useState(0);
+
+      // Email bilan
+      const [adminEmail, setAdminEmail] = useState('');
+      const [showEmailConfig, setShowEmailConfig] = useState(false);
+
       // Timer refresh pour les fûts
       const [, setTimerRefresh] = useState(0);
 
@@ -670,6 +678,11 @@
         // Sync config
         sessionRef.child('config').on('value', (snap) => {
           if (snap.val()) setConfig(snap.val());
+        });
+
+        // Sync admin email
+        sessionRef.child('config/adminEmail').on('value', (snap) => {
+          if (snap.val()) setAdminEmail(snap.val());
         });
 
         // Sync bars
@@ -787,6 +800,62 @@
         }, 60000); // Refresh toutes les minutes
         return () => clearInterval(timerInterval);
       }, []);
+
+      // ==================== ENVOI BILAN EMAIL À 00H30 ====================
+      useEffect(() => {
+        if (!session || !isCreator || !adminEmail) return;
+        
+        let bilanEnvoye = false;
+        
+        const checkMidnight = setInterval(() => {
+          const now = new Date();
+          const heure = now.getHours();
+          const minute = now.getMinutes();
+          
+          // Déclencher à 00h30
+          if (heure === 0 && minute === 30 && !bilanEnvoye) {
+            bilanEnvoye = true;
+            envoyerBilanEmail();
+            
+            // Reset le flag après 2 minutes pour éviter les doublons
+            setTimeout(() => { bilanEnvoye = false; }, 120000);
+          }
+        }, 30000); // Vérifier toutes les 30 secondes
+        
+        return () => clearInterval(checkMidnight);
+      }, [session, isCreator, adminEmail, jourActuel]);
+
+      // Fonction pour envoyer le bilan par email
+      const envoyerBilanEmail = () => {
+        // Générer le PDF
+        const doc = exporterBilanPDF();
+        
+        // Télécharger le PDF automatiquement
+        doc.save(`Bilan_J${jourActuel}_${new Date().toISOString().split('T')[0]}.pdf`);
+        
+        // Préparer le contenu de l'email
+        const stats = getStatistiques();
+        const comparaison = getComparaisonJour();
+        
+        let sujet = `[Hellfest 2026] Bilan J${jourActuel} - ${stats.totalVentesJour.toFixed(2)}€`;
+        let corps = `Bilan automatique J${jourActuel} - ${new Date().toLocaleDateString('fr-FR')}%0D%0A%0D%0A`;
+        corps += `RÉSUMÉ:%0D%0A`;
+        corps += `- Ventes du jour: ${stats.totalVentesJour.toFixed(2)}€%0D%0A`;
+        corps += `- Fûts en circulation: ${stats.futsEnCirculation}%0D%0A`;
+        
+        if (comparaison) {
+          corps += `%0D%0ACOMPARAISON J${comparaison.jour} vs J${comparaison.jourMoins1}:%0D%0A`;
+          corps += `- Écart ventes: ${comparaison.ecartVentes >= 0 ? '+' : ''}${comparaison.ecartVentes.toFixed(2)}€ (${comparaison.ecartPourcent}%)%0D%0A`;
+        }
+        
+        corps += `%0D%0ALe PDF détaillé a été téléchargé automatiquement.%0D%0A`;
+        corps += `Session: ${session}`;
+        
+        // Ouvrir le client mail
+        window.open(`mailto:${adminEmail}?subject=${encodeURIComponent(sujet)}&body=${corps}`, '_blank');
+        
+        showToast('📧 Bilan généré - Vérifiez votre client mail');
+      };
 
       // ==================== SYNC ANNONCES ====================
       useEffect(() => {
@@ -975,6 +1044,15 @@
         if (isSessionCreator) {
           localStorage.setItem('gestionFuts_isAdmin', 'true');
           localStorage.setItem('gestionFuts_isCreator', 'true');
+        }
+        
+        // Afficher le tutoriel si c'est la première fois
+        const tutorielVu = localStorage.getItem('gestionFuts_tutorielVu');
+        if (!tutorielVu) {
+          setTimeout(() => {
+            setShowTutoriel(true);
+            setTutorielStep(0);
+          }, 500);
         }
       };
 
@@ -1616,6 +1694,65 @@
         };
       };
 
+      // ==================== COMPARAISON J vs J-1 ====================
+      const getComparaisonJour = () => {
+        if (jourActuel <= 1) return null;
+        
+        const heureActuelle = new Date().getHours();
+        const minuteActuelle = new Date().getMinutes();
+        
+        // Ventes du jour actuel jusqu'à maintenant
+        const ventesJour = historiqueVentes.filter(v => !v.annule && v.jour === jourActuel);
+        const totalJour = ventesJour.reduce((acc, v) => acc + (v.montant || 0), 0);
+        const nbTransactionsJour = ventesJour.length;
+        
+        // Ventes de J-1 à la même heure (approximation basée sur le timestamp)
+        const ventesJMoins1 = historiqueVentes.filter(v => {
+          if (v.annule || v.jour !== jourActuel - 1) return false;
+          const heureVente = new Date(v.timestamp).getHours();
+          const minuteVente = new Date(v.timestamp).getMinutes();
+          // Comparer si la vente était avant l'heure actuelle
+          return heureVente < heureActuelle || (heureVente === heureActuelle && minuteVente <= minuteActuelle);
+        });
+        const totalJMoins1 = ventesJMoins1.reduce((acc, v) => acc + (v.montant || 0), 0);
+        const nbTransactionsJMoins1 = ventesJMoins1.length;
+        
+        // Total final de J-1 (pour référence)
+        const totalFinalJMoins1 = historiqueVentes
+          .filter(v => !v.annule && v.jour === jourActuel - 1)
+          .reduce((acc, v) => acc + (v.montant || 0), 0);
+        
+        // Fûts sortis
+        const futsJour = historique.filter(h => !h.annule && h.jour === jourActuel && h.type === 'SORTIE').length;
+        const futsJMoins1 = historique.filter(h => {
+          if (h.annule || h.jour !== jourActuel - 1 || h.type !== 'SORTIE') return false;
+          const heureH = new Date(h.timestamp).getHours();
+          return heureH < heureActuelle || (heureH === heureActuelle);
+        }).length;
+        
+        // Calcul des écarts
+        const ecartVentes = totalJour - totalJMoins1;
+        const ecartPourcent = totalJMoins1 > 0 ? ((ecartVentes / totalJMoins1) * 100).toFixed(1) : 0;
+        const ecartFuts = futsJour - futsJMoins1;
+        
+        return {
+          jour: jourActuel,
+          jourMoins1: jourActuel - 1,
+          heureComparaison: `${heureActuelle}h${minuteActuelle.toString().padStart(2, '0')}`,
+          ventesJour: totalJour,
+          ventesJMoins1: totalJMoins1,
+          totalFinalJMoins1,
+          ecartVentes,
+          ecartPourcent: parseFloat(ecartPourcent),
+          tendance: ecartVentes >= 0 ? 'hausse' : 'baisse',
+          nbTransactionsJour,
+          nbTransactionsJMoins1,
+          futsJour,
+          futsJMoins1,
+          ecartFuts
+        };
+      };
+
       // ==================== PRÉVISION RUPTURE DE STOCK ====================
       const getPrevisionRupture = () => {
         const historiqueJour = historique.filter(h => !h.annule && h.jour === jourActuel);
@@ -1797,6 +1934,7 @@
         const mouvementsJour = historique.filter(h => !h.annule && h.jour === jourActuel);
         const incidents = historiqueVentes.filter(v => !v.annule && v.equipementDefaillant && v.jour === jourActuel);
         const totalVentes = ventesJour.reduce((acc, v) => acc + (v.montant || 0), 0);
+        const comparaison = getComparaisonJour();
         
         let y = 20;
         
@@ -1814,20 +1952,45 @@
         // Résumé des ventes
         doc.setFontSize(16);
         doc.setTextColor(16, 185, 129);
-        doc.text('💰 RÉSUMÉ DES VENTES', 20, y);
+        doc.text('RESUME DES VENTES', 20, y);
         y += 10;
         
         doc.setFontSize(12);
         doc.setTextColor(0);
-        doc.text(`Total du jour: ${totalVentes.toFixed(2)} €`, 25, y);
+        doc.text(`Total du jour: ${totalVentes.toFixed(2)} EUR`, 25, y);
         y += 7;
         doc.text(`Nombre de transactions: ${ventesJour.length}`, 25, y);
         y += 7;
-        doc.text(`Ticket moyen: ${ventesJour.length > 0 ? (totalVentes / ventesJour.length).toFixed(2) : 0} €`, 25, y);
-        y += 15;
+        doc.text(`Ticket moyen: ${ventesJour.length > 0 ? (totalVentes / ventesJour.length).toFixed(2) : 0} EUR`, 25, y);
+        y += 12;
+        
+        // Comparaison J vs J-1
+        if (comparaison) {
+          doc.setFontSize(14);
+          doc.setTextColor(comparaison.tendance === 'hausse' ? 34 : 220, comparaison.tendance === 'hausse' ? 197 : 38, comparaison.tendance === 'hausse' ? 94 : 38);
+          doc.text(`COMPARAISON J${comparaison.jour} vs J${comparaison.jourMoins1}`, 20, y);
+          y += 8;
+          
+          doc.setFontSize(11);
+          doc.setTextColor(0);
+          doc.text(`A ${comparaison.heureComparaison}, comparaison avec hier a la meme heure :`, 25, y);
+          y += 6;
+          doc.text(`Ventes J${comparaison.jour}: ${comparaison.ventesJour.toFixed(2)} EUR vs J${comparaison.jourMoins1}: ${comparaison.ventesJMoins1.toFixed(2)} EUR`, 25, y);
+          y += 6;
+          doc.text(`Ecart: ${comparaison.ecartVentes >= 0 ? '+' : ''}${comparaison.ecartVentes.toFixed(2)} EUR (${comparaison.ecartVentes >= 0 ? '+' : ''}${comparaison.ecartPourcent}%)`, 25, y);
+          y += 6;
+          doc.text(`Futs sortis: ${comparaison.futsJour} vs ${comparaison.futsJMoins1} hier (${comparaison.ecartFuts >= 0 ? '+' : ''}${comparaison.ecartFuts})`, 25, y);
+          y += 6;
+          if (comparaison.totalFinalJMoins1 > 0) {
+            doc.text(`Total final J${comparaison.jourMoins1}: ${comparaison.totalFinalJMoins1.toFixed(2)} EUR`, 25, y);
+            y += 6;
+          }
+          y += 6;
+        }
         
         // Ventes par bar
         doc.setFontSize(14);
+        doc.setTextColor(0);
         doc.text('Ventes par bar:', 25, y);
         y += 7;
         
@@ -1837,7 +2000,7 @@
             .filter(v => !v.annule && v.barId === bar.id && v.jour === jourActuel)
             .reduce((acc, v) => acc + (v.montant || 0), 0);
           doc.setFontSize(11);
-          doc.text(`${idx + 1}. ${bar.nom} (${bar.type}): ${ventesBarJour.toFixed(2)} €`, 30, y);
+          doc.text(`${idx + 1}. ${bar.nom} (${bar.type}): ${ventesBarJour.toFixed(2)} EUR`, 30, y);
           y += 6;
         });
         y += 10;
@@ -1845,7 +2008,7 @@
         // Mouvements de fûts
         doc.setFontSize(16);
         doc.setTextColor(147, 51, 234);
-        doc.text('🍺 MOUVEMENTS DE FÛTS', 20, y);
+        doc.text('MOUVEMENTS DE FUTS', 20, y);
         y += 10;
         
         doc.setFontSize(12);
@@ -1859,24 +2022,24 @@
         y += 7;
         doc.text(`Retours vides: ${retoursVides}`, 25, y);
         y += 7;
-        doc.text(`Retours cassés: ${retoursCasses}`, 25, y);
+        doc.text(`Retours casses: ${retoursCasses}`, 25, y);
         y += 7;
-        doc.text(`Fûts non terminés: ${retoursNonTermines}`, 25, y);
+        doc.text(`Futs non termines: ${retoursNonTermines}`, 25, y);
         y += 7;
-        doc.text(`Stock restant - Bière: ${stockBiere} | Cidre: ${stockCidre}`, 25, y);
+        doc.text(`Stock restant - Biere: ${stockBiere} | Cidre: ${stockCidre}`, 25, y);
         y += 15;
         
         // Incidents
         if (incidents.length > 0) {
           doc.setFontSize(16);
           doc.setTextColor(234, 88, 12);
-          doc.text('⚠️ INCIDENTS SIGNALÉS', 20, y);
+          doc.text('INCIDENTS SIGNALES', 20, y);
           y += 10;
           
           doc.setFontSize(11);
           doc.setTextColor(0);
           incidents.forEach(inc => {
-            doc.text(`• ${inc.barNom} - Équip. ${inc.numEquipement || 'N/A'}: ${inc.commentaire || 'Pas de détail'}`, 25, y);
+            doc.text(`- ${inc.barNom} - Equip. ${inc.numEquipement || 'N/A'}: ${inc.commentaire || 'Pas de detail'}`, 25, y);
             y += 6;
           });
         }
@@ -1884,8 +2047,14 @@
         // Footer
         doc.setFontSize(9);
         doc.setTextColor(128);
-        doc.text(`Généré le ${new Date().toLocaleString('fr-FR')} - Session ${session}`, 105, 285, { align: 'center' });
+        doc.text(`Genere le ${new Date().toLocaleString('fr-FR')} - Session ${session}`, 105, 285, { align: 'center' });
         
+        return doc;
+      };
+      
+      // Fonction pour télécharger le PDF
+      const telechargerBilanPDF = () => {
+        const doc = exporterBilanPDF();
         doc.save(`Bilan_J${jourActuel}_${new Date().toISOString().split('T')[0]}.pdf`);
         showToast('📄 PDF exporté');
       };
@@ -2579,11 +2748,36 @@
                       }} className="px-4 py-2 bg-red-600 rounded-lg text-sm">+</button>
                     </div>
                   </div>
+
+                  {isCreator && (
+                    <>
+                      <hr className="border-neutral-700" />
+                      <div>
+                        <h4 className="font-bold mb-2">📧 Email bilan automatique</h4>
+                        <p className="text-xs text-neutral-400 mb-2">Recevez le bilan PDF à 00h30 chaque jour</p>
+                        <input 
+                          type="email" 
+                          id="adminEmailInput"
+                          defaultValue={adminEmail} 
+                          placeholder="email@exemple.com" 
+                          className="w-full px-4 py-2 bg-neutral-800 rounded-lg text-sm" 
+                        />
+                        <p className="text-xs text-neutral-500 mt-2">
+                          💡 À 00h30, le PDF sera généré et votre client mail s'ouvrira avec le bilan en lien.
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="flex gap-2 mt-6">
                   <button onClick={() => setShowParametres(false)} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
                   <button onClick={() => {
+                    const newEmail = document.getElementById('adminEmailInput')?.value || '';
+                    if (newEmail !== adminEmail) {
+                      setAdminEmail(newEmail);
+                      database.ref(`sessions/${session}/config/adminEmail`).set(newEmail);
+                    }
                     sauvegarderConfig({
                       stockInitialBiere: parseInt(document.getElementById('stockBiere').value) || 50,
                       stockInitialCidre: parseInt(document.getElementById('stockCidre').value) || 20,
@@ -2682,7 +2876,7 @@
                 <h3 className="text-xl font-bold">📈 Dashboard J{jourActuel}</h3>
                 <div className="flex items-center gap-2">
                   {isCreator && (
-                    <button onClick={exporterBilanPDF} className="px-3 py-1 bg-red-600 rounded-lg text-sm">
+                    <button onClick={telechargerBilanPDF} className="px-3 py-1 bg-red-600 rounded-lg text-sm">
                       📄 Export PDF
                     </button>
                   )}
@@ -2696,6 +2890,7 @@
                   const classement = getClassementBars();
                   const previsions = getPrevisionRupture();
                   const activiteParHeure = getActiviteParHeure();
+                  const comparaison = getComparaisonJour();
                   
                   return (
                     <div className="space-y-4 max-w-2xl mx-auto">
@@ -2710,6 +2905,45 @@
                           <p className="text-3xl font-bold text-emerald-400">{stats.totalVentesJour.toFixed(2)} €</p>
                         </div>
                       </div>
+
+                      {/* Comparaison J vs J-1 */}
+                      {comparaison && (
+                        <div className={`p-4 rounded-xl border ${comparaison.tendance === 'hausse' ? 'bg-green-900/30 border-green-700' : 'bg-red-900/30 border-red-700'}`}>
+                          <h4 className="font-bold mb-3">📈 Comparaison J{comparaison.jour} vs J{comparaison.jourMoins1}</h4>
+                          <p className="text-xs text-neutral-400 mb-3">À {comparaison.heureComparaison}, hier vous aviez :</p>
+                          
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <p className="text-sm text-neutral-300">Ventes</p>
+                              <div className="flex items-baseline gap-2">
+                                <span className="text-2xl font-bold">{comparaison.ventesJour.toFixed(0)}€</span>
+                                <span className={`text-sm ${comparaison.tendance === 'hausse' ? 'text-green-400' : 'text-red-400'}`}>
+                                  {comparaison.tendance === 'hausse' ? '▲' : '▼'} {Math.abs(comparaison.ecartPourcent)}%
+                                </span>
+                              </div>
+                              <p className="text-xs text-neutral-500">vs {comparaison.ventesJMoins1.toFixed(0)}€ hier</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-neutral-300">Fûts sortis</p>
+                              <div className="flex items-baseline gap-2">
+                                <span className="text-2xl font-bold">{comparaison.futsJour}</span>
+                                <span className={`text-sm ${comparaison.ecartFuts >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                  {comparaison.ecartFuts >= 0 ? '+' : ''}{comparaison.ecartFuts}
+                                </span>
+                              </div>
+                              <p className="text-xs text-neutral-500">vs {comparaison.futsJMoins1} hier</p>
+                            </div>
+                          </div>
+                          
+                          {comparaison.totalFinalJMoins1 > 0 && (
+                            <div className="mt-3 pt-3 border-t border-white/10">
+                              <p className="text-xs text-neutral-400">
+                                Total final J{comparaison.jourMoins1} : <span className="font-bold text-white">{comparaison.totalFinalJMoins1.toFixed(2)}€</span>
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {/* Prévision de rupture de stock */}
                       <div className="bg-gradient-to-r from-amber-900/30 to-orange-900/30 p-4 rounded-xl border border-amber-700">
@@ -2921,6 +3155,12 @@
                   </div>
                 </div>
                 <div className="flex gap-2 mt-4">
+                  <button 
+                    onClick={() => { setShowSessionInfo(false); setShowTutoriel(true); setTutorielStep(0); }} 
+                    className="py-3 px-4 bg-blue-900 hover:bg-blue-800 rounded-lg text-sm"
+                  >
+                    📖 Tutoriel
+                  </button>
                   <button onClick={() => setShowSessionInfo(false)} className="flex-1 py-3 bg-neutral-700 rounded-lg">Fermer</button>
                   <button 
                     onClick={deconnexion} 
@@ -3324,6 +3564,192 @@
                   <button onClick={() => { setShowModalAffectation(false); setEditAffectation(null); }} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
                   <button onClick={sauvegarderAffectation} className="flex-1 py-3 bg-indigo-600 rounded-lg font-medium">✓ Enregistrer</button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ==================== TUTORIEL INTÉGRÉ ==================== */}
+          {showTutoriel && (
+            <div className="fixed inset-0 bg-black/95 flex items-center justify-center p-4 z-[60]">
+              <div className="bg-neutral-900 rounded-2xl w-full max-w-md overflow-hidden">
+                {/* Contenu du tutoriel selon l'étape */}
+                {tutorielStep === 0 && (
+                  <div className="p-6 text-center">
+                    <div className="text-6xl mb-4">🍺</div>
+                    <h2 className="text-2xl font-bold text-red-500 mb-2">Bienvenue !</h2>
+                    <p className="text-neutral-300 mb-4">
+                      Application de gestion des fûts pour les Bars Nomades du Hellfest 2026
+                    </p>
+                    <p className="text-sm text-neutral-400">
+                      Suivez ce petit guide pour découvrir les fonctionnalités principales.
+                    </p>
+                  </div>
+                )}
+                
+                {tutorielStep === 1 && (
+                  <div className="p-6">
+                    <div className="text-4xl mb-4 text-center">➕</div>
+                    <h3 className="text-xl font-bold mb-3 text-center">Attribuer un fût</h3>
+                    <div className="bg-amber-900/30 p-4 rounded-xl mb-4">
+                      <p className="text-sm text-neutral-300 mb-2">
+                        Utilisez le bouton <span className="bg-amber-600 px-2 py-1 rounded text-xs font-bold">➕ Fût</span> en bas de l'écran
+                      </p>
+                      <p className="text-xs text-neutral-400">
+                        Sélectionnez ensuite le bar qui reçoit le fût.
+                      </p>
+                    </div>
+                    <div className="bg-neutral-800 p-3 rounded-lg">
+                      <p className="text-xs text-neutral-400">💡 Les couleurs indiquent la durée :</p>
+                      <div className="flex gap-2 mt-2 text-xs">
+                        <span className="bg-neutral-700 px-2 py-1 rounded">&lt;1h30</span>
+                        <span className="bg-yellow-500 text-black px-2 py-1 rounded">1h30-3h</span>
+                        <span className="bg-orange-500 px-2 py-1 rounded">3h-4h</span>
+                        <span className="bg-red-600 px-2 py-1 rounded">&gt;4h</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {tutorielStep === 2 && (
+                  <div className="p-6">
+                    <div className="text-4xl mb-4 text-center">↩️</div>
+                    <h3 className="text-xl font-bold mb-3 text-center">Retourner un fût</h3>
+                    <div className="bg-blue-900/30 p-4 rounded-xl mb-4">
+                      <p className="text-sm text-neutral-300 mb-2">
+                        Cliquez sur <span className="bg-black/30 px-2 py-1 rounded text-xs">↩️ Retour</span> à côté du fût
+                      </p>
+                    </div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-center gap-2 bg-neutral-800 p-2 rounded">
+                        <span>📦</span>
+                        <span className="text-neutral-300">Fût vide</span>
+                        <span className="text-xs text-neutral-500 ml-auto">Le plus courant</span>
+                      </div>
+                      <div className="flex items-center gap-2 bg-neutral-800 p-2 rounded">
+                        <span>💥</span>
+                        <span className="text-neutral-300">Fût cassé</span>
+                        <span className="text-xs text-neutral-500 ml-auto">Problème technique</span>
+                      </div>
+                      <div className="flex items-center gap-2 bg-neutral-800 p-2 rounded">
+                        <span>♻️</span>
+                        <span className="text-neutral-300">Non terminé</span>
+                        <span className="text-xs text-neutral-500 ml-auto">Reste du contenu</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {tutorielStep === 3 && (
+                  <div className="p-6">
+                    <div className="text-4xl mb-4 text-center">💰</div>
+                    <h3 className="text-xl font-bold mb-3 text-center">Enregistrer une vente</h3>
+                    <div className="bg-emerald-900/30 p-4 rounded-xl mb-4">
+                      <p className="text-sm text-neutral-300 mb-2">
+                        Utilisez le bouton <span className="bg-emerald-600 px-2 py-1 rounded text-xs font-bold">💰 Vente</span> en bas de l'écran
+                      </p>
+                    </div>
+                    <div className="bg-neutral-800 p-3 rounded-lg text-sm">
+                      <p className="text-neutral-300 mb-2">Renseignez :</p>
+                      <ul className="text-neutral-400 text-xs space-y-1 ml-4">
+                        <li>• Le bar nomade</li>
+                        <li>• Le montant en €</li>
+                        <li>• Optionnel : détails (pintes, pichets...)</li>
+                        <li>• Si équipement défaillant : cochez la case</li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+                
+                {tutorielStep === 4 && (
+                  <div className="p-6">
+                    <div className="text-4xl mb-4 text-center">👥</div>
+                    <h3 className="text-xl font-bold mb-3 text-center">Gérer les bénévoles</h3>
+                    <div className="bg-indigo-900/30 p-4 rounded-xl mb-4">
+                      <p className="text-sm text-neutral-300 mb-2">
+                        Cliquez sur <span className="bg-indigo-600 px-2 py-1 rounded text-xs font-bold">👥 Bénévoles</span>
+                      </p>
+                    </div>
+                    <div className="bg-neutral-800 p-3 rounded-lg text-sm">
+                      <p className="text-neutral-300 mb-2">Vous pouvez :</p>
+                      <ul className="text-neutral-400 text-xs space-y-1 ml-4">
+                        <li>• Affecter vendeur, serveur, runner par créneau</li>
+                        <li>• Voir la synthèse de tous les bars</li>
+                        <li>• Copier le planning du jour précédent</li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+                
+                {tutorielStep === 5 && (
+                  <div className="p-6 text-center">
+                    <div className="text-6xl mb-4">🎉</div>
+                    <h3 className="text-xl font-bold mb-3">C'est parti !</h3>
+                    <p className="text-neutral-300 mb-4">
+                      Vous êtes prêt à utiliser l'application.
+                    </p>
+                    <div className="bg-neutral-800 p-3 rounded-lg text-sm text-left">
+                      <p className="text-neutral-400 mb-2">💡 Astuces :</p>
+                      <ul className="text-xs text-neutral-500 space-y-1">
+                        <li>• Cliquez sur le code session pour voir les infos</li>
+                        <li>• Les admins ont accès aux statistiques (📈)</li>
+                        <li>• Le tutoriel est accessible dans les infos session</li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Navigation */}
+                <div className="bg-neutral-800 px-6 py-4 flex items-center justify-between">
+                  <div className="flex gap-1">
+                    {[0, 1, 2, 3, 4, 5].map(i => (
+                      <div 
+                        key={i} 
+                        className={`w-2 h-2 rounded-full ${tutorielStep === i ? 'bg-red-500' : 'bg-neutral-600'}`}
+                      />
+                    ))}
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    {tutorielStep > 0 && (
+                      <button 
+                        onClick={() => setTutorielStep(prev => prev - 1)}
+                        className="px-4 py-2 bg-neutral-700 rounded-lg text-sm"
+                      >
+                        ← Précédent
+                      </button>
+                    )}
+                    
+                    {tutorielStep < 5 ? (
+                      <button 
+                        onClick={() => setTutorielStep(prev => prev + 1)}
+                        className="px-4 py-2 bg-red-600 rounded-lg text-sm font-medium"
+                      >
+                        Suivant →
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => {
+                          setShowTutoriel(false);
+                          localStorage.setItem('gestionFuts_tutorielVu', 'true');
+                        }}
+                        className="px-4 py-2 bg-green-600 rounded-lg text-sm font-medium"
+                      >
+                        ✓ Commencer
+                      </button>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Bouton passer */}
+                <button 
+                  onClick={() => {
+                    setShowTutoriel(false);
+                    localStorage.setItem('gestionFuts_tutorielVu', 'true');
+                  }}
+                  className="w-full py-2 text-neutral-500 text-sm hover:text-neutral-300"
+                >
+                  Passer le tutoriel
+                </button>
               </div>
             </div>
           )}
