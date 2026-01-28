@@ -1621,13 +1621,29 @@
         const historiqueJour = historique.filter(h => !h.annule && h.jour === jourActuel);
         const sorties = historiqueJour.filter(h => h.type === 'SORTIE');
         
-        if (sorties.length < 2) return null;
+        // Fonction pour formater les heures en texte lisible
+        const formatHeures = (heures) => {
+          if (!isFinite(heures) || heures > 100) return null;
+          const h = Math.floor(heures);
+          const m = Math.round((heures - h) * 60);
+          if (h > 0 && m > 0) return `${h}h${m.toString().padStart(2, '0')}`;
+          if (h > 0) return `${h}h`;
+          return `${m}min`;
+        };
+        
+        // Valeurs par défaut si pas assez de données
+        const defaultResult = {
+          biere: { rythme: '0.0', tempsRestant: null, alerte: false },
+          cidre: { rythme: '0.0', tempsRestant: null, alerte: false }
+        };
+        
+        if (sorties.length < 2) return defaultResult;
         
         // Calculer le temps écoulé depuis la première sortie
         const premiereSortie = Math.min(...sorties.map(s => s.timestamp));
         const heuresEcoulees = (Date.now() - premiereSortie) / (1000 * 60 * 60);
         
-        if (heuresEcoulees < 0.5) return null;
+        if (heuresEcoulees < 0.5) return defaultResult;
         
         // Rythme par type de fût
         const sortiesBiere = sorties.filter(s => s.typeFut === 'biere').length;
@@ -1641,13 +1657,13 @@
         
         return {
           biere: {
-            rythme: rythmeBiere,
-            heuresRestantes: heuresRestantesBiere,
+            rythme: rythmeBiere.toFixed(1),
+            tempsRestant: formatHeures(heuresRestantesBiere),
             alerte: heuresRestantesBiere < 4
           },
           cidre: {
-            rythme: rythmeCidre,
-            heuresRestantes: heuresRestantesCidre,
+            rythme: rythmeCidre.toFixed(1),
+            tempsRestant: formatHeures(heuresRestantesCidre),
             alerte: heuresRestantesCidre < 4
           }
         };
