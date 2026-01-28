@@ -27,6 +27,9 @@
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
   
+  <!-- QR Code Generator -->
+  <script src="https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js"></script>
+  
   <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
@@ -207,6 +210,14 @@
           setError('Mot de passe incorrect. Seul un administrateur peut créer une session.');
           return;
         }
+
+        // Vérifier la limite de sessions (2 max par navigateur)
+        const createdSessions = JSON.parse(localStorage.getItem('gestionFuts_createdSessions') || '[]');
+        if (createdSessions.length >= 2) {
+          setError(`Limite atteinte : vous avez déjà créé ${createdSessions.length} session(s). Maximum autorisé : 2.`);
+          return;
+        }
+
         setLoading(true);
         setError('');
         
@@ -219,7 +230,8 @@
             stockInitialCidre: 20,
             maxFutsParBar: 3,
             nombreJours: 4,
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            createdBy: userName.trim()
           },
           creneaux: [
             { id: 'c1', label: '11h30-13h' },
@@ -235,6 +247,11 @@
         };
 
         await sessionRef.set(initialData);
+        
+        // Enregistrer la session créée dans localStorage
+        createdSessions.push({ code: newCode, createdAt: Date.now() });
+        localStorage.setItem('gestionFuts_createdSessions', JSON.stringify(createdSessions));
+        
         onJoinSession(newCode, userName.trim(), true); // true = créateur = Super Admin
       };
 
@@ -569,6 +586,43 @@
       const [showModalReinit, setShowModalReinit] = useState(false);
       const [reinitPassword, setReinitPassword] = useState('');
 
+      // Toast notifications
+      const [toast, setToast] = useState(null);
+      const showToast = (message, type = 'success') => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), 3000);
+      };
+
+      // Loading states (anti-double-clic)
+      const [isLoading, setIsLoading] = useState(false);
+
+      // Filtres historique
+      const [filtreJourHistorique, setFiltreJourHistorique] = useState('tous');
+      const [filtreJourVentes, setFiltreJourVentes] = useState('tous');
+      const [rechercheHistorique, setRechercheHistorique] = useState('');
+      const [rechercheVentes, setRechercheVentes] = useState('');
+
+      // Dashboard
+      const [showDashboard, setShowDashboard] = useState(false);
+
+      // QR Code
+      const [showQRCode, setShowQRCode] = useState(false);
+      const qrCanvasRef = useRef(null);
+
+      // Logs d'audit
+      const [auditLogs, setAuditLogs] = useState([]);
+
+      // Couleurs des bars
+      const barColors = [
+        'bg-red-600', 'bg-blue-600', 'bg-green-600', 'bg-yellow-600', 
+        'bg-purple-600', 'bg-pink-600', 'bg-indigo-600', 'bg-teal-600',
+        'bg-orange-600', 'bg-cyan-600'
+      ];
+      const getBarColor = (barId) => {
+        const index = barsNomades.findIndex(b => b.id === barId);
+        return barColors[index % barColors.length];
+      };
+
       const ADMIN_PASSWORD = "Hellfest26";
 
       // ==================== FIREBASE SYNC ====================
@@ -709,6 +763,27 @@
         };
       }, [session, jourActuel]);
 
+      // ==================== SYNC AUDIT LOGS ====================
+      useEffect(() => {
+        if (!session) return;
+        
+        const auditRef = database.ref(`sessions/${session}/auditLogs`);
+        
+        auditRef.orderByChild('timestamp').limitToLast(100).on('value', (snap) => {
+          if (snap.val()) {
+            const logs = Object.entries(snap.val()).map(([id, data]) => ({ id, ...data }));
+            logs.sort((a, b) => b.timestamp - a.timestamp);
+            setAuditLogs(logs);
+          } else {
+            setAuditLogs([]);
+          }
+        });
+
+        return () => {
+          auditRef.off();
+        };
+      }, [session]);
+
       // Fonction pour éjecter un utilisateur (admin only)
       const ejecterUtilisateur = async (user) => {
         if (!isAdmin || user === userName) return;
@@ -837,7 +912,21 @@
         }
       };
 
+      // Fonction pour ajouter un log d'audit
+      const addAuditLog = async (action, details) => {
+        const log = {
+          action,
+          details,
+          user: userName,
+          timestamp: Date.now(),
+          jour: jourActuel
+        };
+        await database.ref(`sessions/${session}/auditLogs`).push(log);
+      };
+
       const attribuerFut = async (barId) => {
+        if (isLoading) return;
+        
         const bar = barsNomades.find(b => b.id === barId);
         if (!bar) return;
 
@@ -848,27 +937,39 @@
         if (typeFut === 'biere' && stockBiere <= 0) return;
         if (typeFut === 'cidre' && stockCidre <= 0) return;
 
-        const newFut = {
-          id: Date.now().toString(),
-          type: typeFut,
-          dateAttribution: Date.now()
-        };
+        setIsLoading(true);
+        try {
+          const newFut = {
+            id: Date.now().toString(),
+            type: typeFut,
+            dateAttribution: Date.now()
+          };
 
-        const updatedFuts = [...currentFuts, newFut];
-        await database.ref(`sessions/${session}/barsNomades/${barId}/futs`).set(updatedFuts);
+          const updatedFuts = [...currentFuts, newFut];
+          await database.ref(`sessions/${session}/barsNomades/${barId}/futs`).set(updatedFuts);
 
-        await database.ref(`sessions/${session}/historique`).push({
-          type: 'SORTIE',
-          typeFut,
-          barId,
-          barNom: bar.nom,
-          jour: jourActuel,
-          timestamp: Date.now(),
-          user: userName
-        });
+          await database.ref(`sessions/${session}/historique`).push({
+            type: 'SORTIE',
+            typeFut,
+            barId,
+            barNom: bar.nom,
+            jour: jourActuel,
+            timestamp: Date.now(),
+            user: userName
+          });
+
+          await addAuditLog('SORTIE_FUT', `${typeFut === 'biere' ? '🍺 Bière' : '🍎 Cidre'} → ${bar.nom}`);
+          showToast(`✅ Fût ${typeFut === 'biere' ? '🍺' : '🍎'} attribué à ${bar.nom}`);
+        } catch (error) {
+          showToast('❌ Erreur lors de l\'attribution', 'error');
+        } finally {
+          setTimeout(() => setIsLoading(false), 1000);
+        }
       };
 
       const retournerFut = async (barId, futIndex, typeRetour, commentaire = '') => {
+        if (isLoading) return;
+        
         const bar = barsNomades.find(b => b.id === barId);
         if (!bar) return;
 
@@ -876,37 +977,52 @@
         const fut = currentFuts[futIndex];
         if (!fut) return;
 
-        const updatedFuts = currentFuts.filter((_, i) => i !== futIndex);
-        await database.ref(`sessions/${session}/barsNomades/${barId}/futs`).set(updatedFuts.length > 0 ? updatedFuts : null);
+        setIsLoading(true);
+        try {
+          const updatedFuts = currentFuts.filter((_, i) => i !== futIndex);
+          await database.ref(`sessions/${session}/barsNomades/${barId}/futs`).set(updatedFuts.length > 0 ? updatedFuts : null);
 
-        // Enregistrer dans l'historique
-        const historiqueData = {
-          type: typeRetour,
-          typeFut: fut.type,
-          barId,
-          barNom: bar.nom,
-          jour: jourActuel,
-          timestamp: Date.now(),
-          user: userName
-        };
-
-        // Ajouter le commentaire si présent (obligatoire pour cassé)
-        if (commentaire.trim()) {
-          historiqueData.commentaire = commentaire.trim();
-        }
-
-        await database.ref(`sessions/${session}/historique`).push(historiqueData);
-
-        // Si fût non terminé, le mettre en attente pour le jour suivant
-        if (typeRetour === 'RETOUR_REUTILISABLE') {
-          await database.ref(`sessions/${session}/futsEnAttente`).push({
+          // Enregistrer dans l'historique
+          const historiqueData = {
+            type: typeRetour,
             typeFut: fut.type,
             barId,
             barNom: bar.nom,
-            jourOrigine: jourActuel,
+            jour: jourActuel,
             timestamp: Date.now(),
             user: userName
-          });
+          };
+
+          // Ajouter le commentaire si présent (obligatoire pour cassé)
+          if (commentaire.trim()) {
+            historiqueData.commentaire = commentaire.trim();
+          }
+
+          await database.ref(`sessions/${session}/historique`).push(historiqueData);
+
+          // Si fût non terminé, le mettre en attente pour le jour suivant
+          if (typeRetour === 'RETOUR_REUTILISABLE') {
+            await database.ref(`sessions/${session}/futsEnAttente`).push({
+              typeFut: fut.type,
+              barId,
+              barNom: bar.nom,
+              jourOrigine: jourActuel,
+              timestamp: Date.now(),
+              user: userName
+            });
+          }
+
+          const typeLabels = {
+            'RETOUR_VIDE': '📦 Vide',
+            'RETOUR_CASSE': '💥 Cassé',
+            'RETOUR_REUTILISABLE': '♻️ Non terminé'
+          };
+          await addAuditLog('RETOUR_FUT', `${typeLabels[typeRetour]} de ${bar.nom}`);
+          showToast(`✅ Fût retourné (${typeLabels[typeRetour]})`);
+        } catch (error) {
+          showToast('❌ Erreur lors du retour', 'error');
+        } finally {
+          setTimeout(() => setIsLoading(false), 1000);
         }
 
         // Reset modal
@@ -949,34 +1065,45 @@
       };
 
       const enregistrerVente = async () => {
-        if (!venteBarId) return;
+        if (!venteBarId || isLoading) return;
         const bar = barsNomades.find(b => b.id === venteBarId);
 
-        await database.ref(`sessions/${session}/historiqueVentes`).push({
-          barId: venteBarId,
-          barNom: bar?.nom || 'Bar inconnu',
-          montant: parseFloat(venteMontant) || 0,
-          nbPintes: parseInt(venteNbPintes) || 0,
-          nbPichets: parseInt(venteNbPichets) || 0,
-          nbGobelets: parseInt(venteNbGobelets) || 0,
-          equipementDefaillant: venteEquipDefaillant,
-          numEquipement: venteEquipDefaillant ? venteNumEquipement.trim() : '',
-          donneesPartielles: venteEquipDefaillant ? venteDonneesPartielles : false,
-          commentaire: venteCommentaire,
-          jour: jourActuel,
-          timestamp: Date.now(),
-          user: userName
-        });
+        setIsLoading(true);
+        try {
+          const montant = parseFloat(venteMontant) || 0;
+          await database.ref(`sessions/${session}/historiqueVentes`).push({
+            barId: venteBarId,
+            barNom: bar?.nom || 'Bar inconnu',
+            montant,
+            nbPintes: parseInt(venteNbPintes) || 0,
+            nbPichets: parseInt(venteNbPichets) || 0,
+            nbGobelets: parseInt(venteNbGobelets) || 0,
+            equipementDefaillant: venteEquipDefaillant,
+            numEquipement: venteEquipDefaillant ? venteNumEquipement.trim() : '',
+            donneesPartielles: venteEquipDefaillant ? venteDonneesPartielles : false,
+            commentaire: venteCommentaire,
+            jour: jourActuel,
+            timestamp: Date.now(),
+            user: userName
+          });
 
-        setShowModalVentes(false);
-        setVenteMontant('');
-        setVenteNbPintes('');
-        setVenteNbPichets('');
-        setVenteNbGobelets('');
-        setVenteEquipDefaillant(false);
-        setVenteNumEquipement('');
-        setVenteDonneesPartielles(false);
-        setVenteCommentaire('');
+          await addAuditLog('VENTE', `${montant.toFixed(2)}€ - ${bar?.nom || 'Bar inconnu'}`);
+          showToast(`✅ Vente enregistrée (${montant.toFixed(2)}€)`);
+          
+          setShowModalVentes(false);
+          setVenteMontant('');
+          setVenteNbPintes('');
+          setVenteNbPichets('');
+          setVenteNbGobelets('');
+          setVenteEquipDefaillant(false);
+          setVenteNumEquipement('');
+          setVenteDonneesPartielles(false);
+          setVenteCommentaire('');
+        } catch (error) {
+          showToast('❌ Erreur lors de l\'enregistrement', 'error');
+        } finally {
+          setTimeout(() => setIsLoading(false), 1000);
+        }
       };
 
       const sauvegarderConfig = async (newConfig) => {
@@ -1257,6 +1384,113 @@
           headers.join(';') + '\n' + rows.join('\n') + '\n\nJour;J' + jourActuel + '\nTotal affectations;' + nbAffectations);
       };
 
+      // ==================== COPIER AFFECTATIONS DU JOUR PRÉCÉDENT ====================
+      const copierAffectationsJourPrecedent = async () => {
+        if (jourActuel <= 1) return;
+        
+        const jourSource = jourActuel - 1;
+        const snapshot = await database.ref(`sessions/${session}/affectations/jour${jourSource}`).once('value');
+        const affectationsSource = snapshot.val();
+        
+        if (!affectationsSource) {
+          showToast(`❌ Aucune affectation trouvée pour J${jourSource}`, 'error');
+          return;
+        }
+
+        if (!confirm(`Copier les affectations de J${jourSource} vers J${jourActuel} ?\n\nLes affectations existantes seront écrasées.`)) return;
+
+        setIsLoading(true);
+        try {
+          await database.ref(`sessions/${session}/affectations/jour${jourActuel}`).set(affectationsSource);
+          await addAuditLog('COPIE_AFFECTATIONS', `Copie de J${jourSource} vers J${jourActuel}`);
+          showToast(`✅ Affectations copiées depuis J${jourSource}`);
+        } catch (error) {
+          showToast('❌ Erreur lors de la copie', 'error');
+        } finally {
+          setTimeout(() => setIsLoading(false), 1000);
+        }
+      };
+
+      // ==================== QR CODE ====================
+      const genererQRCode = useCallback(() => {
+        if (qrCanvasRef.current && session) {
+          const url = `${window.location.origin}${window.location.pathname}?session=${session}`;
+          QRCode.toCanvas(qrCanvasRef.current, url, {
+            width: 200,
+            margin: 2,
+            color: { dark: '#000000', light: '#ffffff' }
+          });
+        }
+      }, [session]);
+
+      useEffect(() => {
+        if (showQRCode) {
+          setTimeout(genererQRCode, 100);
+        }
+      }, [showQRCode, genererQRCode]);
+
+      // ==================== FILTRES HISTORIQUE ====================
+      const historiqueFiltre = historique.filter(h => {
+        // Filtre par jour
+        if (filtreJourHistorique !== 'tous' && h.jour !== parseInt(filtreJourHistorique)) {
+          return false;
+        }
+        // Filtre par recherche
+        if (rechercheHistorique.trim()) {
+          const search = rechercheHistorique.toLowerCase();
+          return (
+            h.barNom?.toLowerCase().includes(search) ||
+            h.user?.toLowerCase().includes(search) ||
+            h.type?.toLowerCase().includes(search) ||
+            h.commentaire?.toLowerCase().includes(search)
+          );
+        }
+        return true;
+      });
+
+      const ventesFiltre = historiqueVentes.filter(v => {
+        // Filtre par jour
+        if (filtreJourVentes !== 'tous' && v.jour !== parseInt(filtreJourVentes)) {
+          return false;
+        }
+        // Filtre par recherche
+        if (rechercheVentes.trim()) {
+          const search = rechercheVentes.toLowerCase();
+          return (
+            v.barNom?.toLowerCase().includes(search) ||
+            v.user?.toLowerCase().includes(search) ||
+            v.commentaire?.toLowerCase().includes(search)
+          );
+        }
+        return true;
+      });
+
+      // ==================== STATISTIQUES DASHBOARD ====================
+      const getStatistiques = () => {
+        const aujourdHui = historique.filter(h => !h.annule && h.jour === jourActuel);
+        const futsEnCirculation = aujourdHui.filter(h => h.type === 'SORTIE').length - 
+          aujourdHui.filter(h => h.type.startsWith('RETOUR_')).length;
+        
+        const ventesParJour = {};
+        for (let j = 1; j <= config.nombreJours; j++) {
+          ventesParJour[j] = historiqueVentes
+            .filter(v => !v.annule && v.jour === j)
+            .reduce((acc, v) => acc + (v.montant || 0), 0);
+        }
+
+        const barsSansFut = barsNomades.filter(b => !b.futs || b.futs.length === 0);
+        const equipementsDefaillants = historiqueVentes
+          .filter(v => !v.annule && v.equipementDefaillant && v.jour === jourActuel);
+
+        return {
+          futsEnCirculation,
+          ventesParJour,
+          barsSansFut,
+          equipementsDefaillants,
+          totalVentesJour: ventesParJour[jourActuel] || 0
+        };
+      };
+
       // ==================== RENDER ====================
       if (!session) {
         return <SessionScreen onJoinSession={handleJoinSession} />;
@@ -1264,6 +1498,15 @@
 
       return (
         <div className="min-h-screen bg-black text-white">
+          {/* Toast Notification */}
+          {toast && (
+            <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-[100] px-6 py-3 rounded-xl shadow-lg animate-pulse ${
+              toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'
+            }`}>
+              <p className="font-medium text-white">{toast.message}</p>
+            </div>
+          )}
+
           {/* Header */}
           <div className="bg-neutral-900 border-b border-red-900 p-3">
             <div className="flex items-center justify-between mb-2">
@@ -1319,6 +1562,9 @@
               </button>
               {isAdmin && (
                 <>
+                  <button onClick={() => setShowDashboard(true)} className="py-2 px-3 bg-amber-600 rounded-lg text-sm font-medium">
+                    📈 Stats
+                  </button>
                   <button onClick={() => setShowHistoriqueVentes(!showHistoriqueVentes)} className={`py-2 px-3 rounded-lg text-sm ${showHistoriqueVentes ? 'bg-teal-500' : 'bg-teal-700'}`}>
                     📊 {historiqueVentes.length}
                   </button>
@@ -1417,21 +1663,41 @@
           {isAdmin && showHistoriqueVentes && (
             <div className="mx-2 mt-2 bg-teal-900/30 rounded-xl border border-teal-700 overflow-hidden">
               <div className="bg-teal-900/50 px-3 py-2 flex items-center justify-between">
-                <span className="font-bold text-teal-300">📊 Historique Ventes</span>
+                <span className="font-bold text-teal-300">📊 Historique Ventes ({ventesFiltre.length}/{historiqueVentes.length})</span>
                 <button onClick={() => setShowHistoriqueVentes(false)} className="text-teal-400">✕</button>
               </div>
+              {/* Filtres */}
+              <div className="px-3 py-2 bg-teal-900/30 border-b border-teal-800 flex flex-wrap gap-2">
+                <select 
+                  value={filtreJourVentes} 
+                  onChange={(e) => setFiltreJourVentes(e.target.value)}
+                  className="px-2 py-1 bg-teal-800 rounded text-sm"
+                >
+                  <option value="tous">Tous les jours</option>
+                  {Array.from({ length: config.nombreJours }, (_, i) => (
+                    <option key={i + 1} value={i + 1}>J{i + 1} ({historiqueVentes.filter(v => v.jour === i + 1).length})</option>
+                  ))}
+                </select>
+                <input 
+                  type="text"
+                  value={rechercheVentes}
+                  onChange={(e) => setRechercheVentes(e.target.value)}
+                  placeholder="🔍 Rechercher..."
+                  className="flex-1 px-2 py-1 bg-teal-800 rounded text-sm min-w-[120px]"
+                />
+              </div>
               <div className="max-h-64 overflow-y-auto">
-                {historiqueVentes.length === 0 ? (
+                {ventesFiltre.length === 0 ? (
                   <p className="text-neutral-500 text-sm text-center py-4">Aucune vente</p>
                 ) : (
-                  historiqueVentes.map(v => (
+                  ventesFiltre.map(v => (
                     <div key={v.id} className={`px-3 py-2 border-b border-teal-800 last:border-0 ${v.annule ? 'opacity-50 bg-red-900/20' : ''}`}>
                       <div className="flex items-center justify-between">
                         <span className={`font-medium ${v.annule ? 'line-through text-red-400' : 'text-teal-300'}`}>
                           {(v.montant || 0).toFixed(2)} €
                         </span>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-neutral-400">{v.barNom}</span>
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${getBarColor(v.barId)}`}>{v.barNom}</span>
                           {!v.annule && (
                             <button 
                               onClick={() => annulerVente(v.id)}
@@ -1445,7 +1711,7 @@
                       </div>
                       <div className="flex items-center justify-between text-xs text-neutral-500">
                         <span className={v.annule ? 'line-through' : ''}>🍺{v.nbPintes || 0} 🍶{v.nbPichets || 0} 🥤{v.nbGobelets || 0}</span>
-                        <span>J{v.jour} • {new Date(v.timestamp).toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'})}</span>
+                        <span>J{v.jour} • {new Date(v.timestamp).toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'})} • {v.user}</span>
                       </div>
                       {v.annule && (
                         <div className="mt-1 text-xs text-red-400">
@@ -1468,14 +1734,34 @@
           {isAdmin && showHistorique && (
             <div className="mx-2 mt-2 bg-purple-900/30 rounded-xl border border-purple-700 overflow-hidden">
               <div className="bg-purple-900/50 px-3 py-2 flex items-center justify-between">
-                <span className="font-bold text-purple-300">📋 Historique Fûts</span>
+                <span className="font-bold text-purple-300">📋 Historique Fûts ({historiqueFiltre.length}/{historique.length})</span>
                 <button onClick={() => setShowHistorique(false)} className="text-purple-400">✕</button>
               </div>
+              {/* Filtres */}
+              <div className="px-3 py-2 bg-purple-900/30 border-b border-purple-800 flex flex-wrap gap-2">
+                <select 
+                  value={filtreJourHistorique} 
+                  onChange={(e) => setFiltreJourHistorique(e.target.value)}
+                  className="px-2 py-1 bg-purple-800 rounded text-sm"
+                >
+                  <option value="tous">Tous les jours</option>
+                  {Array.from({ length: config.nombreJours }, (_, i) => (
+                    <option key={i + 1} value={i + 1}>J{i + 1} ({historique.filter(h => h.jour === i + 1).length})</option>
+                  ))}
+                </select>
+                <input 
+                  type="text"
+                  value={rechercheHistorique}
+                  onChange={(e) => setRechercheHistorique(e.target.value)}
+                  placeholder="🔍 Rechercher..."
+                  className="flex-1 px-2 py-1 bg-purple-800 rounded text-sm min-w-[120px]"
+                />
+              </div>
               <div className="max-h-64 overflow-y-auto">
-                {historique.length === 0 ? (
+                {historiqueFiltre.length === 0 ? (
                   <p className="text-neutral-500 text-sm text-center py-4">Aucun mouvement</p>
                 ) : (
-                  historique.map(h => {
+                  historiqueFiltre.map(h => {
                     const typeLabels = {
                       'SORTIE': { icon: '📤', label: 'Sortie', color: 'text-green-400' },
                       'RETOUR_VIDE': { icon: '📦', label: 'Vide', color: 'text-blue-400' },
@@ -1489,7 +1775,7 @@
                         <div className="flex items-center justify-between">
                           <span className={`font-medium ${h.annule ? 'line-through text-red-400' : t.color}`}>{t.icon} {t.label}</span>
                           <div className="flex items-center gap-2">
-                            <span className="text-xs text-neutral-400">{h.barNom}</span>
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${getBarColor(h.barId)}`}>{h.barNom}</span>
                             {!h.annule && (
                               <button 
                                 onClick={() => annulerMouvementFut(h.id)}
@@ -1567,14 +1853,14 @@
 
                       <button
                         onClick={() => attribuerFut(bar.id)}
-                        disabled={!canAdd}
+                        disabled={!canAdd || isLoading}
                         className={`w-full py-3 rounded-lg font-medium transition-all ${
-                          canAdd 
+                          canAdd && !isLoading
                             ? (isBiere ? 'bg-amber-600 hover:bg-amber-500' : 'bg-orange-600 hover:bg-orange-500')
                             : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
                         }`}
                       >
-                        ➕ Attribuer un fût
+                        {isLoading ? '⏳ En cours...' : '➕ Attribuer un fût'}
                       </button>
                     </div>
                   </div>
@@ -1774,7 +2060,13 @@
 
                 <div className="flex gap-2 mt-6">
                   <button onClick={() => setShowModalVentes(false)} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
-                  <button onClick={enregistrerVente} className="flex-1 py-3 bg-emerald-600 rounded-lg font-medium">✓ Enregistrer</button>
+                  <button 
+                    onClick={enregistrerVente} 
+                    disabled={isLoading || !venteBarId}
+                    className="flex-1 py-3 bg-emerald-600 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isLoading ? '⏳ En cours...' : '✓ Enregistrer'}
+                  </button>
                 </div>
               </div>
             </div>
@@ -1927,6 +2219,115 @@
             </div>
           )}
 
+          {/* Modal Dashboard Statistiques */}
+          {showDashboard && (
+            <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
+              <div className="bg-neutral-900 rounded-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold">📈 Dashboard J{jourActuel}</h3>
+                  <button onClick={() => setShowDashboard(false)} className="text-neutral-400 hover:text-white text-2xl">✕</button>
+                </div>
+                
+                {(() => {
+                  const stats = getStatistiques();
+                  return (
+                    <div className="space-y-4">
+                      {/* Résumé rapide */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-blue-900/30 p-4 rounded-xl border border-blue-700">
+                          <p className="text-sm text-blue-300">Fûts en circulation (J{jourActuel})</p>
+                          <p className="text-3xl font-bold text-blue-400">{stats.futsEnCirculation}</p>
+                        </div>
+                        <div className="bg-emerald-900/30 p-4 rounded-xl border border-emerald-700">
+                          <p className="text-sm text-emerald-300">Ventes J{jourActuel}</p>
+                          <p className="text-3xl font-bold text-emerald-400">{stats.totalVentesJour.toFixed(2)} €</p>
+                        </div>
+                      </div>
+
+                      {/* Graphique ventes par jour */}
+                      <div className="bg-neutral-800 p-4 rounded-xl">
+                        <h4 className="font-bold mb-3">💰 Ventes par jour</h4>
+                        <div className="space-y-2">
+                          {Array.from({ length: config.nombreJours }, (_, i) => {
+                            const jour = i + 1;
+                            const montant = stats.ventesParJour[jour] || 0;
+                            const maxMontant = Math.max(...Object.values(stats.ventesParJour), 1);
+                            const pourcentage = (montant / maxMontant) * 100;
+                            return (
+                              <div key={jour} className="flex items-center gap-3">
+                                <span className={`w-8 text-sm font-bold ${jour === jourActuel ? 'text-amber-400' : 'text-neutral-400'}`}>J{jour}</span>
+                                <div className="flex-1 bg-neutral-700 rounded-full h-6 overflow-hidden">
+                                  <div 
+                                    className={`h-full ${jour === jourActuel ? 'bg-amber-500' : 'bg-emerald-600'} transition-all`}
+                                    style={{ width: `${pourcentage}%` }}
+                                  />
+                                </div>
+                                <span className="w-20 text-right text-sm font-medium">{montant.toFixed(2)} €</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Alertes */}
+                      {(stats.barsSansFut.length > 0 || stats.equipementsDefaillants.length > 0) && (
+                        <div className="bg-red-900/30 p-4 rounded-xl border border-red-700">
+                          <h4 className="font-bold mb-2 text-red-400">⚠️ Alertes</h4>
+                          {stats.barsSansFut.length > 0 && (
+                            <div className="mb-2">
+                              <p className="text-sm text-red-300">Bars sans fût :</p>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {stats.barsSansFut.map(bar => (
+                                  <span key={bar.id} className="text-xs bg-red-800 px-2 py-1 rounded">{bar.nom}</span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {stats.equipementsDefaillants.length > 0 && (
+                            <div>
+                              <p className="text-sm text-orange-300">Équipements défaillants signalés aujourd'hui : {stats.equipementsDefaillants.length}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Logs d'audit récents */}
+                      <div className="bg-neutral-800 p-4 rounded-xl">
+                        <h4 className="font-bold mb-2">📝 Dernières actions</h4>
+                        <div className="space-y-1 max-h-32 overflow-y-auto">
+                          {auditLogs.slice(0, 10).map(log => (
+                            <div key={log.id} className="text-xs flex items-center justify-between py-1 border-b border-neutral-700 last:border-0">
+                              <span className="text-neutral-300">{log.action}: {log.details}</span>
+                              <span className="text-neutral-500">{log.user}</span>
+                            </div>
+                          ))}
+                          {auditLogs.length === 0 && <p className="text-neutral-500 text-sm">Aucune action enregistrée</p>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <button onClick={() => setShowDashboard(false)} className="w-full py-3 bg-neutral-700 rounded-lg mt-4">Fermer</button>
+              </div>
+            </div>
+          )}
+
+          {/* Modal QR Code */}
+          {showQRCode && (
+            <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
+              <div className="bg-neutral-900 rounded-2xl w-full max-w-sm p-6 text-center">
+                <h3 className="text-xl font-bold mb-4">📱 QR Code de la session</h3>
+                <p className="text-neutral-400 text-sm mb-4">Scannez ce code pour rejoindre</p>
+                <div className="bg-white p-4 rounded-xl inline-block mb-4">
+                  <canvas ref={qrCanvasRef} />
+                </div>
+                <p className="text-2xl font-mono font-bold text-red-400 mb-4">{session}</p>
+                <button onClick={() => setShowQRCode(false)} className="w-full py-3 bg-neutral-700 rounded-lg">Fermer</button>
+              </div>
+            </div>
+          )}
+
           {/* Modal Session Info */}
           {showSessionInfo && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
@@ -1935,6 +2336,12 @@
                 <div className="bg-neutral-800 p-4 rounded-xl mb-4 text-center">
                   <p className="text-sm text-neutral-400">Code à partager</p>
                   <p className="text-2xl font-mono font-bold text-red-400">{session}</p>
+                  <button 
+                    onClick={() => { setShowSessionInfo(false); setShowQRCode(true); }}
+                    className="mt-2 px-4 py-2 bg-blue-600 rounded-lg text-sm"
+                  >
+                    📱 Afficher QR Code
+                  </button>
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-2">
@@ -2031,6 +2438,20 @@
                       </div>
                     ) : (
                       <>
+                        {/* Bouton copier depuis jour précédent */}
+                        {jourActuel > 1 && nbAffectations === 0 && (
+                          <div className="mb-4 p-3 bg-amber-900/30 border border-amber-700 rounded-xl text-center">
+                            <p className="text-sm text-amber-300 mb-2">Aucune affectation pour J{jourActuel}</p>
+                            <button
+                              onClick={copierAffectationsJourPrecedent}
+                              disabled={isLoading}
+                              className="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg text-sm font-medium disabled:opacity-50"
+                            >
+                              📋 Copier depuis J{jourActuel - 1}
+                            </button>
+                          </div>
+                        )}
+                        
                         {/* Sélecteur de bar */}
                         <div className="flex items-center justify-center gap-4 mb-6">
                           <button 
