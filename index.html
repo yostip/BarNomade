@@ -27,6 +27,9 @@
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
   
+  <!-- jsPDF pour export PDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  
   <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
@@ -620,6 +623,42 @@
       // Logs d'audit
       const [auditLogs, setAuditLogs] = useState([]);
 
+      // Mode hors-ligne
+      const [offlineQueue, setOfflineQueue] = useState([]);
+      const [isSyncing, setIsSyncing] = useState(false);
+
+      // Annonces
+      const [annonces, setAnnonces] = useState([]);
+      const [showAnnonceInput, setShowAnnonceInput] = useState(false);
+      const [nouvelleAnnonce, setNouvelleAnnonce] = useState('');
+
+      // Raccourcis rapides
+      const [showQuickFut, setShowQuickFut] = useState(false);
+
+      // Timer refresh pour les fûts
+      const [, setTimerRefresh] = useState(0);
+
+      // Fonction pour formater la durée
+      const formatDuration = (timestamp) => {
+        const now = Date.now();
+        const diff = now - timestamp;
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        if (hours > 0) {
+          return `${hours}h${minutes.toString().padStart(2, '0')}`;
+        }
+        return `${minutes}min`;
+      };
+
+      // Couleur selon durée du fût
+      const getFutDurationColor = (timestamp) => {
+        const hours = (Date.now() - timestamp) / (1000 * 60 * 60);
+        if (hours >= 6) return 'bg-red-600 text-white';
+        if (hours >= 4) return 'bg-orange-500 text-white';
+        if (hours >= 2) return 'bg-yellow-500 text-black';
+        return 'bg-neutral-700';
+      };
+
       // Couleurs des bars
       const barColors = [
         'bg-red-600', 'bg-blue-600', 'bg-green-600', 'bg-yellow-600', 
@@ -751,6 +790,113 @@
           clearInterval(interval);
         };
       }, [session, userName]);
+
+      // ==================== TIMER REFRESH POUR FÛTS ====================
+      useEffect(() => {
+        const timerInterval = setInterval(() => {
+          setTimerRefresh(prev => prev + 1);
+        }, 60000); // Refresh toutes les minutes
+        return () => clearInterval(timerInterval);
+      }, []);
+
+      // ==================== SYNC ANNONCES ====================
+      useEffect(() => {
+        if (!session) return;
+        
+        const annoncesRef = database.ref(`sessions/${session}/annonces`);
+        annoncesRef.orderByChild('timestamp').limitToLast(5).on('value', (snap) => {
+          if (snap.val()) {
+            const anns = Object.entries(snap.val()).map(([id, data]) => ({ id, ...data }));
+            anns.sort((a, b) => b.timestamp - a.timestamp);
+            setAnnonces(anns);
+          } else {
+            setAnnonces([]);
+          }
+        });
+
+        return () => annoncesRef.off();
+      }, [session]);
+
+      // ==================== SYNC OFFLINE QUEUE ====================
+      useEffect(() => {
+        if (isOnline && offlineQueue.length > 0 && !isSyncing) {
+          syncOfflineQueue();
+        }
+      }, [isOnline, offlineQueue]);
+
+      // Fonction de sync hors-ligne
+      const syncOfflineQueue = async () => {
+        if (offlineQueue.length === 0) return;
+        setIsSyncing(true);
+        
+        for (const action of offlineQueue) {
+          try {
+            if (action.type === 'SORTIE') {
+              await database.ref(`sessions/${session}/barsNomades/${action.barId}/futs`).set(action.futs);
+              await database.ref(`sessions/${session}/historique`).push(action.historique);
+            } else if (action.type === 'VENTE') {
+              await database.ref(`sessions/${session}/historiqueVentes`).push(action.data);
+            }
+          } catch (error) {
+            console.error('Erreur sync:', error);
+          }
+        }
+        
+        setOfflineQueue([]);
+        setIsSyncing(false);
+        showToast(`✅ ${offlineQueue.length} action(s) synchronisée(s)`);
+      };
+
+      // Ajouter à la queue offline
+      const addToOfflineQueue = (action) => {
+        setOfflineQueue(prev => [...prev, action]);
+        showToast(`⏳ Action en attente (hors-ligne)`, 'warning');
+      };
+
+      // ==================== BACKUP AUTOMATIQUE ====================
+      useEffect(() => {
+        if (!session) return;
+        
+        const backupInterval = setInterval(() => {
+          const backupData = {
+            session,
+            timestamp: Date.now(),
+            config,
+            barsNomades,
+            historique,
+            historiqueVentes,
+            affectations,
+            jourActuel
+          };
+          
+          const backups = JSON.parse(localStorage.getItem('gestionFuts_backups') || '[]');
+          backups.unshift(backupData);
+          // Garder seulement les 24 derniers backups
+          const trimmedBackups = backups.slice(0, 24);
+          localStorage.setItem('gestionFuts_backups', JSON.stringify(trimmedBackups));
+          
+          console.log('Backup automatique effectué:', new Date().toLocaleString());
+        }, 3600000); // Toutes les heures
+
+        // Backup immédiat au chargement
+        setTimeout(() => {
+          const backupData = {
+            session,
+            timestamp: Date.now(),
+            config,
+            barsNomades,
+            historique,
+            historiqueVentes,
+            affectations,
+            jourActuel
+          };
+          const backups = JSON.parse(localStorage.getItem('gestionFuts_backups') || '[]');
+          backups.unshift(backupData);
+          localStorage.setItem('gestionFuts_backups', JSON.stringify(backups.slice(0, 24)));
+        }, 5000);
+
+        return () => clearInterval(backupInterval);
+      }, [session, config, barsNomades, historique, historiqueVentes, affectations, jourActuel]);
 
       // ==================== SYNC AFFECTATIONS PAR JOUR ====================
       useEffect(() => {
@@ -1481,6 +1627,264 @@
         };
       };
 
+      // ==================== PRÉVISION RUPTURE DE STOCK ====================
+      const getPrevisionRupture = () => {
+        const historiqueJour = historique.filter(h => !h.annule && h.jour === jourActuel);
+        const sorties = historiqueJour.filter(h => h.type === 'SORTIE');
+        
+        if (sorties.length < 2) return null;
+        
+        // Calculer le temps écoulé depuis la première sortie
+        const premiereSortie = Math.min(...sorties.map(s => s.timestamp));
+        const heuresEcoulees = (Date.now() - premiereSortie) / (1000 * 60 * 60);
+        
+        if (heuresEcoulees < 0.5) return null;
+        
+        // Rythme par type de fût
+        const sortiesBiere = sorties.filter(s => s.typeFut === 'biere').length;
+        const sortiesCidre = sorties.filter(s => s.typeFut === 'cidre').length;
+        
+        const rythmeBiere = sortiesBiere / heuresEcoulees;
+        const rythmeCidre = sortiesCidre / heuresEcoulees;
+        
+        const heuresRestantesBiere = rythmeBiere > 0 ? stockBiere / rythmeBiere : Infinity;
+        const heuresRestantesCidre = rythmeCidre > 0 ? stockCidre / rythmeCidre : Infinity;
+        
+        return {
+          biere: {
+            rythme: rythmeBiere,
+            heuresRestantes: heuresRestantesBiere,
+            alerte: heuresRestantesBiere < 4
+          },
+          cidre: {
+            rythme: rythmeCidre,
+            heuresRestantes: heuresRestantesCidre,
+            alerte: heuresRestantesCidre < 4
+          }
+        };
+      };
+
+      // ==================== STATISTIQUES PAR HEURE ====================
+      const getStatsParHeure = () => {
+        const statsParHeure = {};
+        const statsParBarEtHeure = {};
+        
+        // Initialiser les heures de 10h à 2h du matin
+        for (let h = 10; h <= 26; h++) {
+          const heure = h > 24 ? h - 24 : h;
+          statsParHeure[heure] = { sorties: 0, retours: 0 };
+        }
+        
+        historique.filter(h => !h.annule && h.jour === jourActuel).forEach(h => {
+          const heure = new Date(h.timestamp).getHours();
+          if (!statsParHeure[heure]) statsParHeure[heure] = { sorties: 0, retours: 0 };
+          
+          if (h.type === 'SORTIE') {
+            statsParHeure[heure].sorties++;
+          } else if (h.type.startsWith('RETOUR_')) {
+            statsParHeure[heure].retours++;
+          }
+          
+          // Stats par bar et heure
+          if (!statsParBarEtHeure[h.barId]) statsParBarEtHeure[h.barId] = {};
+          if (!statsParBarEtHeure[h.barId][heure]) statsParBarEtHeure[h.barId][heure] = { sorties: 0, retours: 0 };
+          if (h.type === 'SORTIE') {
+            statsParBarEtHeure[h.barId][heure].sorties++;
+          } else if (h.type.startsWith('RETOUR_')) {
+            statsParBarEtHeure[h.barId][heure].retours++;
+          }
+        });
+        
+        return { statsParHeure, statsParBarEtHeure };
+      };
+
+      // ==================== CLASSEMENT DES BARS ====================
+      const getClassementBars = () => {
+        return barsNomades.map(bar => {
+          const ventesBar = historiqueVentes
+            .filter(v => !v.annule && v.barId === bar.id)
+            .reduce((acc, v) => acc + (v.montant || 0), 0);
+          
+          const futsConsommes = historique
+            .filter(h => !h.annule && h.barId === bar.id && h.type.startsWith('RETOUR_'))
+            .length;
+          
+          const sorties = historique
+            .filter(h => !h.annule && h.barId === bar.id && h.type === 'SORTIE');
+          
+          const retours = historique
+            .filter(h => !h.annule && h.barId === bar.id && h.type.startsWith('RETOUR_'));
+          
+          // Temps moyen de rotation (entre sortie et retour)
+          let rotationMoyenne = 0;
+          if (retours.length > 0) {
+            // Simplification : prendre le temps moyen basé sur les fûts retournés
+            const tempsTotal = retours.reduce((acc, r) => {
+              const sortieCorrespondante = sorties.find(s => s.timestamp < r.timestamp);
+              if (sortieCorrespondante) {
+                return acc + (r.timestamp - sortieCorrespondante.timestamp);
+              }
+              return acc;
+            }, 0);
+            rotationMoyenne = tempsTotal / retours.length / (1000 * 60 * 60); // en heures
+          }
+          
+          return {
+            ...bar,
+            chiffreAffaires: ventesBar,
+            futsConsommes,
+            rotationMoyenne
+          };
+        }).sort((a, b) => b.chiffreAffaires - a.chiffreAffaires);
+      };
+
+      // ==================== ACTIVITÉ PAR HEURE ====================
+      const getActiviteParHeure = () => {
+        const heures = [];
+        // De 10h à 23h, puis minuit (0h)
+        const heuresJournee = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0];
+        
+        for (const h of heuresJournee) {
+          const mouvementsHeure = historique.filter(m => {
+            if (m.annule || m.jour !== jourActuel) return false;
+            const heureMouvement = new Date(m.timestamp).getHours();
+            return heureMouvement === h;
+          });
+          
+          heures.push({
+            heure: h,
+            heureAffichage: h === 0 ? '00' : h.toString(),
+            sorties: mouvementsHeure.filter(m => m.type === 'SORTIE').length,
+            retours: mouvementsHeure.filter(m => m.type.startsWith('RETOUR_')).length
+          });
+        }
+        return heures;
+      };
+
+      // ==================== ENVOI D'ANNONCE ====================
+      const envoyerAnnonce = async () => {
+        if (!nouvelleAnnonce.trim() || !isCreator) return;
+        
+        await database.ref(`sessions/${session}/annonces`).push({
+          message: nouvelleAnnonce.trim(),
+          auteur: userName,
+          timestamp: Date.now(),
+          jour: jourActuel
+        });
+        
+        setNouvelleAnnonce('');
+        setShowAnnonceInput(false);
+        showToast('📢 Annonce envoyée');
+      };
+
+      // Supprimer une annonce
+      const supprimerAnnonce = async (annonceId) => {
+        if (!isCreator) return;
+        await database.ref(`sessions/${session}/annonces/${annonceId}`).remove();
+      };
+
+      // ==================== EXPORT PDF BILAN JOURNALIER ====================
+      const exporterBilanPDF = () => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        
+        const ventesJour = historiqueVentes.filter(v => !v.annule && v.jour === jourActuel);
+        const mouvementsJour = historique.filter(h => !h.annule && h.jour === jourActuel);
+        const incidents = historiqueVentes.filter(v => !v.annule && v.equipementDefaillant && v.jour === jourActuel);
+        const totalVentes = ventesJour.reduce((acc, v) => acc + (v.montant || 0), 0);
+        
+        let y = 20;
+        
+        // Titre
+        doc.setFontSize(20);
+        doc.setTextColor(220, 38, 38);
+        doc.text('HELLFEST 2026 - BILAN JOURNALIER', 105, y, { align: 'center' });
+        y += 10;
+        
+        doc.setFontSize(14);
+        doc.setTextColor(0);
+        doc.text(`Jour ${jourActuel} - ${new Date().toLocaleDateString('fr-FR')}`, 105, y, { align: 'center' });
+        y += 15;
+        
+        // Résumé des ventes
+        doc.setFontSize(16);
+        doc.setTextColor(16, 185, 129);
+        doc.text('💰 RÉSUMÉ DES VENTES', 20, y);
+        y += 10;
+        
+        doc.setFontSize(12);
+        doc.setTextColor(0);
+        doc.text(`Total du jour: ${totalVentes.toFixed(2)} €`, 25, y);
+        y += 7;
+        doc.text(`Nombre de transactions: ${ventesJour.length}`, 25, y);
+        y += 7;
+        doc.text(`Ticket moyen: ${ventesJour.length > 0 ? (totalVentes / ventesJour.length).toFixed(2) : 0} €`, 25, y);
+        y += 15;
+        
+        // Ventes par bar
+        doc.setFontSize(14);
+        doc.text('Ventes par bar:', 25, y);
+        y += 7;
+        
+        const classement = getClassementBars();
+        classement.forEach((bar, idx) => {
+          const ventesBarJour = historiqueVentes
+            .filter(v => !v.annule && v.barId === bar.id && v.jour === jourActuel)
+            .reduce((acc, v) => acc + (v.montant || 0), 0);
+          doc.setFontSize(11);
+          doc.text(`${idx + 1}. ${bar.nom} (${bar.type}): ${ventesBarJour.toFixed(2)} €`, 30, y);
+          y += 6;
+        });
+        y += 10;
+        
+        // Mouvements de fûts
+        doc.setFontSize(16);
+        doc.setTextColor(147, 51, 234);
+        doc.text('🍺 MOUVEMENTS DE FÛTS', 20, y);
+        y += 10;
+        
+        doc.setFontSize(12);
+        doc.setTextColor(0);
+        const sorties = mouvementsJour.filter(m => m.type === 'SORTIE').length;
+        const retoursVides = mouvementsJour.filter(m => m.type === 'RETOUR_VIDE').length;
+        const retoursCasses = mouvementsJour.filter(m => m.type === 'RETOUR_CASSE').length;
+        const retoursNonTermines = mouvementsJour.filter(m => m.type === 'RETOUR_REUTILISABLE').length;
+        
+        doc.text(`Sorties: ${sorties}`, 25, y);
+        y += 7;
+        doc.text(`Retours vides: ${retoursVides}`, 25, y);
+        y += 7;
+        doc.text(`Retours cassés: ${retoursCasses}`, 25, y);
+        y += 7;
+        doc.text(`Fûts non terminés: ${retoursNonTermines}`, 25, y);
+        y += 7;
+        doc.text(`Stock restant - Bière: ${stockBiere} | Cidre: ${stockCidre}`, 25, y);
+        y += 15;
+        
+        // Incidents
+        if (incidents.length > 0) {
+          doc.setFontSize(16);
+          doc.setTextColor(234, 88, 12);
+          doc.text('⚠️ INCIDENTS SIGNALÉS', 20, y);
+          y += 10;
+          
+          doc.setFontSize(11);
+          doc.setTextColor(0);
+          incidents.forEach(inc => {
+            doc.text(`• ${inc.barNom} - Équip. ${inc.numEquipement || 'N/A'}: ${inc.commentaire || 'Pas de détail'}`, 25, y);
+            y += 6;
+          });
+        }
+        
+        // Footer
+        doc.setFontSize(9);
+        doc.setTextColor(128);
+        doc.text(`Généré le ${new Date().toLocaleString('fr-FR')} - Session ${session}`, 105, 285, { align: 'center' });
+        
+        doc.save(`Bilan_J${jourActuel}_${new Date().toISOString().split('T')[0]}.pdf`);
+        showToast('📄 PDF exporté');
+      };
+
       // ==================== RENDER ====================
       if (!session) {
         return <SessionScreen onJoinSession={handleJoinSession} />;
@@ -1494,6 +1898,37 @@
               toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'
             }`}>
               <p className="font-medium text-white">{toast.message}</p>
+            </div>
+          )}
+
+          {/* Bannière Annonces */}
+          {annonces.length > 0 && (
+            <div className="bg-blue-900 border-b border-blue-700">
+              {annonces.slice(0, 1).map(annonce => (
+                <div key={annonce.id} className="px-4 py-2 flex items-center justify-between">
+                  <div className="flex items-center gap-2 flex-1">
+                    <span className="text-xl">📢</span>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{annonce.message}</p>
+                      <p className="text-xs text-blue-300">{annonce.user} • {new Date(annonce.timestamp).toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'})}</p>
+                    </div>
+                  </div>
+                  {isCreator && (
+                    <button onClick={() => supprimerAnnonce(annonce.id)} className="text-blue-300 hover:text-white px-2">✕</button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Indicateur Mode Hors-ligne */}
+          {(!isOnline || offlineQueue.length > 0) && (
+            <div className={`px-4 py-2 text-center text-sm ${!isOnline ? 'bg-red-900' : 'bg-amber-900'}`}>
+              {!isOnline ? (
+                <span>⚠️ Mode hors-ligne - Les actions seront synchronisées au retour du réseau</span>
+              ) : (
+                <span>⏳ Synchronisation de {offlineQueue.length} action(s) en attente...</span>
+              )}
             </div>
           )}
 
@@ -1563,6 +1998,11 @@
                   </button>
                 </>
               )}
+              {isCreator && (
+                <button onClick={() => setShowAnnonceInput(!showAnnonceInput)} className={`py-2 px-3 rounded-lg text-sm ${showAnnonceInput ? 'bg-blue-500' : 'bg-blue-700'}`}>
+                  📢
+                </button>
+              )}
               <button onClick={() => demanderAccesAdmin('export')} className="py-2 px-3 bg-green-700 rounded-lg text-sm">
                 📥
               </button>
@@ -1570,6 +2010,27 @@
                 ⚙️
               </button>
             </div>
+
+            {/* Champ saisie annonce */}
+            {showAnnonceInput && isCreator && (
+              <div className="mt-2 flex gap-2">
+                <input
+                  type="text"
+                  value={nouvelleAnnonce}
+                  onChange={(e) => setNouvelleAnnonce(e.target.value)}
+                  placeholder="Votre message à tous..."
+                  className="flex-1 px-3 py-2 bg-neutral-800 rounded-lg text-sm"
+                  onKeyDown={(e) => e.key === 'Enter' && envoyerAnnonce()}
+                />
+                <button 
+                  onClick={envoyerAnnonce} 
+                  disabled={!nouvelleAnnonce.trim()}
+                  className="px-4 py-2 bg-blue-600 rounded-lg text-sm disabled:opacity-50"
+                >
+                  📢 Envoyer
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Stocks */}
@@ -1828,17 +2289,20 @@
                       {barFuts.length === 0 ? (
                         <p className="text-neutral-500 text-sm text-center py-2">Aucun fût</p>
                       ) : (
-                        barFuts.map((fut, idx) => (
-                          <div key={fut.id} className="flex items-center justify-between bg-black/30 p-2 rounded-lg">
-                            <span className="text-sm">{isBiere ? '🍺' : '🍎'} Fût {idx + 1}</span>
-                            <button 
-                              onClick={() => setShowModalRetour({ barId: bar.id, futIndex: idx, barNom: bar.nom })}
-                              className="px-3 py-1 bg-neutral-700 rounded text-sm hover:bg-neutral-600"
-                            >
-                              ↩️ Retour
-                            </button>
-                          </div>
-                        ))
+                        barFuts.map((fut, idx) => {
+                          const durationColor = fut.dateAttribution ? getFutDurationColor(fut.dateAttribution) : 'bg-neutral-700';
+                          return (
+                            <div key={fut.id || idx} className={`flex items-center justify-between p-2 rounded-lg ${durationColor}`}>
+                              <span className="text-sm">{isBiere ? '🍺' : '🍎'} Fût {idx + 1}</span>
+                              <button 
+                                onClick={() => setShowModalRetour({ barId: bar.id, futIndex: idx, barNom: bar.nom })}
+                                className="px-3 py-1 bg-black/30 hover:bg-black/50 rounded text-sm"
+                              >
+                                ↩️ Retour
+                              </button>
+                            </div>
+                          );
+                        })
                       )}
 
                       <button
@@ -2211,21 +2675,33 @@
 
           {/* Modal Dashboard Statistiques */}
           {showDashboard && (
-            <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
-              <div className="bg-neutral-900 rounded-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-xl font-bold">📈 Dashboard J{jourActuel}</h3>
-                  <button onClick={() => setShowDashboard(false)} className="text-neutral-400 hover:text-white text-2xl">✕</button>
+            <div className="fixed inset-0 bg-black/90 flex flex-col z-50">
+              {/* Header Dashboard */}
+              <div className="bg-amber-900 px-4 py-3 flex items-center justify-between">
+                <h3 className="text-xl font-bold">📈 Dashboard J{jourActuel}</h3>
+                <div className="flex items-center gap-2">
+                  {isCreator && (
+                    <button onClick={exporterBilanPDF} className="px-3 py-1 bg-red-600 rounded-lg text-sm">
+                      📄 Export PDF
+                    </button>
+                  )}
+                  <button onClick={() => setShowDashboard(false)} className="text-2xl">✕</button>
                 </div>
-                
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-4">
                 {(() => {
                   const stats = getStatistiques();
+                  const classement = getClassementBars();
+                  const previsions = getPrevisionRupture();
+                  const activiteParHeure = getActiviteParHeure();
+                  
                   return (
-                    <div className="space-y-4">
+                    <div className="space-y-4 max-w-2xl mx-auto">
                       {/* Résumé rapide */}
                       <div className="grid grid-cols-2 gap-3">
                         <div className="bg-blue-900/30 p-4 rounded-xl border border-blue-700">
-                          <p className="text-sm text-blue-300">Fûts en circulation (J{jourActuel})</p>
+                          <p className="text-sm text-blue-300">Fûts en circulation</p>
                           <p className="text-3xl font-bold text-blue-400">{stats.futsEnCirculation}</p>
                         </div>
                         <div className="bg-emerald-900/30 p-4 rounded-xl border border-emerald-700">
@@ -2234,13 +2710,91 @@
                         </div>
                       </div>
 
-                      {/* Graphique ventes par jour */}
+                      {/* Prévision de rupture de stock */}
+                      <div className="bg-gradient-to-r from-amber-900/30 to-orange-900/30 p-4 rounded-xl border border-amber-700">
+                        <h4 className="font-bold mb-3">⏱️ Prévision de rupture de stock</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-sm text-amber-300">🍺 Bière ({stockBiere} restants)</p>
+                            {previsions.biere.tempsRestant ? (
+                              <p className="text-xl font-bold text-amber-400">~{previsions.biere.tempsRestant}</p>
+                            ) : (
+                              <p className="text-sm text-neutral-400">Données insuffisantes</p>
+                            )}
+                            <p className="text-xs text-neutral-500">{previsions.biere.rythme} fûts/h</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-orange-300">🍎 Cidre ({stockCidre} restants)</p>
+                            {previsions.cidre.tempsRestant ? (
+                              <p className="text-xl font-bold text-orange-400">~{previsions.cidre.tempsRestant}</p>
+                            ) : (
+                              <p className="text-sm text-neutral-400">Données insuffisantes</p>
+                            )}
+                            <p className="text-xs text-neutral-500">{previsions.cidre.rythme} fûts/h</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Graphique activité par heure */}
                       <div className="bg-neutral-800 p-4 rounded-xl">
-                        <h4 className="font-bold mb-3">💰 Ventes par jour</h4>
+                        <h4 className="font-bold mb-3">📊 Activité par heure (J{jourActuel})</h4>
+                        <div className="space-y-1">
+                          {activiteParHeure.map(h => {
+                            const maxActivite = Math.max(...activiteParHeure.map(x => x.sorties + x.retours), 1);
+                            const pourcentage = ((h.sorties + h.retours) / maxActivite) * 100;
+                            return (
+                              <div key={h.heure} className="flex items-center gap-2 text-xs">
+                                <span className="w-12 text-neutral-400">{h.heureAffichage}h</span>
+                                <div className="flex-1 flex h-4 bg-neutral-700 rounded overflow-hidden">
+                                  <div className="bg-green-500" style={{ width: `${(h.sorties / maxActivite) * 100}%` }} title={`${h.sorties} sorties`} />
+                                  <div className="bg-blue-500" style={{ width: `${(h.retours / maxActivite) * 100}%` }} title={`${h.retours} retours`} />
+                                </div>
+                                <span className="w-16 text-right">
+                                  <span className="text-green-400">+{h.sorties}</span>
+                                  <span className="text-blue-400 ml-1">-{h.retours}</span>
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="flex gap-4 mt-2 text-xs text-neutral-400">
+                          <span><span className="inline-block w-3 h-3 bg-green-500 rounded mr-1"></span>Sorties</span>
+                          <span><span className="inline-block w-3 h-3 bg-blue-500 rounded mr-1"></span>Retours</span>
+                        </div>
+                      </div>
+
+                      {/* Classement des bars */}
+                      <div className="bg-neutral-800 p-4 rounded-xl">
+                        <h4 className="font-bold mb-3">🏆 Classement des bars</h4>
+                        <div className="space-y-2">
+                          {classement.slice(0, 5).map((bar, idx) => (
+                            <div key={bar.id} className="flex items-center gap-3 bg-neutral-700/50 p-2 rounded-lg">
+                              <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${
+                                idx === 0 ? 'bg-amber-500 text-black' : idx === 1 ? 'bg-neutral-400 text-black' : idx === 2 ? 'bg-amber-700' : 'bg-neutral-600'
+                              }`}>
+                                {idx + 1}
+                              </span>
+                              <div className="flex-1">
+                                <p className="font-medium">{bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom}</p>
+                                <p className="text-xs text-neutral-400">{bar.futsConsommes} fûts consommés</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-bold text-emerald-400">{bar.chiffreAffaires.toFixed(2)} €</p>
+                              </div>
+                            </div>
+                          ))}
+                          {classement.length === 0 && <p className="text-neutral-500 text-sm">Aucune donnée</p>}
+                        </div>
+                      </div>
+
+                      {/* Comparaison par jour */}
+                      <div className="bg-neutral-800 p-4 rounded-xl">
+                        <h4 className="font-bold mb-3">📅 Comparaison par jour</h4>
                         <div className="space-y-2">
                           {Array.from({ length: config.nombreJours }, (_, i) => {
                             const jour = i + 1;
                             const montant = stats.ventesParJour[jour] || 0;
+                            const futsJour = historique.filter(h => !h.annule && h.jour === jour && h.type === 'SORTIE').length;
                             const maxMontant = Math.max(...Object.values(stats.ventesParJour), 1);
                             const pourcentage = (montant / maxMontant) * 100;
                             return (
@@ -2252,7 +2806,10 @@
                                     style={{ width: `${pourcentage}%` }}
                                   />
                                 </div>
-                                <span className="w-20 text-right text-sm font-medium">{montant.toFixed(2)} €</span>
+                                <div className="w-32 text-right text-sm">
+                                  <span className="font-medium">{montant.toFixed(0)} €</span>
+                                  <span className="text-neutral-500 ml-2">({futsJour} fûts)</span>
+                                </div>
                               </div>
                             );
                           })}
@@ -2275,7 +2832,7 @@
                           )}
                           {stats.equipementsDefaillants.length > 0 && (
                             <div>
-                              <p className="text-sm text-orange-300">Équipements défaillants signalés aujourd'hui : {stats.equipementsDefaillants.length}</p>
+                              <p className="text-sm text-orange-300">Équipements défaillants signalés : {stats.equipementsDefaillants.length}</p>
                             </div>
                           )}
                         </div>
@@ -2297,8 +2854,6 @@
                     </div>
                   );
                 })()}
-
-                <button onClick={() => setShowDashboard(false)} className="w-full py-3 bg-neutral-700 rounded-lg mt-4">Fermer</button>
               </div>
             </div>
           )}
@@ -2768,6 +3323,78 @@
                   <button onClick={() => { setShowModalAffectation(false); setEditAffectation(null); }} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
                   <button onClick={sauvegarderAffectation} className="flex-1 py-3 bg-indigo-600 rounded-lg font-medium">✓ Enregistrer</button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ==================== BARRE FLOTTANTE RACCOURCIS ==================== */}
+          <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-40">
+            <div className="flex gap-2 bg-neutral-900/95 backdrop-blur px-4 py-3 rounded-2xl shadow-lg border border-neutral-700">
+              <button
+                onClick={() => setShowQuickFut(true)}
+                disabled={isLoading}
+                className="px-5 py-3 bg-amber-600 hover:bg-amber-500 rounded-xl font-medium text-sm flex items-center gap-2 disabled:opacity-50"
+              >
+                ➕ Fût
+              </button>
+              <button
+                onClick={() => setShowModalVentes(true)}
+                className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-medium text-sm flex items-center gap-2"
+              >
+                💰 Vente
+              </button>
+              <button
+                onClick={() => setShowSessionInfo(true)}
+                className="px-4 py-3 bg-neutral-700 hover:bg-neutral-600 rounded-xl font-medium text-sm"
+              >
+                📡
+              </button>
+            </div>
+          </div>
+
+          {/* ==================== MODAL SÉLECTION RAPIDE FÛT ==================== */}
+          {showQuickFut && (
+            <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
+              <div className="bg-neutral-900 rounded-2xl w-full max-w-md p-6">
+                <h3 className="text-xl font-bold mb-4">➕ Attribuer un fût</h3>
+                <p className="text-neutral-400 text-sm mb-4">Sélectionnez le bar :</p>
+                
+                <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+                  {barsNomades.map(bar => {
+                    const isBiere = bar.type === 'biere';
+                    const barFuts = bar.futs || [];
+                    const canAdd = barFuts.length < config.maxFutsParBar && (isBiere ? stockBiere > 0 : stockCidre > 0);
+                    
+                    return (
+                      <button
+                        key={bar.id}
+                        onClick={() => { attribuerFut(bar.id); setShowQuickFut(false); }}
+                        disabled={!canAdd || isLoading}
+                        className={`w-full p-4 rounded-xl flex items-center justify-between ${
+                          canAdd && !isLoading
+                            ? (isBiere ? 'bg-amber-900/50 hover:bg-amber-900' : 'bg-orange-900/50 hover:bg-orange-900')
+                            : 'bg-neutral-800 opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl">{isBiere ? '🍺' : '🍎'}</span>
+                          <div className="text-left">
+                            <p className="font-medium">{bar.nom}</p>
+                            <p className="text-xs text-neutral-400">{barFuts.length}/{config.maxFutsParBar} fûts</p>
+                          </div>
+                        </div>
+                        {canAdd && <span className="text-green-400">✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button 
+                  onClick={() => setShowQuickFut(false)} 
+                  className="w-full py-3 bg-neutral-700 rounded-lg mt-4"
+                >
+                  Fermer
+                </button>
               </div>
             </div>
           )}
