@@ -27,9 +27,6 @@
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
   
-  <!-- QR Code Generator -->
-  <script src="https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js"></script>
-  
   <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
@@ -96,6 +93,18 @@
       const [createPassword, setCreatePassword] = useState('');
       
       const SUPER_ADMIN_PASSWORD = "HF2026Admin";
+
+      // Lire le paramètre URL ?session=XXX au chargement
+      React.useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionFromUrl = urlParams.get('session');
+        if (sessionFromUrl) {
+          setSessionCode(sessionFromUrl.toUpperCase());
+          setMode('join');
+          // Nettoyer l'URL sans recharger la page
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      }, []);
 
       // Vérifier s'il y a une session récente au chargement
       React.useEffect(() => {
@@ -607,7 +616,6 @@
 
       // QR Code
       const [showQRCode, setShowQRCode] = useState(false);
-      const qrCanvasRef = useRef(null);
 
       // Logs d'audit
       const [auditLogs, setAuditLogs] = useState([]);
@@ -1410,24 +1418,6 @@
           setTimeout(() => setIsLoading(false), 1000);
         }
       };
-
-      // ==================== QR CODE ====================
-      const genererQRCode = useCallback(() => {
-        if (qrCanvasRef.current && session) {
-          const url = `${window.location.origin}${window.location.pathname}?session=${session}`;
-          QRCode.toCanvas(qrCanvasRef.current, url, {
-            width: 200,
-            margin: 2,
-            color: { dark: '#000000', light: '#ffffff' }
-          });
-        }
-      }, [session]);
-
-      useEffect(() => {
-        if (showQRCode) {
-          setTimeout(genererQRCode, 100);
-        }
-      }, [showQRCode, genererQRCode]);
 
       // ==================== FILTRES HISTORIQUE ====================
       const historiqueFiltre = historique.filter(h => {
@@ -2314,15 +2304,22 @@
           )}
 
           {/* Modal QR Code */}
+          {/* Modal QR Code */}
           {showQRCode && (
             <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
               <div className="bg-neutral-900 rounded-2xl w-full max-w-sm p-6 text-center">
                 <h3 className="text-xl font-bold mb-4">📱 QR Code de la session</h3>
                 <p className="text-neutral-400 text-sm mb-4">Scannez ce code pour rejoindre</p>
                 <div className="bg-white p-4 rounded-xl inline-block mb-4">
-                  <canvas ref={qrCanvasRef} />
+                  <img 
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(window.location.origin + window.location.pathname + '?session=' + session)}`}
+                    alt="QR Code"
+                    width="200"
+                    height="200"
+                  />
                 </div>
-                <p className="text-2xl font-mono font-bold text-red-400 mb-4">{session}</p>
+                <p className="text-2xl font-mono font-bold text-red-400 mb-2">{session}</p>
+                <p className="text-xs text-neutral-500 mb-4 break-all">{window.location.origin + window.location.pathname}?session={session}</p>
                 <button onClick={() => setShowQRCode(false)} className="w-full py-3 bg-neutral-700 rounded-lg">Fermer</button>
               </div>
             </div>
