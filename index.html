@@ -28,7 +28,7 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   
   <!-- jsPDF pour export PDF -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   
   <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
@@ -223,13 +223,6 @@
           return;
         }
 
-        // Vérifier la limite de sessions (2 max par navigateur)
-       // const createdSessions = JSON.parse(localStorage.getItem('gestionFuts_createdSessions') || '[]');
-       // if (createdSessions.length >= 2) {
-         // setError(`Limite atteinte : vous avez déjà créé ${createdSessions.length} session(s). Maximum autorisé : 2.`);
-          //return;
-        }
-
         setLoading(true);
         setError('');
         
@@ -259,10 +252,6 @@
         };
 
         await sessionRef.set(initialData);
-        
-        // Enregistrer la session créée dans localStorage
-        createdSessions.push({ code: newCode, createdAt: Date.now() });
-        localStorage.setItem('gestionFuts_createdSessions', JSON.stringify(createdSessions));
         
         onJoinSession(newCode, userName.trim(), true); // true = créateur = Super Admin
       };
