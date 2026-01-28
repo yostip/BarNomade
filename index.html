@@ -642,9 +642,9 @@
       // Couleur selon durée du fût
       const getFutDurationColor = (timestamp) => {
         const hours = (Date.now() - timestamp) / (1000 * 60 * 60);
-        if (hours >= 6) return 'bg-red-600 text-white';
-        if (hours >= 4) return 'bg-orange-500 text-white';
-        if (hours >= 2) return 'bg-yellow-500 text-black';
+        if (hours >= 4) return 'bg-red-600 text-white';
+        if (hours >= 3) return 'bg-orange-500 text-white';
+        if (hours >= 1.5) return 'bg-yellow-500 text-black';
         return 'bg-neutral-700';
       };
 
@@ -2296,9 +2296,17 @@
                       ) : (
                         barFuts.map((fut, idx) => {
                           const durationColor = fut.dateAttribution ? getFutDurationColor(fut.dateAttribution) : 'bg-neutral-700';
+                          const dateAttrib = fut.dateAttribution ? new Date(fut.dateAttribution) : null;
+                          const dateStr = dateAttrib ? `${dateAttrib.getDate().toString().padStart(2, '0')}/${(dateAttrib.getMonth() + 1).toString().padStart(2, '0')}` : '';
+                          const heureStr = dateAttrib ? `${dateAttrib.getHours().toString().padStart(2, '0')}:${dateAttrib.getMinutes().toString().padStart(2, '0')}` : '';
                           return (
                             <div key={fut.id || idx} className={`flex items-center justify-between p-2 rounded-lg ${durationColor}`}>
-                              <span className="text-sm">{isBiere ? '🍺' : '🍎'} Fût {idx + 1}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm">{isBiere ? '🍺' : '🍎'} Fût {idx + 1}</span>
+                                {dateAttrib && (
+                                  <span className="text-xs opacity-75">• {dateStr} {heureStr}</span>
+                                )}
+                              </div>
                               <button 
                                 onClick={() => setShowModalRetour({ barId: bar.id, futIndex: idx, barNom: bar.nom })}
                                 className="px-3 py-1 bg-black/30 hover:bg-black/50 rounded text-sm"
@@ -2309,18 +2317,6 @@
                           );
                         })
                       )}
-
-                      <button
-                        onClick={() => attribuerFut(bar.id)}
-                        disabled={!canAdd || isLoading}
-                        className={`w-full py-3 rounded-lg font-medium transition-all ${
-                          canAdd && !isLoading
-                            ? (isBiere ? 'bg-amber-600 hover:bg-amber-500' : 'bg-orange-600 hover:bg-orange-500')
-                            : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
-                        }`}
-                      >
-                        {isLoading ? '⏳ En cours...' : '➕ Attribuer un fût'}
-                      </button>
                     </div>
                   </div>
                 );
@@ -3347,12 +3343,6 @@
                 className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-medium text-sm flex items-center gap-2"
               >
                 💰 Vente
-              </button>
-              <button
-                onClick={() => setShowSessionInfo(true)}
-                className="px-4 py-3 bg-neutral-700 hover:bg-neutral-600 rounded-xl font-medium text-sm"
-              >
-                📡
               </button>
             </div>
           </div>
