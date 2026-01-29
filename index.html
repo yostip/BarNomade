@@ -625,6 +625,7 @@
 
       // Raccourcis rapides
       const [showQuickFut, setShowQuickFut] = useState(false);
+      const [quickFutConfirm, setQuickFutConfirm] = useState(null); // { barId, barNom, barType, currentFuts, maxFuts }
 
       // Tutoriel
       const [showTutoriel, setShowTutoriel] = useState(false);
@@ -2492,22 +2493,62 @@
                 const isBiere = bar.type === 'biere';
                 const barFuts = bar.futs || [];
                 const canAdd = barFuts.length < config.maxFutsParBar && (isBiere ? stockBiere > 0 : stockCidre > 0);
+                const isFull = barFuts.length >= config.maxFutsParBar;
+                const fillPercent = (barFuts.length / config.maxFutsParBar) * 100;
+                
+                // Couleur de la jauge selon remplissage
+                const gaugeColor = isFull ? 'bg-red-500' : barFuts.length >= config.maxFutsParBar - 1 ? 'bg-yellow-500' : 'bg-green-500';
 
                 return (
-                  <div key={bar.id} className={`rounded-xl border-2 overflow-hidden ${isBiere ? 'border-emerald-600 bg-emerald-950/30' : 'border-teal-600 bg-teal-950/30'}`}>
-                    <div className={`px-3 py-2 flex items-center justify-between ${isBiere ? 'bg-emerald-900/50' : 'bg-teal-900/50'}`}>
+                  <div key={bar.id} className={`rounded-xl border-2 overflow-hidden ${isFull ? 'border-red-600 bg-red-950/20' : isBiere ? 'border-emerald-600 bg-emerald-950/30' : 'border-teal-600 bg-teal-950/30'}`}>
+                    {/* Header avec nom */}
+                    <div className={`px-3 py-2 flex items-center justify-between ${isFull ? 'bg-red-900/50' : isBiere ? 'bg-emerald-900/50' : 'bg-teal-900/50'}`}>
                       <div className="flex items-center gap-2">
-                        <span>{isBiere ? '🍺' : '🍎'}</span>
-                        <span className="font-bold">{bar.nom}</span>
+                        <span className="text-xl">{isBiere ? '🍺' : '🍎'}</span>
+                        <span className="font-bold text-lg">{bar.nom}</span>
                       </div>
-                      <span className={`text-sm px-2 py-0.5 rounded ${barFuts.length >= config.maxFutsParBar ? 'bg-red-600' : 'bg-white/20'}`}>
-                        {barFuts.length}/{config.maxFutsParBar}
-                      </span>
+                      {isFull && (
+                        <span className="px-3 py-1 bg-red-600 rounded-full text-xs font-bold animate-pulse">
+                          COMPLET
+                        </span>
+                      )}
                     </div>
 
+                    {/* Section compteur visuel */}
+                    <div className="px-3 py-3 border-b border-white/10">
+                      {/* Icônes de fûts */}
+                      <div className="flex items-center justify-center gap-1 mb-2">
+                        {Array.from({ length: config.maxFutsParBar }).map((_, idx) => (
+                          <span key={idx} className={`text-2xl ${idx < barFuts.length ? '' : 'opacity-30 grayscale'}`}>
+                            🛢️
+                          </span>
+                        ))}
+                      </div>
+                      
+                      {/* Compteur en gros */}
+                      <div className="text-center">
+                        <span className={`text-4xl font-black ${isFull ? 'text-red-400' : barFuts.length > 0 ? 'text-yellow-400' : 'text-green-400'}`}>
+                          {barFuts.length}
+                        </span>
+                        <span className="text-2xl text-neutral-400">/{config.maxFutsParBar}</span>
+                        <p className="text-xs text-neutral-500 mt-1">
+                          {isFull ? '⛔ Maximum atteint' : barFuts.length === 0 ? '✅ Disponible' : `⚠️ ${config.maxFutsParBar - barFuts.length} place(s) restante(s)`}
+                        </p>
+                      </div>
+                      
+                      {/* Jauge de progression */}
+                      <div className="mt-2 h-3 bg-neutral-700 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full ${gaugeColor} transition-all duration-300`}
+                          style={{ width: `${fillPercent}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Liste des fûts */}
                     <div className="p-3 space-y-2">
                       {barFuts.length === 0 ? (
-                        <p className="text-neutral-500 text-sm text-center py-2">Aucun fût</p>
+                        <p className="text-neutral-500 text-sm text-center py-2">Aucun fût attribué</p>
                       ) : (
                         barFuts.map((fut, idx) => {
                           const durationColor = fut.dateAttribution ? getFutDurationColor(fut.dateAttribution) : 'bg-neutral-700';
@@ -3855,45 +3896,148 @@
           {showQuickFut && (
             <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
               <div className="bg-neutral-900 rounded-2xl w-full max-w-md p-6">
-                <h3 className="text-xl font-bold mb-4">➕ Attribuer un fût</h3>
-                <p className="text-neutral-400 text-sm mb-4">Sélectionnez le bar :</p>
                 
-                <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-                  {barsNomades.map(bar => {
-                    const isBiere = bar.type === 'biere';
-                    const barFuts = bar.futs || [];
-                    const canAdd = barFuts.length < config.maxFutsParBar && (isBiere ? stockBiere > 0 : stockCidre > 0);
+                {/* Étape 1 : Sélection du bar */}
+                {!quickFutConfirm ? (
+                  <>
+                    <h3 className="text-xl font-bold mb-4">➕ Attribuer un fût</h3>
+                    <p className="text-neutral-400 text-sm mb-4">Sélectionnez le bar :</p>
                     
-                    return (
-                      <button
-                        key={bar.id}
-                        onClick={() => { attribuerFut(bar.id); setShowQuickFut(false); }}
-                        disabled={!canAdd || isLoading}
-                        className={`w-full p-4 rounded-xl flex items-center justify-between ${
-                          canAdd && !isLoading
-                            ? (isBiere ? 'bg-emerald-900/50 hover:bg-emerald-900' : 'bg-teal-900/50 hover:bg-teal-900')
-                            : 'bg-neutral-800 opacity-50 cursor-not-allowed'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-2xl">{isBiere ? '🍺' : '🍎'}</span>
-                          <div className="text-left">
-                            <p className="font-medium">{bar.nom}</p>
-                            <p className="text-xs text-neutral-400">{barFuts.length}/{config.maxFutsParBar} fûts</p>
-                          </div>
-                        </div>
-                        {canAdd && <span className="text-green-400">✓</span>}
-                      </button>
-                    );
-                  })}
-                </div>
+                    <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+                      {barsNomades.map(bar => {
+                        const isBiere = bar.type === 'biere';
+                        const barFuts = bar.futs || [];
+                        const canAdd = barFuts.length < config.maxFutsParBar && (isBiere ? stockBiere > 0 : stockCidre > 0);
+                        const isFull = barFuts.length >= config.maxFutsParBar;
+                        
+                        return (
+                          <button
+                            key={bar.id}
+                            onClick={() => setQuickFutConfirm({
+                              barId: bar.id,
+                              barNom: bar.nom,
+                              barType: bar.type,
+                              currentFuts: barFuts.length,
+                              maxFuts: config.maxFutsParBar
+                            })}
+                            disabled={!canAdd || isLoading}
+                            className={`w-full p-4 rounded-xl flex items-center justify-between transition-all ${
+                              canAdd && !isLoading
+                                ? (isBiere ? 'bg-emerald-900/50 hover:bg-emerald-900 hover:scale-[1.02]' : 'bg-teal-900/50 hover:bg-teal-900 hover:scale-[1.02]')
+                                : 'bg-neutral-800 opacity-50 cursor-not-allowed'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="text-2xl">{isBiere ? '🍺' : '🍎'}</span>
+                              <div className="text-left">
+                                <p className="font-medium">{bar.nom}</p>
+                                <div className="flex items-center gap-2">
+                                  {/* Icônes mini */}
+                                  <div className="flex gap-0.5">
+                                    {Array.from({ length: config.maxFutsParBar }).map((_, idx) => (
+                                      <span key={idx} className={`text-sm ${idx < barFuts.length ? '' : 'opacity-30'}`}>🛢️</span>
+                                    ))}
+                                  </div>
+                                  <span className={`text-sm font-bold ${isFull ? 'text-red-400' : barFuts.length > 0 ? 'text-yellow-400' : 'text-green-400'}`}>
+                                    {barFuts.length}/{config.maxFutsParBar}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            {isFull ? (
+                              <span className="text-red-400 text-xs font-bold">COMPLET</span>
+                            ) : canAdd ? (
+                              <span className="text-green-400 text-xl">→</span>
+                            ) : (
+                              <span className="text-red-400 text-xs">Stock vide</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
 
-                <button 
-                  onClick={() => setShowQuickFut(false)} 
-                  className="w-full py-3 bg-neutral-700 rounded-lg mt-4"
-                >
-                  Fermer
-                </button>
+                    <button 
+                      onClick={() => { setShowQuickFut(false); setQuickFutConfirm(null); }} 
+                      className="w-full py-3 bg-neutral-700 rounded-lg mt-4"
+                    >
+                      Fermer
+                    </button>
+                  </>
+                ) : (
+                  /* Étape 2 : Confirmation */
+                  <>
+                    <div className="text-center">
+                      <div className="text-5xl mb-4">
+                        {quickFutConfirm.barType === 'biere' ? '🍺' : '🍎'}
+                      </div>
+                      <h3 className="text-xl font-bold mb-2">Confirmer l'attribution</h3>
+                      <p className="text-2xl font-black text-white mb-4">{quickFutConfirm.barNom}</p>
+                    </div>
+                    
+                    {/* Visualisation avant/après */}
+                    <div className="bg-neutral-800 rounded-xl p-4 mb-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-neutral-400">Actuellement :</span>
+                        <div className="flex items-center gap-2">
+                          <div className="flex gap-1">
+                            {Array.from({ length: quickFutConfirm.maxFuts }).map((_, idx) => (
+                              <span key={idx} className={`text-xl ${idx < quickFutConfirm.currentFuts ? '' : 'opacity-30'}`}>🛢️</span>
+                            ))}
+                          </div>
+                          <span className={`text-2xl font-black ${quickFutConfirm.currentFuts > 0 ? 'text-yellow-400' : 'text-green-400'}`}>
+                            {quickFutConfirm.currentFuts}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center justify-center text-3xl text-green-400 my-2">
+                        ↓ +1
+                      </div>
+                      
+                      <div className="flex items-center justify-between">
+                        <span className="text-neutral-400">Après :</span>
+                        <div className="flex items-center gap-2">
+                          <div className="flex gap-1">
+                            {Array.from({ length: quickFutConfirm.maxFuts }).map((_, idx) => (
+                              <span key={idx} className={`text-xl ${idx < quickFutConfirm.currentFuts + 1 ? '' : 'opacity-30'}`}>🛢️</span>
+                            ))}
+                          </div>
+                          <span className={`text-2xl font-black ${quickFutConfirm.currentFuts + 1 >= quickFutConfirm.maxFuts ? 'text-red-400' : 'text-yellow-400'}`}>
+                            {quickFutConfirm.currentFuts + 1}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {quickFutConfirm.currentFuts + 1 >= quickFutConfirm.maxFuts && (
+                        <div className="mt-3 text-center">
+                          <span className="text-red-400 text-sm font-bold bg-red-900/50 px-3 py-1 rounded-full">
+                            ⚠️ Ce bar sera COMPLET
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex gap-3">
+                      <button 
+                        onClick={() => setQuickFutConfirm(null)} 
+                        className="flex-1 py-4 bg-neutral-700 hover:bg-neutral-600 rounded-xl font-medium text-lg"
+                      >
+                        ← Retour
+                      </button>
+                      <button 
+                        onClick={() => { 
+                          attribuerFut(quickFutConfirm.barId); 
+                          setQuickFutConfirm(null);
+                          setShowQuickFut(false); 
+                        }}
+                        disabled={isLoading}
+                        className="flex-1 py-4 bg-green-600 hover:bg-green-500 rounded-xl font-bold text-lg disabled:opacity-50"
+                      >
+                        {isLoading ? '⏳' : '✓ CONFIRMER'}
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}
