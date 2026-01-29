@@ -527,7 +527,18 @@
         stockInitialBiere: 50,
         stockInitialCidre: 20,
         maxFutsParBar: 3,
-        nombreJours: 4
+        nombreJours: 4,
+        // Tarifs
+        prixPinte: 6,
+        prixPichet: 15,
+        prixGobelet: 2,
+        // Volumes
+        volumePinte: 0.5,
+        volumePichet: 1.5,
+        volumeFutBiere: 30,
+        volumeFutCidre: 20,
+        // Seuil alerte
+        seuilPerte: 10
       });
       const [barsNomades, setBarsNomades] = useState([]);
       const [futsEnAttente, setFutsEnAttente] = useState([]);
@@ -611,6 +622,7 @@
 
       // Dashboard
       const [showDashboard, setShowDashboard] = useState(false);
+      const [dashboardOnglet, setDashboardOnglet] = useState('synthese'); // 'synthese', 'ecarts', 'comparatif'
 
       // QR Code
       const [showQRCode, setShowQRCode] = useState(false);
@@ -1810,6 +1822,344 @@
         };
       };
 
+      // ==================== ANALYSE DES ÉCARTS (PERTES) ====================
+      const getAnalyseEcarts = (jour = jourActuel) => {
+        // Fûts vides retournés pour ce jour
+        const retoursBiere = historique.filter(h => 
+          !h.annule && h.jour === jour && h.type === 'RETOUR_VIDE' && h.typeFut === 'biere'
+        ).length;
+        const retoursCidre = historique.filter(h => 
+          !h.annule && h.jour === jour && h.type === 'RETOUR_VIDE' && h.typeFut === 'cidre'
+        ).length;
+        
+        // Volumes sortis (basé sur fûts vides uniquement)
+        const volumeSortiBiere = retoursBiere * config.volumeFutBiere;
+        const volumeSortiCidre = retoursCidre * config.volumeFutCidre;
+        
+        // Ventes du jour
+        const ventesJour = historiqueVentes.filter(v => !v.annule && v.jour === jour);
+        
+        // Séparer ventes bière et cidre
+        const ventesBiere = ventesJour.filter(v => {
+          const bar = barsNomades.find(b => b.id === v.barId);
+          return bar?.type === 'biere';
+        });
+        const ventesCidre = ventesJour.filter(v => {
+          const bar = barsNomades.find(b => b.id === v.barId);
+          return bar?.type === 'cidre';
+        });
+        
+        // Quantités vendues
+        const pintesBiere = ventesBiere.reduce((acc, v) => acc + (v.nbPintes || 0), 0);
+        const pichetsBiere = ventesBiere.reduce((acc, v) => acc + (v.nbPichets || 0), 0);
+        const gobeletsBiere = ventesBiere.reduce((acc, v) => acc + (v.nbGobelets || 0), 0);
+        
+        const pintesCidre = ventesCidre.reduce((acc, v) => acc + (v.nbPintes || 0), 0);
+        const pichetsCidre = ventesCidre.reduce((acc, v) => acc + (v.nbPichets || 0), 0);
+        const gobeletsCidre = ventesCidre.reduce((acc, v) => acc + (v.nbGobelets || 0), 0);
+        
+        // Volume vendu (SANS gobelets)
+        const volumeVenduBiere = (pintesBiere * config.volumePinte) + (pichetsBiere * config.volumePichet);
+        const volumeVenduCidre = (pintesCidre * config.volumePinte) + (pichetsCidre * config.volumePichet);
+        
+        // CA déclaré
+        const caDeclareBiere = ventesBiere.reduce((acc, v) => acc + (v.montant || 0), 0);
+        const caDeclareCidre = ventesCidre.reduce((acc, v) => acc + (v.montant || 0), 0);
+        
+        // CA théorique (avec gobelets)
+        const caTheoriqueBiere = (pintesBiere * config.prixPinte) + (pichetsBiere * config.prixPichet) + (gobeletsBiere * config.prixGobelet);
+        const caTheoriqueCidre = (pintesCidre * config.prixPinte) + (pichetsCidre * config.prixPichet) + (gobeletsCidre * config.prixGobelet);
+        
+        // Écarts volume
+        const ecartVolumeBiere = volumeSortiBiere - volumeVenduBiere;
+        const ecartVolumeCidre = volumeSortiCidre - volumeVenduCidre;
+        
+        // Taux de perte
+        const tauxPerteBiere = volumeSortiBiere > 0 ? (ecartVolumeBiere / volumeSortiBiere) * 100 : 0;
+        const tauxPerteCidre = volumeSortiCidre > 0 ? (ecartVolumeCidre / volumeSortiCidre) * 100 : 0;
+        const tauxPerteGlobal = (volumeSortiBiere + volumeSortiCidre) > 0 
+          ? ((ecartVolumeBiere + ecartVolumeCidre) / (volumeSortiBiere + volumeSortiCidre)) * 100 
+          : 0;
+        
+        // Écarts CA
+        const ecartCaBiere = caDeclareBiere - caTheoriqueBiere;
+        const ecartCaCidre = caDeclareCidre - caTheoriqueCidre;
+        
+        // Cohérence CA
+        const coherenceCaBiere = caTheoriqueBiere > 0 ? (caDeclareBiere / caTheoriqueBiere) * 100 : 100;
+        const coherenceCaCidre = caTheoriqueCidre > 0 ? (caDeclareCidre / caTheoriqueCidre) * 100 : 100;
+        
+        // Manque à gagner (basé sur le prix de la pinte)
+        const manqueAGagnerBiere = ecartVolumeBiere > 0 ? (ecartVolumeBiere / config.volumePinte) * config.prixPinte : 0;
+        const manqueAGagnerCidre = ecartVolumeCidre > 0 ? (ecartVolumeCidre / config.volumePinte) * config.prixPinte : 0;
+        
+        // Statut selon seuil
+        const getStatut = (taux) => {
+          if (taux <= config.seuilPerte) return 'ok';
+          if (taux <= config.seuilPerte * 1.5) return 'attention';
+          return 'alerte';
+        };
+        
+        return {
+          biere: {
+            futsVides: retoursBiere,
+            volumeSorti: volumeSortiBiere,
+            pintes: pintesBiere,
+            pichets: pichetsBiere,
+            gobelets: gobeletsBiere,
+            volumeVendu: volumeVenduBiere,
+            ecartVolume: ecartVolumeBiere,
+            tauxPerte: tauxPerteBiere,
+            statutPerte: getStatut(tauxPerteBiere),
+            caDeclare: caDeclareBiere,
+            caTheorique: caTheoriqueBiere,
+            ecartCa: ecartCaBiere,
+            coherenceCa: coherenceCaBiere,
+            manqueAGagner: manqueAGagnerBiere
+          },
+          cidre: {
+            futsVides: retoursCidre,
+            volumeSorti: volumeSortiCidre,
+            pintes: pintesCidre,
+            pichets: pichetsCidre,
+            gobelets: gobeletsCidre,
+            volumeVendu: volumeVenduCidre,
+            ecartVolume: ecartVolumeCidre,
+            tauxPerte: tauxPerteCidre,
+            statutPerte: getStatut(tauxPerteCidre),
+            caDeclare: caDeclareCidre,
+            caTheorique: caTheoriqueCidre,
+            ecartCa: ecartCaCidre,
+            coherenceCa: coherenceCaCidre,
+            manqueAGagner: manqueAGagnerCidre
+          },
+          total: {
+            futsVides: retoursBiere + retoursCidre,
+            volumeSorti: volumeSortiBiere + volumeSortiCidre,
+            volumeVendu: volumeVenduBiere + volumeVenduCidre,
+            ecartVolume: ecartVolumeBiere + ecartVolumeCidre,
+            tauxPerte: tauxPerteGlobal,
+            statutPerte: getStatut(tauxPerteGlobal),
+            caDeclare: caDeclareBiere + caDeclareCidre,
+            caTheorique: caTheoriqueBiere + caTheoriqueCidre,
+            ecartCa: ecartCaBiere + ecartCaCidre,
+            manqueAGagner: manqueAGagnerBiere + manqueAGagnerCidre
+          }
+        };
+      };
+
+      // ==================== ANALYSE ÉCARTS PAR BAR ====================
+      const getAnalyseEcartsParBar = (jour = jourActuel) => {
+        return barsNomades.map(bar => {
+          const isBiere = bar.type === 'biere';
+          const volumeFut = isBiere ? config.volumeFutBiere : config.volumeFutCidre;
+          
+          // Fûts vides retournés pour ce bar
+          const futsVides = historique.filter(h => 
+            !h.annule && h.jour === jour && h.type === 'RETOUR_VIDE' && h.barId === bar.id
+          ).length;
+          
+          const volumeSorti = futsVides * volumeFut;
+          
+          // Ventes de ce bar
+          const ventesBar = historiqueVentes.filter(v => !v.annule && v.jour === jour && v.barId === bar.id);
+          const pintes = ventesBar.reduce((acc, v) => acc + (v.nbPintes || 0), 0);
+          const pichets = ventesBar.reduce((acc, v) => acc + (v.nbPichets || 0), 0);
+          const gobelets = ventesBar.reduce((acc, v) => acc + (v.nbGobelets || 0), 0);
+          
+          const volumeVendu = (pintes * config.volumePinte) + (pichets * config.volumePichet);
+          const ecartVolume = volumeSorti - volumeVendu;
+          const tauxPerte = volumeSorti > 0 ? (ecartVolume / volumeSorti) * 100 : 0;
+          
+          const caDeclare = ventesBar.reduce((acc, v) => acc + (v.montant || 0), 0);
+          const caTheorique = (pintes * config.prixPinte) + (pichets * config.prixPichet) + (gobelets * config.prixGobelet);
+          
+          const getStatut = (taux) => {
+            if (taux <= config.seuilPerte) return 'ok';
+            if (taux <= config.seuilPerte * 1.5) return 'attention';
+            return 'alerte';
+          };
+          
+          return {
+            barId: bar.id,
+            barNom: bar.nom,
+            type: bar.type,
+            futsVides,
+            volumeSorti,
+            pintes,
+            pichets,
+            gobelets,
+            volumeVendu,
+            ecartVolume,
+            tauxPerte,
+            statutPerte: getStatut(tauxPerte),
+            caDeclare,
+            caTheorique,
+            ecartCa: caDeclare - caTheorique,
+            ratioParFut: futsVides > 0 ? caDeclare / futsVides : 0
+          };
+        });
+      };
+
+      // ==================== ANALYSE ÉCARTS PAR CRÉNEAU ====================
+      const getAnalyseEcartsParCreneau = (jour = jourActuel) => {
+        return creneaux.map(creneau => {
+          // Ventes de ce créneau
+          const ventesCreneau = historiqueVentes.filter(v => 
+            !v.annule && v.jour === jour && v.creneau === creneau.id
+          );
+          
+          // Fûts retournés pendant ce créneau (approximation basée sur le timestamp)
+          // On ne peut pas lier directement, donc on compte globalement
+          const pintes = ventesCreneau.reduce((acc, v) => acc + (v.nbPintes || 0), 0);
+          const pichets = ventesCreneau.reduce((acc, v) => acc + (v.nbPichets || 0), 0);
+          const gobelets = ventesCreneau.reduce((acc, v) => acc + (v.nbGobelets || 0), 0);
+          
+          const volumeVendu = (pintes * config.volumePinte) + (pichets * config.volumePichet);
+          const caDeclare = ventesCreneau.reduce((acc, v) => acc + (v.montant || 0), 0);
+          const caTheorique = (pintes * config.prixPinte) + (pichets * config.prixPichet) + (gobelets * config.prixGobelet);
+          
+          return {
+            creneauId: creneau.id,
+            creneauLabel: creneau.label,
+            nbTransactions: ventesCreneau.length,
+            pintes,
+            pichets,
+            gobelets,
+            volumeVendu,
+            caDeclare,
+            caTheorique,
+            ecartCa: caDeclare - caTheorique,
+            coherenceCa: caTheorique > 0 ? (caDeclare / caTheorique) * 100 : 100
+          };
+        });
+      };
+
+      // ==================== SYNTHÈSE TOP 10 ====================
+      const getSyntheseTop10 = () => {
+        const stats = getStatistiques();
+        const comparaison = getComparaisonJour();
+        const ecarts = getAnalyseEcarts();
+        const ecartsParBar = getAnalyseEcartsParBar();
+        const ecartsParCreneau = getAnalyseEcartsParCreneau();
+        
+        // 1. CA total du jour
+        const caTotal = stats.totalVentesJour;
+        
+        // 2. Comparaison J vs J-1 (déjà dans comparaison)
+        
+        // 3. Classement bars par CA
+        const classementBars = [...ecartsParBar].sort((a, b) => b.caDeclare - a.caDeclare);
+        
+        // 4. Fûts consommés
+        const futsConsommes = ecarts.total.futsVides;
+        const futsBiere = ecarts.biere.futsVides;
+        const futsCidre = ecarts.cidre.futsVides;
+        
+        // 5. Durée moyenne fût
+        const retours = historique.filter(h => !h.annule && h.jour === jourActuel && h.type === 'RETOUR_VIDE');
+        let dureeTotale = 0;
+        let nbDurees = 0;
+        retours.forEach(retour => {
+          // Chercher la sortie correspondante
+          const sortie = historique.find(h => 
+            !h.annule && h.jour === jourActuel && h.type === 'SORTIE' && 
+            h.barId === retour.barId && h.timestamp < retour.timestamp
+          );
+          if (sortie) {
+            dureeTotale += retour.timestamp - sortie.timestamp;
+            nbDurees++;
+          }
+        });
+        const dureeMoyenneMs = nbDurees > 0 ? dureeTotale / nbDurees : 0;
+        const dureeMoyenneH = Math.floor(dureeMoyenneMs / (1000 * 60 * 60));
+        const dureeMoyenneM = Math.floor((dureeMoyenneMs % (1000 * 60 * 60)) / (1000 * 60));
+        const dureeMoyenneStr = dureeMoyenneMs > 0 ? `${dureeMoyenneH}h${dureeMoyenneM.toString().padStart(2, '0')}` : '-';
+        
+        // 6. Taux de perte global
+        const tauxPerteGlobal = ecarts.total.tauxPerte;
+        
+        // 7. Bar le plus rentable (CA/fût)
+        const barsAvecFuts = ecartsParBar.filter(b => b.futsVides > 0);
+        const barPlusRentable = barsAvecFuts.length > 0 
+          ? barsAvecFuts.reduce((best, b) => b.ratioParFut > best.ratioParFut ? b : best, barsAvecFuts[0])
+          : null;
+        
+        // 8. Pic d'activité (créneau avec le plus de CA)
+        const picActivite = ecartsParCreneau.reduce((best, c) => c.caDeclare > best.caDeclare ? c : best, ecartsParCreneau[0]);
+        
+        // 9. Stock restant (déjà dans stockBiere/stockCidre)
+        
+        // 10. Progression festival
+        const progressionFestival = [];
+        for (let j = 1; j <= jourActuel; j++) {
+          const ventesJ = historiqueVentes.filter(v => !v.annule && v.jour === j);
+          const caJ = ventesJ.reduce((acc, v) => acc + (v.montant || 0), 0);
+          progressionFestival.push({ jour: j, ca: caJ });
+        }
+        
+        return {
+          caTotal,
+          comparaison,
+          classementBars,
+          futsConsommes,
+          futsBiere,
+          futsCidre,
+          dureeMoyenne: dureeMoyenneStr,
+          tauxPerteGlobal,
+          statutPerte: ecarts.total.statutPerte,
+          manqueAGagner: ecarts.total.manqueAGagner,
+          barPlusRentable,
+          picActivite,
+          progressionFestival
+        };
+      };
+
+      // ==================== COMPARATIF MULTI-JOURS ====================
+      const getComparatifFestival = () => {
+        const jours = [];
+        
+        for (let j = 1; j <= config.nombreJours; j++) {
+          const ventesJ = historiqueVentes.filter(v => !v.annule && v.jour === j);
+          const caJ = ventesJ.reduce((acc, v) => acc + (v.montant || 0), 0);
+          
+          const ecartsJ = getAnalyseEcarts(j);
+          const ecartsParBarJ = getAnalyseEcartsParBar(j);
+          
+          const topBar = ecartsParBarJ.length > 0 
+            ? ecartsParBarJ.reduce((best, b) => b.caDeclare > best.caDeclare ? b : best, ecartsParBarJ[0])
+            : null;
+          
+          // Pic activité
+          const ventesParCreneau = creneaux.map(c => {
+            const v = ventesJ.filter(vente => vente.creneau === c.id);
+            return {
+              creneau: c.label,
+              ca: v.reduce((acc, vente) => acc + (vente.montant || 0), 0)
+            };
+          });
+          const picJ = ventesParCreneau.reduce((best, c) => c.ca > best.ca ? c : best, ventesParCreneau[0]);
+          
+          jours.push({
+            jour: j,
+            ca: caJ,
+            futsBiere: ecartsJ.biere.futsVides,
+            futsCidre: ecartsJ.cidre.futsVides,
+            tauxPerte: ecartsJ.total.tauxPerte,
+            topBar: topBar?.barNom || '-',
+            topBarCa: topBar?.caDeclare || 0,
+            picCreneau: picJ.creneau,
+            hasDonnees: caJ > 0 || ecartsJ.total.futsVides > 0
+          });
+        }
+        
+        // Totaux
+        const caTotal = jours.reduce((acc, j) => acc + j.ca, 0);
+        const futsTotal = jours.reduce((acc, j) => acc + j.futsBiere + j.futsCidre, 0);
+        
+        return { jours, caTotal, futsTotal };
+      };
+
       // ==================== PRÉVISION RUPTURE DE STOCK ====================
       const getPrevisionRupture = () => {
         const historiqueJour = historique.filter(h => !h.annule && h.jour === jourActuel);
@@ -1992,6 +2342,8 @@
         const incidents = historiqueVentes.filter(v => !v.annule && v.equipementDefaillant && v.jour === jourActuel);
         const totalVentes = ventesJour.reduce((acc, v) => acc + (v.montant || 0), 0);
         const comparaison = getComparaisonJour();
+        const ecarts = getAnalyseEcarts();
+        const ecartsParBar = getAnalyseEcartsParBar();
         
         let y = 20;
         
@@ -2086,8 +2438,74 @@
         doc.text(`Stock restant - Biere: ${stockBiere} | Cidre: ${stockCidre}`, 25, y);
         y += 15;
         
+        // NOUVELLE SECTION: Analyse des écarts
+        if (ecarts.total.futsVides > 0) {
+          // Nouvelle page si nécessaire
+          if (y > 200) {
+            doc.addPage();
+            y = 20;
+          }
+          
+          doc.setFontSize(16);
+          doc.setTextColor(234, 88, 12);
+          doc.text('ANALYSE DES ECARTS (PERTES)', 20, y);
+          y += 10;
+          
+          doc.setFontSize(11);
+          doc.setTextColor(0);
+          
+          // Tableau écarts volume
+          doc.text('Controle Volume:', 25, y);
+          y += 7;
+          doc.text(`                    Biere       Cidre       Total`, 25, y);
+          y += 6;
+          doc.text(`Volume sorti:       ${ecarts.biere.volumeSorti.toFixed(0)}L        ${ecarts.cidre.volumeSorti.toFixed(0)}L        ${ecarts.total.volumeSorti.toFixed(0)}L`, 25, y);
+          y += 6;
+          doc.text(`Volume vendu:       ${ecarts.biere.volumeVendu.toFixed(1)}L      ${ecarts.cidre.volumeVendu.toFixed(1)}L      ${ecarts.total.volumeVendu.toFixed(1)}L`, 25, y);
+          y += 6;
+          doc.text(`Ecart:              ${ecarts.biere.ecartVolume.toFixed(1)}L       ${ecarts.cidre.ecartVolume.toFixed(1)}L       ${ecarts.total.ecartVolume.toFixed(1)}L`, 25, y);
+          y += 6;
+          
+          const getStatutText = (statut) => statut === 'ok' ? 'OK' : statut === 'attention' ? 'ATTENTION' : 'ALERTE';
+          doc.text(`Taux perte:         ${ecarts.biere.tauxPerte.toFixed(1)}% ${getStatutText(ecarts.biere.statutPerte)}    ${ecarts.cidre.tauxPerte.toFixed(1)}% ${getStatutText(ecarts.cidre.statutPerte)}    ${ecarts.total.tauxPerte.toFixed(1)}%`, 25, y);
+          y += 10;
+          
+          // Contrôle CA
+          doc.text('Controle CA:', 25, y);
+          y += 7;
+          doc.text(`CA declare:         ${ecarts.biere.caDeclare.toFixed(0)}EUR      ${ecarts.cidre.caDeclare.toFixed(0)}EUR      ${ecarts.total.caDeclare.toFixed(0)}EUR`, 25, y);
+          y += 6;
+          doc.text(`CA theorique:       ${ecarts.biere.caTheorique.toFixed(0)}EUR      ${ecarts.cidre.caTheorique.toFixed(0)}EUR      ${ecarts.total.caTheorique.toFixed(0)}EUR`, 25, y);
+          y += 6;
+          doc.text(`Ecart CA:           ${ecarts.biere.ecartCa >= 0 ? '+' : ''}${ecarts.biere.ecartCa.toFixed(0)}EUR      ${ecarts.cidre.ecartCa >= 0 ? '+' : ''}${ecarts.cidre.ecartCa.toFixed(0)}EUR      ${ecarts.total.ecartCa >= 0 ? '+' : ''}${ecarts.total.ecartCa.toFixed(0)}EUR`, 25, y);
+          y += 10;
+          
+          if (ecarts.total.manqueAGagner > 0) {
+            doc.setTextColor(220, 38, 38);
+            doc.text(`Manque a gagner estime: ~${ecarts.total.manqueAGagner.toFixed(0)} EUR`, 25, y);
+            y += 10;
+          }
+          
+          // Écarts par bar
+          doc.setTextColor(0);
+          doc.text('Ecarts par bar:', 25, y);
+          y += 7;
+          
+          ecartsParBar.forEach(bar => {
+            const statutSymbol = bar.statutPerte === 'ok' ? '(OK)' : bar.statutPerte === 'attention' ? '(!)' : '(ALERTE)';
+            doc.text(`  ${bar.barNom}: ${bar.tauxPerte.toFixed(1)}% ${statutSymbol} - ${bar.caDeclare.toFixed(0)}EUR`, 25, y);
+            y += 6;
+          });
+          y += 5;
+        }
+        
         // Incidents
         if (incidents.length > 0) {
+          if (y > 240) {
+            doc.addPage();
+            y = 20;
+          }
+          
           doc.setFontSize(16);
           doc.setTextColor(234, 88, 12);
           doc.text('INCIDENTS SIGNALES', 20, y);
@@ -2991,6 +3409,61 @@
                           💡 À 00h30, le PDF sera généré et votre client mail s'ouvrira avec le bilan en lien.
                         </p>
                       </div>
+                      
+                      <hr className="border-neutral-700" />
+                      <div>
+                        <h4 className="font-bold mb-3">💰 Tarifs</h4>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-1">Prix pinte (€)</label>
+                            <input type="number" step="0.5" id="prixPinte" defaultValue={config.prixPinte} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-sm" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-1">Prix pichet (€)</label>
+                            <input type="number" step="0.5" id="prixPichet" defaultValue={config.prixPichet} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-sm" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-1">Prix gobelet (€)</label>
+                            <input type="number" step="0.5" id="prixGobelet" defaultValue={config.prixGobelet} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-sm" />
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <hr className="border-neutral-700" />
+                      <div>
+                        <h4 className="font-bold mb-3">🛢️ Volumes</h4>
+                        <div className="grid grid-cols-2 gap-2 mb-3">
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-1">Vol. pinte (L)</label>
+                            <input type="number" step="0.1" id="volumePinte" defaultValue={config.volumePinte} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-sm" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-1">Vol. pichet (L)</label>
+                            <input type="number" step="0.1" id="volumePichet" defaultValue={config.volumePichet} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-sm" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-1">Vol. fût bière (L)</label>
+                            <input type="number" step="1" id="volumeFutBiere" defaultValue={config.volumeFutBiere} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-sm" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-1">Vol. fût cidre (L)</label>
+                            <input type="number" step="1" id="volumeFutCidre" defaultValue={config.volumeFutCidre} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-sm" />
+                          </div>
+                        </div>
+                        <p className="text-xs text-neutral-500 mt-2">ℹ️ Gobelets = consommable, non comptabilisé dans les volumes</p>
+                      </div>
+                      
+                      <hr className="border-neutral-700" />
+                      <div>
+                        <h4 className="font-bold mb-2">📉 Seuil alerte perte</h4>
+                        <div className="flex items-center gap-2">
+                          <input type="number" step="1" id="seuilPerte" defaultValue={config.seuilPerte} className="w-20 px-3 py-2 bg-neutral-800 rounded-lg text-sm" />
+                          <span className="text-neutral-400">%</span>
+                        </div>
+                        <p className="text-xs text-neutral-500 mt-2">Taux de perte acceptable (mousse, rinçage...)</p>
+                      </div>
                     </>
                   )}
                 </div>
@@ -3007,7 +3480,18 @@
                       stockInitialBiere: parseInt(document.getElementById('stockBiere').value) || 50,
                       stockInitialCidre: parseInt(document.getElementById('stockCidre').value) || 20,
                       maxFutsParBar: parseInt(document.getElementById('maxFuts').value) || 3,
-                      nombreJours: parseInt(document.getElementById('nbJours').value) || 4
+                      nombreJours: parseInt(document.getElementById('nbJours').value) || 4,
+                      // Tarifs
+                      prixPinte: parseFloat(document.getElementById('prixPinte')?.value) || 6,
+                      prixPichet: parseFloat(document.getElementById('prixPichet')?.value) || 15,
+                      prixGobelet: parseFloat(document.getElementById('prixGobelet')?.value) || 2,
+                      // Volumes
+                      volumePinte: parseFloat(document.getElementById('volumePinte')?.value) || 0.5,
+                      volumePichet: parseFloat(document.getElementById('volumePichet')?.value) || 1.5,
+                      volumeFutBiere: parseFloat(document.getElementById('volumeFutBiere')?.value) || 30,
+                      volumeFutCidre: parseFloat(document.getElementById('volumeFutCidre')?.value) || 20,
+                      // Seuil
+                      seuilPerte: parseFloat(document.getElementById('seuilPerte')?.value) || 10
                     });
                   }} className="flex-1 py-3 bg-red-600 rounded-lg font-medium">💾 Sauvegarder</button>
                 </div>
@@ -3109,105 +3593,194 @@
                 </div>
               </div>
               
+              {/* Onglets */}
+              <div className="bg-neutral-800 px-2 py-2 flex gap-1">
+                <button 
+                  onClick={() => setDashboardOnglet('synthese')}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium ${dashboardOnglet === 'synthese' ? 'bg-amber-600' : 'bg-neutral-700'}`}
+                >
+                  📊 Synthèse
+                </button>
+                <button 
+                  onClick={() => setDashboardOnglet('ecarts')}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium ${dashboardOnglet === 'ecarts' ? 'bg-amber-600' : 'bg-neutral-700'}`}
+                >
+                  📉 Écarts
+                </button>
+                <button 
+                  onClick={() => setDashboardOnglet('comparatif')}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium ${dashboardOnglet === 'comparatif' ? 'bg-amber-600' : 'bg-neutral-700'}`}
+                >
+                  📅 Comparatif
+                </button>
+              </div>
+              
               <div className="flex-1 overflow-y-auto p-4">
-                {(() => {
+                {/* ==================== ONGLET SYNTHÈSE ==================== */}
+                {dashboardOnglet === 'synthese' && (() => {
                   const stats = getStatistiques();
                   const classement = getClassementBars();
                   const previsions = getPrevisionRupture();
                   const activiteParHeure = getActiviteParHeure();
                   const comparaison = getComparaisonJour();
+                  const synthese = getSyntheseTop10();
                   
                   return (
                     <div className="space-y-4 max-w-2xl mx-auto">
-                      {/* Résumé rapide */}
+                      {/* Top 10 Indicateurs */}
                       <div className="grid grid-cols-2 gap-3">
-                        <div className="bg-blue-900/30 p-4 rounded-xl border border-blue-700">
-                          <p className="text-sm text-blue-300">Fûts en circulation</p>
-                          <p className="text-3xl font-bold text-blue-400">{stats.futsEnCirculation}</p>
-                        </div>
+                        {/* 1. CA total */}
                         <div className="bg-emerald-900/30 p-4 rounded-xl border border-emerald-700">
-                          <p className="text-sm text-emerald-300">Ventes J{jourActuel}</p>
-                          <p className="text-3xl font-bold text-emerald-400">{stats.totalVentesJour.toFixed(2)} €</p>
+                          <p className="text-xs text-emerald-300">💰 CA Jour</p>
+                          <p className="text-3xl font-black text-emerald-400">{synthese.caTotal.toFixed(0)} €</p>
                         </div>
-                      </div>
-
-                      {/* Comparaison J vs J-1 */}
-                      {comparaison && (
-                        <div className={`p-4 rounded-xl border ${comparaison.tendance === 'hausse' ? 'bg-green-900/30 border-green-700' : 'bg-red-900/30 border-red-700'}`}>
-                          <h4 className="font-bold mb-3">📈 Comparaison J{comparaison.jour} vs J{comparaison.jourMoins1}</h4>
-                          <p className="text-xs text-neutral-400 mb-3">À {comparaison.heureComparaison}, hier vous aviez :</p>
-                          
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <p className="text-sm text-neutral-300">Ventes</p>
-                              <div className="flex items-baseline gap-2">
-                                <span className="text-2xl font-bold">{comparaison.ventesJour.toFixed(0)}€</span>
-                                <span className={`text-sm ${comparaison.tendance === 'hausse' ? 'text-green-400' : 'text-red-400'}`}>
-                                  {comparaison.tendance === 'hausse' ? '▲' : '▼'} {Math.abs(comparaison.ecartPourcent)}%
-                                </span>
-                              </div>
-                              <p className="text-xs text-neutral-500">vs {comparaison.ventesJMoins1.toFixed(0)}€ hier</p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-neutral-300">Fûts sortis</p>
-                              <div className="flex items-baseline gap-2">
-                                <span className="text-2xl font-bold">{comparaison.futsJour}</span>
-                                <span className={`text-sm ${comparaison.ecartFuts >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                  {comparaison.ecartFuts >= 0 ? '+' : ''}{comparaison.ecartFuts}
-                                </span>
-                              </div>
-                              <p className="text-xs text-neutral-500">vs {comparaison.futsJMoins1} hier</p>
-                            </div>
+                        
+                        {/* 2. Comparaison J vs J-1 */}
+                        {synthese.comparaison ? (
+                          <div className={`p-4 rounded-xl border ${synthese.comparaison.tendance === 'hausse' ? 'bg-green-900/30 border-green-700' : 'bg-red-900/30 border-red-700'}`}>
+                            <p className="text-xs text-neutral-300">📈 vs J-1</p>
+                            <p className={`text-2xl font-black ${synthese.comparaison.tendance === 'hausse' ? 'text-green-400' : 'text-red-400'}`}>
+                              {synthese.comparaison.tendance === 'hausse' ? '+' : ''}{synthese.comparaison.ecartVentes.toFixed(0)}€
+                            </p>
+                            <p className={`text-sm ${synthese.comparaison.tendance === 'hausse' ? 'text-green-400' : 'text-red-400'}`}>
+                              {synthese.comparaison.tendance === 'hausse' ? '▲' : '▼'} {Math.abs(synthese.comparaison.ecartPourcent)}%
+                            </p>
                           </div>
-                          
-                          {comparaison.totalFinalJMoins1 > 0 && (
-                            <div className="mt-3 pt-3 border-t border-white/10">
-                              <p className="text-xs text-neutral-400">
-                                Total final J{comparaison.jourMoins1} : <span className="font-bold text-white">{comparaison.totalFinalJMoins1.toFixed(2)}€</span>
-                              </p>
-                            </div>
+                        ) : (
+                          <div className="bg-neutral-800 p-4 rounded-xl border border-neutral-700">
+                            <p className="text-xs text-neutral-400">📈 vs J-1</p>
+                            <p className="text-lg text-neutral-500">J1 - Pas de comparaison</p>
+                          </div>
+                        )}
+                        
+                        {/* 3. Fûts consommés */}
+                        <div className="bg-blue-900/30 p-4 rounded-xl border border-blue-700">
+                          <p className="text-xs text-blue-300">🛢️ Fûts consommés</p>
+                          <p className="text-3xl font-black text-blue-400">{synthese.futsConsommes}</p>
+                          <p className="text-xs text-neutral-400">{synthese.futsBiere}🍺 + {synthese.futsCidre}🍎</p>
+                        </div>
+                        
+                        {/* 4. Durée moyenne fût */}
+                        <div className="bg-purple-900/30 p-4 rounded-xl border border-purple-700">
+                          <p className="text-xs text-purple-300">⏱️ Durée moy. fût</p>
+                          <p className="text-3xl font-black text-purple-400">{synthese.dureeMoyenne}</p>
+                        </div>
+                        
+                        {/* 5. Taux de perte */}
+                        <div className={`p-4 rounded-xl border ${
+                          synthese.statutPerte === 'ok' ? 'bg-green-900/30 border-green-700' :
+                          synthese.statutPerte === 'attention' ? 'bg-yellow-900/30 border-yellow-700' :
+                          'bg-red-900/30 border-red-700'
+                        }`}>
+                          <p className="text-xs text-neutral-300">📉 Taux perte</p>
+                          <p className={`text-3xl font-black ${
+                            synthese.statutPerte === 'ok' ? 'text-green-400' :
+                            synthese.statutPerte === 'attention' ? 'text-yellow-400' :
+                            'text-red-400'
+                          }`}>
+                            {synthese.tauxPerteGlobal.toFixed(1)}%
+                            {synthese.statutPerte === 'ok' ? ' ✓' : synthese.statutPerte === 'attention' ? ' ⚠️' : ' 🔴'}
+                          </p>
+                          {synthese.manqueAGagner > 0 && (
+                            <p className="text-xs text-neutral-400">~{synthese.manqueAGagner.toFixed(0)}€ manque</p>
                           )}
                         </div>
-                      )}
-
-                      {/* Prévision de rupture de stock */}
-                      <div className="bg-gradient-to-r from-amber-900/30 to-orange-900/30 p-4 rounded-xl border border-amber-700">
-                        <h4 className="font-bold mb-3">⏱️ Prévision de rupture de stock</h4>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <p className="text-sm text-amber-300">🍺 Bière ({stockBiere} restants)</p>
-                            {previsions.biere.tempsRestant ? (
-                              <p className="text-xl font-bold text-amber-400">~{previsions.biere.tempsRestant}</p>
-                            ) : (
-                              <p className="text-sm text-neutral-400">Données insuffisantes</p>
-                            )}
-                            <p className="text-xs text-neutral-500">{previsions.biere.rythme} fûts/h</p>
-                          </div>
-                          <div>
-                            <p className="text-sm text-orange-300">🍎 Cidre ({stockCidre} restants)</p>
-                            {previsions.cidre.tempsRestant ? (
-                              <p className="text-xl font-bold text-orange-400">~{previsions.cidre.tempsRestant}</p>
-                            ) : (
-                              <p className="text-sm text-neutral-400">Données insuffisantes</p>
-                            )}
-                            <p className="text-xs text-neutral-500">{previsions.cidre.rythme} fûts/h</p>
-                          </div>
+                        
+                        {/* 6. Bar le plus rentable */}
+                        <div className="bg-amber-900/30 p-4 rounded-xl border border-amber-700">
+                          <p className="text-xs text-amber-300">🎯 Meilleur ratio</p>
+                          {synthese.barPlusRentable ? (
+                            <>
+                              <p className="text-lg font-bold text-amber-400">{synthese.barPlusRentable.barNom}</p>
+                              <p className="text-xs text-neutral-400">{synthese.barPlusRentable.ratioParFut.toFixed(0)}€/fût</p>
+                            </>
+                          ) : (
+                            <p className="text-neutral-500">-</p>
+                          )}
+                        </div>
+                        
+                        {/* 7. Pic d'activité */}
+                        <div className="bg-orange-900/30 p-4 rounded-xl border border-orange-700">
+                          <p className="text-xs text-orange-300">⚡ Pic activité</p>
+                          <p className="text-lg font-bold text-orange-400">{synthese.picActivite?.creneauLabel || '-'}</p>
+                          <p className="text-xs text-neutral-400">{synthese.picActivite?.caDeclare?.toFixed(0) || 0}€</p>
+                        </div>
+                        
+                        {/* 8. Stock restant */}
+                        <div className="bg-teal-900/30 p-4 rounded-xl border border-teal-700">
+                          <p className="text-xs text-teal-300">📦 Stock restant</p>
+                          <p className="text-2xl font-black text-teal-400">{stockBiere}🍺 {stockCidre}🍎</p>
                         </div>
                       </div>
-
+                      
+                      {/* 9. Classement bars */}
+                      <div className="bg-neutral-800 p-4 rounded-xl">
+                        <h4 className="font-bold mb-3">🏆 Classement bars par CA</h4>
+                        <div className="space-y-2">
+                          {synthese.classementBars.slice(0, 5).map((bar, idx) => (
+                            <div key={bar.barId} className="flex items-center gap-3 bg-neutral-700/50 p-2 rounded-lg">
+                              <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${
+                                idx === 0 ? 'bg-amber-500 text-black' : idx === 1 ? 'bg-neutral-400 text-black' : idx === 2 ? 'bg-amber-700' : 'bg-neutral-600'
+                              }`}>
+                                {idx + 1}
+                              </span>
+                              <div className="flex-1">
+                                <p className="font-medium">{bar.type === 'biere' ? '🍺' : '🍎'} {bar.barNom}</p>
+                                <p className="text-xs text-neutral-400">{bar.futsVides} fûts • {bar.ratioParFut.toFixed(0)}€/fût</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-bold text-emerald-400">{bar.caDeclare.toFixed(0)} €</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      {/* 10. Progression festival */}
+                      <div className="bg-neutral-800 p-4 rounded-xl">
+                        <h4 className="font-bold mb-3">📈 Progression festival</h4>
+                        <div className="space-y-2">
+                          {synthese.progressionFestival.map((j, idx) => {
+                            const maxCa = Math.max(...synthese.progressionFestival.map(x => x.ca), 1);
+                            const pct = (j.ca / maxCa) * 100;
+                            const progression = idx > 0 && synthese.progressionFestival[idx-1].ca > 0 
+                              ? ((j.ca - synthese.progressionFestival[idx-1].ca) / synthese.progressionFestival[idx-1].ca * 100).toFixed(0)
+                              : null;
+                            return (
+                              <div key={j.jour} className="flex items-center gap-3">
+                                <span className={`w-8 font-bold ${j.jour === jourActuel ? 'text-amber-400' : 'text-neutral-400'}`}>J{j.jour}</span>
+                                <div className="flex-1 bg-neutral-700 rounded-full h-6 overflow-hidden">
+                                  <div 
+                                    className={`h-full ${j.jour === jourActuel ? 'bg-amber-500' : 'bg-emerald-600'}`}
+                                    style={{ width: `${pct}%` }}
+                                  />
+                                </div>
+                                <div className="w-28 text-right text-sm">
+                                  <span className="font-medium">{j.ca.toFixed(0)} €</span>
+                                  {progression && (
+                                    <span className={`ml-1 text-xs ${parseInt(progression) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                      {parseInt(progression) >= 0 ? '+' : ''}{progression}%
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      
                       {/* Graphique activité par heure */}
                       <div className="bg-neutral-800 p-4 rounded-xl">
-                        <h4 className="font-bold mb-3">📊 Activité par heure (J{jourActuel})</h4>
+                        <h4 className="font-bold mb-3">📊 Activité par heure</h4>
                         <div className="space-y-1">
                           {activiteParHeure.map(h => {
                             const maxActivite = Math.max(...activiteParHeure.map(x => x.sorties + x.retours), 1);
-                            const pourcentage = ((h.sorties + h.retours) / maxActivite) * 100;
                             return (
                               <div key={h.heure} className="flex items-center gap-2 text-xs">
                                 <span className="w-12 text-neutral-400">{h.heureAffichage}h</span>
                                 <div className="flex-1 flex h-4 bg-neutral-700 rounded overflow-hidden">
-                                  <div className="bg-green-500" style={{ width: `${(h.sorties / maxActivite) * 100}%` }} title={`${h.sorties} sorties`} />
-                                  <div className="bg-blue-500" style={{ width: `${(h.retours / maxActivite) * 100}%` }} title={`${h.retours} retours`} />
+                                  <div className="bg-green-500" style={{ width: `${(h.sorties / maxActivite) * 100}%` }} />
+                                  <div className="bg-blue-500" style={{ width: `${(h.retours / maxActivite) * 100}%` }} />
                                 </div>
                                 <span className="w-16 text-right">
                                   <span className="text-green-400">+{h.sorties}</span>
@@ -3217,100 +3790,392 @@
                             );
                           })}
                         </div>
-                        <div className="flex gap-4 mt-2 text-xs text-neutral-400">
-                          <span><span className="inline-block w-3 h-3 bg-green-500 rounded mr-1"></span>Sorties</span>
-                          <span><span className="inline-block w-3 h-3 bg-blue-500 rounded mr-1"></span>Retours</span>
+                      </div>
+                      
+                      {/* Prévisions rupture */}
+                      <div className="bg-gradient-to-r from-amber-900/30 to-orange-900/30 p-4 rounded-xl border border-amber-700">
+                        <h4 className="font-bold mb-3">⏱️ Prévision rupture stock</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-sm text-amber-300">🍺 Bière ({stockBiere})</p>
+                            <p className="text-xl font-bold text-amber-400">{previsions.biere.tempsRestant || '-'}</p>
+                            <p className="text-xs text-neutral-500">{previsions.biere.rythme} fûts/h</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-orange-300">🍎 Cidre ({stockCidre})</p>
+                            <p className="text-xl font-bold text-orange-400">{previsions.cidre.tempsRestant || '-'}</p>
+                            <p className="text-xs text-neutral-500">{previsions.cidre.rythme} fûts/h</p>
+                          </div>
                         </div>
                       </div>
-
-                      {/* Classement des bars */}
+                    </div>
+                  );
+                })()}
+                
+                {/* ==================== ONGLET ÉCARTS ==================== */}
+                {dashboardOnglet === 'ecarts' && (() => {
+                  const ecarts = getAnalyseEcarts();
+                  const ecartsParBar = getAnalyseEcartsParBar();
+                  const ecartsParCreneau = getAnalyseEcartsParCreneau();
+                  
+                  const getStatutIcon = (statut) => {
+                    if (statut === 'ok') return '✅';
+                    if (statut === 'attention') return '⚠️';
+                    return '🔴';
+                  };
+                  
+                  const getStatutColor = (statut) => {
+                    if (statut === 'ok') return 'text-green-400';
+                    if (statut === 'attention') return 'text-yellow-400';
+                    return 'text-red-400';
+                  };
+                  
+                  return (
+                    <div className="space-y-4 max-w-2xl mx-auto">
+                      {/* Résumé global */}
                       <div className="bg-neutral-800 p-4 rounded-xl">
-                        <h4 className="font-bold mb-3">🏆 Classement des bars</h4>
+                        <h4 className="font-bold mb-4">📉 Analyse des écarts - J{jourActuel}</h4>
+                        
+                        {/* Tableau principal */}
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-neutral-600">
+                                <th className="text-left py-2"></th>
+                                <th className="text-right py-2 px-2">🍺 Bière</th>
+                                <th className="text-right py-2 px-2">🍎 Cidre</th>
+                                <th className="text-right py-2 px-2">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr className="border-b border-neutral-700">
+                                <td className="py-2 text-neutral-400">Fûts vides</td>
+                                <td className="text-right px-2">{ecarts.biere.futsVides}</td>
+                                <td className="text-right px-2">{ecarts.cidre.futsVides}</td>
+                                <td className="text-right px-2 font-bold">{ecarts.total.futsVides}</td>
+                              </tr>
+                              <tr className="border-b border-neutral-700">
+                                <td className="py-2 text-neutral-400">Volume sorti</td>
+                                <td className="text-right px-2">{ecarts.biere.volumeSorti} L</td>
+                                <td className="text-right px-2">{ecarts.cidre.volumeSorti} L</td>
+                                <td className="text-right px-2 font-bold">{ecarts.total.volumeSorti} L</td>
+                              </tr>
+                              <tr className="border-b border-neutral-700">
+                                <td className="py-2 text-neutral-400">Pintes vendues</td>
+                                <td className="text-right px-2">{ecarts.biere.pintes}</td>
+                                <td className="text-right px-2">{ecarts.cidre.pintes}</td>
+                                <td className="text-right px-2">{ecarts.biere.pintes + ecarts.cidre.pintes}</td>
+                              </tr>
+                              <tr className="border-b border-neutral-700">
+                                <td className="py-2 text-neutral-400">Pichets vendus</td>
+                                <td className="text-right px-2">{ecarts.biere.pichets}</td>
+                                <td className="text-right px-2">{ecarts.cidre.pichets}</td>
+                                <td className="text-right px-2">{ecarts.biere.pichets + ecarts.cidre.pichets}</td>
+                              </tr>
+                              <tr className="border-b border-neutral-700">
+                                <td className="py-2 text-neutral-400">Volume vendu</td>
+                                <td className="text-right px-2">{ecarts.biere.volumeVendu.toFixed(1)} L</td>
+                                <td className="text-right px-2">{ecarts.cidre.volumeVendu.toFixed(1)} L</td>
+                                <td className="text-right px-2 font-bold">{ecarts.total.volumeVendu.toFixed(1)} L</td>
+                              </tr>
+                              <tr className="border-b border-neutral-700 bg-neutral-700/30">
+                                <td className="py-2 font-bold">Écart volume</td>
+                                <td className="text-right px-2 font-bold">{ecarts.biere.ecartVolume.toFixed(1)} L</td>
+                                <td className="text-right px-2 font-bold">{ecarts.cidre.ecartVolume.toFixed(1)} L</td>
+                                <td className="text-right px-2 font-bold">{ecarts.total.ecartVolume.toFixed(1)} L</td>
+                              </tr>
+                              <tr className="border-b border-neutral-700 bg-neutral-700/30">
+                                <td className="py-2 font-bold">Taux perte</td>
+                                <td className={`text-right px-2 font-bold ${getStatutColor(ecarts.biere.statutPerte)}`}>
+                                  {ecarts.biere.tauxPerte.toFixed(1)}% {getStatutIcon(ecarts.biere.statutPerte)}
+                                </td>
+                                <td className={`text-right px-2 font-bold ${getStatutColor(ecarts.cidre.statutPerte)}`}>
+                                  {ecarts.cidre.tauxPerte.toFixed(1)}% {getStatutIcon(ecarts.cidre.statutPerte)}
+                                </td>
+                                <td className={`text-right px-2 font-bold ${getStatutColor(ecarts.total.statutPerte)}`}>
+                                  {ecarts.total.tauxPerte.toFixed(1)}% {getStatutIcon(ecarts.total.statutPerte)}
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                        
+                        {ecarts.total.manqueAGagner > 0 && (
+                          <div className="mt-3 p-3 bg-red-900/30 rounded-lg border border-red-700">
+                            <p className="text-sm text-red-300">
+                              💸 Manque à gagner estimé : <span className="font-bold">~{ecarts.total.manqueAGagner.toFixed(0)} €</span>
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Contrôle cohérence CA */}
+                      <div className="bg-neutral-800 p-4 rounded-xl">
+                        <h4 className="font-bold mb-4">💰 Contrôle cohérence CA</h4>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-neutral-600">
+                                <th className="text-left py-2"></th>
+                                <th className="text-right py-2 px-2">🍺 Bière</th>
+                                <th className="text-right py-2 px-2">🍎 Cidre</th>
+                                <th className="text-right py-2 px-2">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr className="border-b border-neutral-700">
+                                <td className="py-2 text-neutral-400">CA déclaré</td>
+                                <td className="text-right px-2">{ecarts.biere.caDeclare.toFixed(2)} €</td>
+                                <td className="text-right px-2">{ecarts.cidre.caDeclare.toFixed(2)} €</td>
+                                <td className="text-right px-2 font-bold">{ecarts.total.caDeclare.toFixed(2)} €</td>
+                              </tr>
+                              <tr className="border-b border-neutral-700">
+                                <td className="py-2 text-neutral-400">CA théorique*</td>
+                                <td className="text-right px-2">{ecarts.biere.caTheorique.toFixed(2)} €</td>
+                                <td className="text-right px-2">{ecarts.cidre.caTheorique.toFixed(2)} €</td>
+                                <td className="text-right px-2 font-bold">{ecarts.total.caTheorique.toFixed(2)} €</td>
+                              </tr>
+                              <tr className="border-b border-neutral-700 bg-neutral-700/30">
+                                <td className="py-2 font-bold">Écart CA</td>
+                                <td className={`text-right px-2 font-bold ${ecarts.biere.ecartCa >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                  {ecarts.biere.ecartCa >= 0 ? '+' : ''}{ecarts.biere.ecartCa.toFixed(2)} €
+                                </td>
+                                <td className={`text-right px-2 font-bold ${ecarts.cidre.ecartCa >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                  {ecarts.cidre.ecartCa >= 0 ? '+' : ''}{ecarts.cidre.ecartCa.toFixed(2)} €
+                                </td>
+                                <td className={`text-right px-2 font-bold ${ecarts.total.ecartCa >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                  {ecarts.total.ecartCa >= 0 ? '+' : ''}{ecarts.total.ecartCa.toFixed(2)} €
+                                </td>
+                              </tr>
+                              <tr>
+                                <td className="py-2 font-bold">Cohérence</td>
+                                <td className={`text-right px-2 font-bold ${ecarts.biere.coherenceCa >= 95 ? 'text-green-400' : ecarts.biere.coherenceCa >= 90 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                  {ecarts.biere.coherenceCa.toFixed(1)}%
+                                </td>
+                                <td className={`text-right px-2 font-bold ${ecarts.cidre.coherenceCa >= 95 ? 'text-green-400' : ecarts.cidre.coherenceCa >= 90 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                  {ecarts.cidre.coherenceCa.toFixed(1)}%
+                                </td>
+                                <td className="text-right px-2">-</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className="text-xs text-neutral-500 mt-2">* CA théorique = (Pintes × {config.prixPinte}€) + (Pichets × {config.prixPichet}€) + (Gobelets × {config.prixGobelet}€)</p>
+                      </div>
+                      
+                      {/* Écarts par bar */}
+                      <div className="bg-neutral-800 p-4 rounded-xl">
+                        <h4 className="font-bold mb-4">🍺 Écarts par bar</h4>
                         <div className="space-y-2">
-                          {classement.slice(0, 5).map((bar, idx) => (
-                            <div key={bar.id} className="flex items-center gap-3 bg-neutral-700/50 p-2 rounded-lg">
-                              <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${
-                                idx === 0 ? 'bg-amber-500 text-black' : idx === 1 ? 'bg-neutral-400 text-black' : idx === 2 ? 'bg-amber-700' : 'bg-neutral-600'
-                              }`}>
-                                {idx + 1}
-                              </span>
-                              <div className="flex-1">
-                                <p className="font-medium">{bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom}</p>
-                                <p className="text-xs text-neutral-400">{bar.futsConsommes} fûts consommés</p>
-                              </div>
-                              <div className="text-right">
-                                <p className="font-bold text-emerald-400">{bar.chiffreAffaires.toFixed(2)} €</p>
+                          {ecartsParBar.map(bar => (
+                            <div key={bar.barId} className={`p-3 rounded-lg border ${
+                              bar.statutPerte === 'ok' ? 'bg-green-900/20 border-green-700' :
+                              bar.statutPerte === 'attention' ? 'bg-yellow-900/20 border-yellow-700' :
+                              'bg-red-900/20 border-red-700'
+                            }`}>
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="font-bold">{bar.type === 'biere' ? '🍺' : '🍎'} {bar.barNom}</p>
+                                  <p className="text-xs text-neutral-400">
+                                    {bar.futsVides} fûts • {bar.volumeSorti}L sorti • {bar.volumeVendu.toFixed(1)}L vendu
+                                  </p>
+                                </div>
+                                <div className="text-right">
+                                  <p className={`text-xl font-bold ${getStatutColor(bar.statutPerte)}`}>
+                                    {bar.tauxPerte.toFixed(1)}% {getStatutIcon(bar.statutPerte)}
+                                  </p>
+                                  <p className="text-xs text-neutral-400">{bar.caDeclare.toFixed(0)}€ CA</p>
+                                </div>
                               </div>
                             </div>
                           ))}
-                          {classement.length === 0 && <p className="text-neutral-500 text-sm">Aucune donnée</p>}
                         </div>
                       </div>
-
-                      {/* Comparaison par jour */}
+                      
+                      {/* Écarts par créneau */}
                       <div className="bg-neutral-800 p-4 rounded-xl">
-                        <h4 className="font-bold mb-3">📅 Comparaison par jour</h4>
+                        <h4 className="font-bold mb-4">⏱️ CA par créneau</h4>
                         <div className="space-y-2">
-                          {Array.from({ length: config.nombreJours }, (_, i) => {
-                            const jour = i + 1;
-                            const montant = stats.ventesParJour[jour] || 0;
-                            const futsJour = historique.filter(h => !h.annule && h.jour === jour && h.type === 'SORTIE').length;
-                            const maxMontant = Math.max(...Object.values(stats.ventesParJour), 1);
-                            const pourcentage = (montant / maxMontant) * 100;
-                            return (
-                              <div key={jour} className="flex items-center gap-3">
-                                <span className={`w-8 text-sm font-bold ${jour === jourActuel ? 'text-amber-400' : 'text-neutral-400'}`}>J{jour}</span>
-                                <div className="flex-1 bg-neutral-700 rounded-full h-6 overflow-hidden">
-                                  <div 
-                                    className={`h-full ${jour === jourActuel ? 'bg-amber-500' : 'bg-emerald-600'} transition-all`}
-                                    style={{ width: `${pourcentage}%` }}
-                                  />
+                          {ecartsParCreneau.map(c => (
+                            <div key={c.creneauId} className="p-3 bg-neutral-700/50 rounded-lg">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="font-bold">{c.creneauLabel}</p>
+                                  <p className="text-xs text-neutral-400">
+                                    {c.pintes} pintes • {c.pichets} pichets • {c.gobelets} gobelets
+                                  </p>
                                 </div>
-                                <div className="w-32 text-right text-sm">
-                                  <span className="font-medium">{montant.toFixed(0)} €</span>
-                                  <span className="text-neutral-500 ml-2">({futsJour} fûts)</span>
+                                <div className="text-right">
+                                  <p className="text-lg font-bold text-emerald-400">{c.caDeclare.toFixed(0)} €</p>
+                                  <p className={`text-xs ${c.ecartCa >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                    vs théo: {c.ecartCa >= 0 ? '+' : ''}{c.ecartCa.toFixed(0)}€
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      {/* Légende */}
+                      <div className="bg-neutral-800 p-3 rounded-lg">
+                        <p className="text-xs text-neutral-400">
+                          <span className="text-green-400">✅ OK</span> ≤ {config.seuilPerte}% • 
+                          <span className="text-yellow-400 ml-2">⚠️ Attention</span> {config.seuilPerte}-{(config.seuilPerte * 1.5).toFixed(0)}% • 
+                          <span className="text-red-400 ml-2">🔴 Alerte</span> > {(config.seuilPerte * 1.5).toFixed(0)}%
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })()}
+                
+                {/* ==================== ONGLET COMPARATIF ==================== */}
+                {dashboardOnglet === 'comparatif' && (() => {
+                  const comparatif = getComparatifFestival();
+                  
+                  return (
+                    <div className="space-y-4 max-w-2xl mx-auto">
+                      {/* Tableau comparatif */}
+                      <div className="bg-neutral-800 p-4 rounded-xl">
+                        <h4 className="font-bold mb-4">📅 Comparatif Festival</h4>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-neutral-600">
+                                <th className="text-left py-2"></th>
+                                {comparatif.jours.map(j => (
+                                  <th key={j.jour} className={`text-center py-2 px-2 ${j.jour === jourActuel ? 'text-amber-400' : ''}`}>
+                                    J{j.jour}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr className="border-b border-neutral-700">
+                                <td className="py-2 text-neutral-400">💰 CA</td>
+                                {comparatif.jours.map(j => (
+                                  <td key={j.jour} className={`text-center px-2 font-bold ${j.jour === jourActuel ? 'text-amber-400' : ''}`}>
+                                    {j.hasDonnees ? `${j.ca.toFixed(0)}€` : '-'}
+                                  </td>
+                                ))}
+                              </tr>
+                              <tr className="border-b border-neutral-700">
+                                <td className="py-2 text-neutral-400">🍺 Fûts bière</td>
+                                {comparatif.jours.map(j => (
+                                  <td key={j.jour} className="text-center px-2">
+                                    {j.hasDonnees ? j.futsBiere : '-'}
+                                  </td>
+                                ))}
+                              </tr>
+                              <tr className="border-b border-neutral-700">
+                                <td className="py-2 text-neutral-400">🍎 Fûts cidre</td>
+                                {comparatif.jours.map(j => (
+                                  <td key={j.jour} className="text-center px-2">
+                                    {j.hasDonnees ? j.futsCidre : '-'}
+                                  </td>
+                                ))}
+                              </tr>
+                              <tr className="border-b border-neutral-700">
+                                <td className="py-2 text-neutral-400">📉 Taux perte</td>
+                                {comparatif.jours.map(j => (
+                                  <td key={j.jour} className={`text-center px-2 ${
+                                    j.tauxPerte <= config.seuilPerte ? 'text-green-400' :
+                                    j.tauxPerte <= config.seuilPerte * 1.5 ? 'text-yellow-400' : 'text-red-400'
+                                  }`}>
+                                    {j.hasDonnees ? `${j.tauxPerte.toFixed(1)}%` : '-'}
+                                  </td>
+                                ))}
+                              </tr>
+                              <tr className="border-b border-neutral-700">
+                                <td className="py-2 text-neutral-400">🏆 Top bar</td>
+                                {comparatif.jours.map(j => (
+                                  <td key={j.jour} className="text-center px-2 text-xs">
+                                    {j.hasDonnees ? j.topBar : '-'}
+                                  </td>
+                                ))}
+                              </tr>
+                              <tr>
+                                <td className="py-2 text-neutral-400">⚡ Pic</td>
+                                {comparatif.jours.map(j => (
+                                  <td key={j.jour} className="text-center px-2 text-xs">
+                                    {j.hasDonnees ? j.picCreneau : '-'}
+                                  </td>
+                                ))}
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                      
+                      {/* Totaux festival */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-emerald-900/30 p-4 rounded-xl border border-emerald-700">
+                          <p className="text-sm text-emerald-300">💰 CA Total Festival</p>
+                          <p className="text-3xl font-black text-emerald-400">{comparatif.caTotal.toFixed(0)} €</p>
+                        </div>
+                        <div className="bg-blue-900/30 p-4 rounded-xl border border-blue-700">
+                          <p className="text-sm text-blue-300">🛢️ Fûts consommés</p>
+                          <p className="text-3xl font-black text-blue-400">{comparatif.futsTotal}</p>
+                        </div>
+                      </div>
+                      
+                      {/* Graphique évolution */}
+                      <div className="bg-neutral-800 p-4 rounded-xl">
+                        <h4 className="font-bold mb-4">📈 Évolution CA</h4>
+                        <div className="space-y-3">
+                          {comparatif.jours.map((j, idx) => {
+                            const maxCa = Math.max(...comparatif.jours.map(x => x.ca), 1);
+                            const pct = (j.ca / maxCa) * 100;
+                            const progression = idx > 0 && comparatif.jours[idx-1].ca > 0 
+                              ? ((j.ca - comparatif.jours[idx-1].ca) / comparatif.jours[idx-1].ca * 100).toFixed(0)
+                              : null;
+                            return (
+                              <div key={j.jour}>
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className={`font-bold ${j.jour === jourActuel ? 'text-amber-400' : 'text-neutral-300'}`}>
+                                    Jour {j.jour}
+                                  </span>
+                                  <div>
+                                    <span className="font-bold">{j.ca.toFixed(0)} €</span>
+                                    {progression && (
+                                      <span className={`ml-2 text-sm ${parseInt(progression) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        ({parseInt(progression) >= 0 ? '+' : ''}{progression}%)
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="bg-neutral-700 rounded-full h-4 overflow-hidden">
+                                  <div 
+                                    className={`h-full ${j.jour === jourActuel ? 'bg-amber-500' : 'bg-emerald-600'} transition-all`}
+                                    style={{ width: `${j.hasDonnees ? pct : 0}%` }}
+                                  />
                                 </div>
                               </div>
                             );
                           })}
                         </div>
                       </div>
-
-                      {/* Alertes */}
-                      {(stats.barsSansFut.length > 0 || stats.equipementsDefaillants.length > 0) && (
-                        <div className="bg-red-900/30 p-4 rounded-xl border border-red-700">
-                          <h4 className="font-bold mb-2 text-red-400">⚠️ Alertes</h4>
-                          {stats.barsSansFut.length > 0 && (
-                            <div className="mb-2">
-                              <p className="text-sm text-red-300">Bars sans fût :</p>
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                {stats.barsSansFut.map(bar => (
-                                  <span key={bar.id} className="text-xs bg-red-800 px-2 py-1 rounded">{bar.nom}</span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {stats.equipementsDefaillants.length > 0 && (
+                      
+                      {/* Stats moyennes */}
+                      {jourActuel > 1 && (
+                        <div className="bg-neutral-800 p-4 rounded-xl">
+                          <h4 className="font-bold mb-3">📊 Moyennes</h4>
+                          <div className="grid grid-cols-2 gap-4 text-center">
                             <div>
-                              <p className="text-sm text-orange-300">Équipements défaillants signalés : {stats.equipementsDefaillants.length}</p>
+                              <p className="text-neutral-400 text-sm">CA moyen/jour</p>
+                              <p className="text-2xl font-bold text-emerald-400">
+                                {(comparatif.caTotal / jourActuel).toFixed(0)} €
+                              </p>
                             </div>
-                          )}
+                            <div>
+                              <p className="text-neutral-400 text-sm">Fûts moy./jour</p>
+                              <p className="text-2xl font-bold text-blue-400">
+                                {(comparatif.futsTotal / jourActuel).toFixed(1)}
+                              </p>
+                            </div>
+                          </div>
                         </div>
                       )}
-
-                      {/* Logs d'audit récents */}
-                      <div className="bg-neutral-800 p-4 rounded-xl">
-                        <h4 className="font-bold mb-2">📝 Dernières actions</h4>
-                        <div className="space-y-1 max-h-32 overflow-y-auto">
-                          {auditLogs.slice(0, 10).map(log => (
-                            <div key={log.id} className="text-xs flex items-center justify-between py-1 border-b border-neutral-700 last:border-0">
-                              <span className="text-neutral-300">{log.action}: {log.details}</span>
-                              <span className="text-neutral-500">{log.user}</span>
-                            </div>
-                          ))}
-                          {auditLogs.length === 0 && <p className="text-neutral-500 text-sm">Aucune action enregistrée</p>}
-                        </div>
-                      </div>
                     </div>
                   );
                 })()}
