@@ -27,7 +27,7 @@
     @media (display-mode: standalone) {
       body { padding-top: env(safe-area-inset-top); }
     }
-    /* Écran de chargement */
+    /* Écran de chargement - simplifié */
     #loading-screen {
       position: fixed;
       inset: 0;
@@ -43,11 +43,6 @@
     .loader-logo {
       width: 80px;
       height: 80px;
-      animation: pulse-glow 1.5s ease-in-out infinite;
-    }
-    @keyframes pulse-glow {
-      0%, 100% { transform: scale(1); filter: drop-shadow(0 0 10px #39ff14); }
-      50% { transform: scale(1.1); filter: drop-shadow(0 0 20px #39ff14); }
     }
   </style>
   
@@ -365,7 +360,7 @@
           <div className="min-h-screen bg-black flex items-center justify-center p-4">
             <div className="w-full max-w-sm">
               <div className="text-center mb-8">
-                <img src="logo-hellfest.png" alt="Hellfest" className="w-24 h-24 mx-auto mb-4" style={{ filter: 'drop-shadow(0 0 10px #39ff14)' }} />
+                <img src="logo-hellfest.png" alt="Hellfest" className="w-24 h-24 mx-auto mb-4" />
                 <h1 className="text-2xl font-bold text-white mb-2">Gestion Fûts</h1>
                 <p className="text-green-400 font-bold">HELLFEST 2026</p>
               </div>
@@ -2872,7 +2867,7 @@
           <div className="bg-neutral-900 border-b border-red-900 p-3">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <img src="logo-hellfest.png" alt="Hellfest" className="w-10 h-10" style={{ filter: 'drop-shadow(0 0 5px #39ff14)' }} />
+                <img src="logo-hellfest.png" alt="Hellfest" className="w-10 h-10" />
                 <div>
                   <h1 className="font-bold text-green-400">HELLFEST 2026</h1>
                   <p className="text-xs text-neutral-400">Gestion des Fûts</p>
@@ -3223,7 +3218,7 @@
                         <span className="font-bold text-lg">{bar.nom}</span>
                       </div>
                       {isFull && (
-                        <span className="px-3 py-1 bg-red-600 rounded-full text-xs font-bold animate-pulse">
+                        <span className="px-3 py-1 bg-red-600 rounded-full text-xs font-bold">
                           COMPLET
                         </span>
                       )}
@@ -5164,7 +5159,7 @@
                 {/* Contenu du tutoriel selon l'étape */}
                 {tutorielStep === 0 && (
                   <div className="p-6 text-center">
-                    <img src="logo-hellfest.png" alt="Hellfest" className="w-20 h-20 mx-auto mb-4" style={{ filter: 'drop-shadow(0 0 10px #39ff14)' }} />
+                    <img src="logo-hellfest.png" alt="Hellfest" className="w-20 h-20 mx-auto mb-4" />
                     <h2 className="text-2xl font-bold text-green-400 mb-2">Bienvenue !</h2>
                     <p className="text-neutral-300 mb-4">
                       Application de gestion des fûts pour les Bars Nomades du Hellfest 2026
