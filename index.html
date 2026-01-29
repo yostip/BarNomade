@@ -293,7 +293,7 @@
               <div className="text-center mb-8">
                 <div className="text-6xl mb-4">🍺</div>
                 <h1 className="text-2xl font-bold text-white mb-2">Gestion Fûts</h1>
-                <p className="text-red-500 font-bold">HELLFEST 2026</p>
+                <p className="text-green-400 font-bold">HELLFEST 2026</p>
               </div>
 
               {/* Session récente */}
@@ -574,6 +574,7 @@
 
       // Ventes form
       const [venteBarId, setVenteBarId] = useState('');
+      const [venteCreneau, setVenteCreneau] = useState('');
       const [venteMontant, setVenteMontant] = useState('');
       const [venteNbPintes, setVenteNbPintes] = useState('');
       const [venteNbPichets, setVenteNbPichets] = useState('');
@@ -582,6 +583,7 @@
       const [venteEquipDefaillant, setVenteEquipDefaillant] = useState(false);
       const [venteNumEquipement, setVenteNumEquipement] = useState('');
       const [venteDonneesPartielles, setVenteDonneesPartielles] = useState(false);
+      const [creneauxUtilises, setCreneauxUtilises] = useState({});
       
       // Réinitialisation
       const [showModalReinit, setShowModalReinit] = useState(false);
@@ -717,6 +719,15 @@
             setHistoriqueVentes(ventes);
           } else {
             setHistoriqueVentes([]);
+          }
+        });
+
+        // Sync créneaux utilisés
+        sessionRef.child('creneauxUtilises').on('value', (snap) => {
+          if (snap.val()) {
+            setCreneauxUtilises(snap.val());
+          } else {
+            setCreneauxUtilises({});
           }
         });
 
@@ -1287,14 +1298,34 @@
 
       const enregistrerVente = async () => {
         if (!venteBarId || isLoading) return;
+        
+        // Validation : créneau obligatoire
+        if (!venteCreneau) {
+          showToast('❌ Sélectionnez un créneau horaire', 'error');
+          return;
+        }
+        
+        // Validation : pintes, pichets et gobelets obligatoires
+        if (venteNbPintes === '' || venteNbPichets === '' || venteNbGobelets === '') {
+          showToast('❌ Renseignez le nombre de pintes, pichets et gobelets', 'error');
+          return;
+        }
+        
+        // Validation : montant obligatoire
+        const montant = parseFloat(venteMontant) || 0;
+        if (montant <= 0) {
+          showToast('❌ Le montant doit être supérieur à 0', 'error');
+          return;
+        }
+
         const bar = barsNomades.find(b => b.id === venteBarId);
 
         setIsLoading(true);
         try {
-          const montant = parseFloat(venteMontant) || 0;
           await database.ref(`sessions/${session}/historiqueVentes`).push({
             barId: venteBarId,
             barNom: bar?.nom || 'Bar inconnu',
+            creneau: venteCreneau,
             montant,
             nbPintes: parseInt(venteNbPintes) || 0,
             nbPichets: parseInt(venteNbPichets) || 0,
@@ -1308,10 +1339,24 @@
             user: userName
           });
 
-          await addAuditLog('VENTE', `${montant.toFixed(2)}€ - ${bar?.nom || 'Bar inconnu'}`);
+          // Si pas de problème équipement, marquer le créneau comme utilisé pour ce bar
+          if (!venteEquipDefaillant) {
+            const creneauKey = `J${jourActuel}_${venteBarId}_${venteCreneau}`;
+            await database.ref(`sessions/${session}/creneauxUtilises/${creneauKey}`).set({
+              barId: venteBarId,
+              creneau: venteCreneau,
+              jour: jourActuel,
+              timestamp: Date.now(),
+              user: userName
+            });
+          }
+
+          await addAuditLog('VENTE', `${montant.toFixed(2)}€ - ${bar?.nom || 'Bar inconnu'} (${venteCreneau})`);
           showToast(`✅ Vente enregistrée (${montant.toFixed(2)}€)`);
           
           setShowModalVentes(false);
+          setVenteBarId('');
+          setVenteCreneau('');
           setVenteMontant('');
           setVenteNbPintes('');
           setVenteNbPichets('');
@@ -1351,6 +1396,7 @@
         await database.ref(`sessions/${session}/historiqueVentes`).remove();
         await database.ref(`sessions/${session}/affectations`).remove();
         await database.ref(`sessions/${session}/futsEnAttente`).remove();
+        await database.ref(`sessions/${session}/creneauxUtilises`).remove();
 
         // Réinitialiser les bars avec 0 fûts
         for (const bar of barsNomades) {
@@ -2112,7 +2158,7 @@
               <div className="flex items-center gap-2">
                 <span className="text-2xl">🍺</span>
                 <div>
-                  <h1 className="font-bold text-red-500">HELLFEST 2026</h1>
+                  <h1 className="font-bold text-green-400">HELLFEST 2026</h1>
                   <p className="text-xs text-neutral-400">Gestion des Fûts</p>
                 </div>
               </div>
@@ -2435,7 +2481,7 @@
           )}
 
           {/* Bars */}
-          <div className="p-2 space-y-2">
+          <div className="p-2 space-y-2 pb-24">
             {barsNomades.length === 0 ? (
               <div className="text-center py-8 text-neutral-500">
                 <p>Aucun bar nomade configuré</p>
@@ -2448,8 +2494,8 @@
                 const canAdd = barFuts.length < config.maxFutsParBar && (isBiere ? stockBiere > 0 : stockCidre > 0);
 
                 return (
-                  <div key={bar.id} className={`rounded-xl border-2 overflow-hidden ${isBiere ? 'border-amber-600 bg-amber-950/30' : 'border-orange-600 bg-orange-950/30'}`}>
-                    <div className={`px-3 py-2 flex items-center justify-between ${isBiere ? 'bg-amber-900/50' : 'bg-orange-900/50'}`}>
+                  <div key={bar.id} className={`rounded-xl border-2 overflow-hidden ${isBiere ? 'border-emerald-600 bg-emerald-950/30' : 'border-teal-600 bg-teal-950/30'}`}>
+                    <div className={`px-3 py-2 flex items-center justify-between ${isBiere ? 'bg-emerald-900/50' : 'bg-teal-900/50'}`}>
                       <div className="flex items-center gap-2">
                         <span>{isBiere ? '🍺' : '🍎'}</span>
                         <span className="font-bold">{bar.nom}</span>
@@ -2602,10 +2648,10 @@
                 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm text-neutral-400 mb-1">Bar</label>
+                    <label className="block text-sm text-neutral-400 mb-1">Bar <span className="text-red-400">*</span></label>
                     <select 
                       value={venteBarId} 
-                      onChange={(e) => setVenteBarId(e.target.value)}
+                      onChange={(e) => { setVenteBarId(e.target.value); setVenteCreneau(''); }}
                       className="w-full px-4 py-3 bg-neutral-800 rounded-lg"
                     >
                       <option value="">Sélectionner...</option>
@@ -2615,25 +2661,56 @@
                     </select>
                   </div>
 
+                  {venteBarId && (
+                    <div>
+                      <label className="block text-sm text-neutral-400 mb-1">Créneau horaire <span className="text-red-400">*</span></label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {creneaux.map(creneau => {
+                          const creneauKey = `J${jourActuel}_${venteBarId}_${creneau.id}`;
+                          const isUsed = creneauxUtilises[creneauKey];
+                          return (
+                            <button
+                              key={creneau.id}
+                              onClick={() => !isUsed && setVenteCreneau(creneau.id)}
+                              disabled={isUsed}
+                              className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                                venteCreneau === creneau.id
+                                  ? 'bg-green-600 text-white'
+                                  : isUsed
+                                    ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed line-through'
+                                    : 'bg-neutral-700 hover:bg-neutral-600'
+                              }`}
+                            >
+                              {creneau.label}
+                              {isUsed && <span className="ml-1">✓</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-neutral-500 mt-1">Les créneaux barrés ont déjà été enregistrés</p>
+                    </div>
+                  )}
+
                   <div>
-                    <label className="block text-sm text-neutral-400 mb-1">Montant (€)</label>
+                    <label className="block text-sm text-neutral-400 mb-1">Montant (€) <span className="text-red-400">*</span></label>
                     <input type="number" step="0.01" value={venteMontant} onChange={(e) => setVenteMontant(e.target.value)} className="w-full px-4 py-3 bg-neutral-800 rounded-lg text-xl" placeholder="0.00" />
                   </div>
 
                   <div className="grid grid-cols-3 gap-2">
                     <div>
-                      <label className="block text-sm text-neutral-400 mb-1">Pintes</label>
-                      <input type="number" value={venteNbPintes} onChange={(e) => setVenteNbPintes(e.target.value)} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-center" />
+                      <label className="block text-sm text-neutral-400 mb-1">Pintes <span className="text-red-400">*</span></label>
+                      <input type="number" min="0" value={venteNbPintes} onChange={(e) => setVenteNbPintes(e.target.value)} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-center" placeholder="0" />
                     </div>
                     <div>
-                      <label className="block text-sm text-neutral-400 mb-1">Pichets</label>
-                      <input type="number" value={venteNbPichets} onChange={(e) => setVenteNbPichets(e.target.value)} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-center" />
+                      <label className="block text-sm text-neutral-400 mb-1">Pichets <span className="text-red-400">*</span></label>
+                      <input type="number" min="0" value={venteNbPichets} onChange={(e) => setVenteNbPichets(e.target.value)} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-center" placeholder="0" />
                     </div>
                     <div>
-                      <label className="block text-sm text-neutral-400 mb-1">Gobelets</label>
-                      <input type="number" value={venteNbGobelets} onChange={(e) => setVenteNbGobelets(e.target.value)} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-center" />
+                      <label className="block text-sm text-neutral-400 mb-1">Gobelets <span className="text-red-400">*</span></label>
+                      <input type="number" min="0" value={venteNbGobelets} onChange={(e) => setVenteNbGobelets(e.target.value)} className="w-full px-3 py-2 bg-neutral-800 rounded-lg text-center" placeholder="0" />
                     </div>
                   </div>
+                  <p className="text-xs text-neutral-500">Mettez 0 si aucune vente pour ce type</p>
 
                   {/* Équipement défaillant */}
                   <div className="flex items-center gap-3 mt-2">
@@ -2648,6 +2725,7 @@
 
                   {venteEquipDefaillant && (
                     <div className="bg-neutral-800 rounded-lg p-4 space-y-3 border border-orange-500/30">
+                      <p className="text-xs text-orange-300">⚠️ Ce créneau restera disponible pour une nouvelle saisie</p>
                       <input 
                         type="text" 
                         value={venteNumEquipement} 
@@ -2683,10 +2761,10 @@
                 </div>
 
                 <div className="flex gap-2 mt-6">
-                  <button onClick={() => setShowModalVentes(false)} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
+                  <button onClick={() => { setShowModalVentes(false); setVenteBarId(''); setVenteCreneau(''); }} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
                   <button 
                     onClick={enregistrerVente} 
-                    disabled={isLoading || !venteBarId}
+                    disabled={isLoading || !venteBarId || !venteCreneau}
                     className="flex-1 py-3 bg-emerald-600 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isLoading ? '⏳ En cours...' : '✓ Enregistrer'}
@@ -3385,7 +3463,7 @@
                                   {creneauIdx === 0 && (
                                     <td 
                                       rowSpan={creneaux.length} 
-                                      className={`border border-neutral-700 px-2 py-1 font-medium ${bar.type === 'biere' ? 'bg-amber-900/30' : 'bg-orange-900/30'}`}
+                                      className={`border border-neutral-700 px-2 py-1 font-medium ${bar.type === 'biere' ? 'bg-emerald-900/30' : 'bg-teal-900/30'}`}
                                     >
                                       {bar.nom}
                                     </td>
@@ -3576,7 +3654,7 @@
                 {tutorielStep === 0 && (
                   <div className="p-6 text-center">
                     <div className="text-6xl mb-4">🍺</div>
-                    <h2 className="text-2xl font-bold text-red-500 mb-2">Bienvenue !</h2>
+                    <h2 className="text-2xl font-bold text-green-400 mb-2">Bienvenue !</h2>
                     <p className="text-neutral-300 mb-4">
                       Application de gestion des fûts pour les Bars Nomades du Hellfest 2026
                     </p>
@@ -3599,7 +3677,7 @@
                       </p>
                     </div>
                     <div className="bg-neutral-800 p-3 rounded-lg">
-                      <p className="text-xs text-neutral-400">💡 Les couleurs indiquent la période de non retour du fût:</p>
+                      <p className="text-xs text-neutral-400">💡 Les couleurs indiquent la durée :</p>
                       <div className="flex gap-2 mt-2 text-xs">
                         <span className="bg-neutral-700 px-2 py-1 rounded">&lt;1h30</span>
                         <span className="bg-yellow-500 text-black px-2 py-1 rounded">1h30-3h</span>
@@ -3653,8 +3731,8 @@
                       <ul className="text-neutral-400 text-xs space-y-1 ml-4">
                         <li>• Le bar nomade</li>
                         <li>• Le montant en €</li>
-                        <li>• Détails (pintes, pichets...)</li>
-                        <li>• Si le PAD est défaillant : cochez la case</li>
+                        <li>• Optionnel : détails (pintes, pichets...)</li>
+                        <li>• Si équipement défaillant : cochez la case</li>
                       </ul>
                     </div>
                   </div>
@@ -3663,7 +3741,7 @@
                 {tutorielStep === 4 && (
                   <div className="p-6">
                     <div className="text-4xl mb-4 text-center">👥</div>
-                    <h3 className="text-xl font-bold mb-3 text-center">Gérer les affectations des bénévoles</h3>
+                    <h3 className="text-xl font-bold mb-3 text-center">Gérer les bénévoles</h3>
                     <div className="bg-indigo-900/30 p-4 rounded-xl mb-4">
                       <p className="text-sm text-neutral-300 mb-2">
                         Cliquez sur <span className="bg-indigo-600 px-2 py-1 rounded text-xs font-bold">👥 Bénévoles</span>
@@ -3673,7 +3751,7 @@
                       <p className="text-neutral-300 mb-2">Vous pouvez :</p>
                       <ul className="text-neutral-400 text-xs space-y-1 ml-4">
                         <li>• Affecter vendeur, serveur, runner par créneau</li>
-                        <li>• Voir la synthèse de tous les bénévoles par bars nomades</li>
+                        <li>• Voir la synthèse de tous les bars</li>
                         <li>• Copier le planning du jour précédent</li>
                       </ul>
                     </div>
@@ -3793,7 +3871,7 @@
                         disabled={!canAdd || isLoading}
                         className={`w-full p-4 rounded-xl flex items-center justify-between ${
                           canAdd && !isLoading
-                            ? (isBiere ? 'bg-amber-900/50 hover:bg-amber-900' : 'bg-orange-900/50 hover:bg-orange-900')
+                            ? (isBiere ? 'bg-emerald-900/50 hover:bg-emerald-900' : 'bg-teal-900/50 hover:bg-teal-900')
                             : 'bg-neutral-800 opacity-50 cursor-not-allowed'
                         }`}
                       >
