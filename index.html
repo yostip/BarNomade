@@ -16,43 +16,75 @@
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Preconnect pour accélérer les connexions CDN -->
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="preconnect" href="https://cdn.tailwindcss.com">
+  <link rel="preconnect" href="https://www.gstatic.com">
   
-  <!-- React -->
+  <style>
+    * { -webkit-tap-highlight-color: transparent; }
+    body { overscroll-behavior: none; background: #000; }
+    @media (display-mode: standalone) {
+      body { padding-top: env(safe-area-inset-top); }
+    }
+    /* Écran de chargement */
+    #loading-screen {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      color: #39ff14;
+    }
+    #loading-screen.hidden { display: none; }
+    .loader-logo {
+      width: 80px;
+      height: 80px;
+      animation: pulse-glow 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse-glow {
+      0%, 100% { transform: scale(1); filter: drop-shadow(0 0 10px #39ff14); }
+      50% { transform: scale(1.1); filter: drop-shadow(0 0 20px #39ff14); }
+    }
+  </style>
+  
+  <!-- Scripts critiques (chargement immédiat) -->
+  <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
-  
-  <!-- jsPDF pour export PDF -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  
-  <!-- SheetJS pour export Excel -->
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
-  
-  <!-- Chart.js pour graphiques -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  
-  <!-- Firebase -->
+  <!-- Firebase (critique) -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
   
-  <style>
-    * { -webkit-tap-highlight-color: transparent; }
-    body { overscroll-behavior: none; }
-    @media (display-mode: standalone) {
-      body { padding-top: env(safe-area-inset-top); }
-    }
-  </style>
+  <!-- Scripts différés (chargement après le rendu initial) -->
+  <script src="https://unpkg.com/lucide@latest" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
 </head>
 <body class="bg-black">
+  <!-- Écran de chargement affiché immédiatement -->
+  <div id="loading-screen">
+    <img src="logo-hellfest.png" alt="Hellfest" class="loader-logo">
+    <p style="margin-top: 20px; font-size: 18px;">Chargement...</p>
+    <p style="margin-top: 8px; font-size: 12px; color: #39ff14; font-weight: bold;">HELLFEST 2026</p>
+  </div>
+  
   <div id="root"></div>
   
   <script type="text/babel">
     const { useState, useEffect, useCallback, useRef } = React;
+
+    // Masquer l'écran de chargement dès que React est prêt
+    const hideLoadingScreen = () => {
+      const loader = document.getElementById('loading-screen');
+      if (loader) loader.classList.add('hidden');
+    };
 
     // ==================== FIREBASE CONFIG ====================
     const firebaseConfig = {
@@ -333,7 +365,7 @@
           <div className="min-h-screen bg-black flex items-center justify-center p-4">
             <div className="w-full max-w-sm">
               <div className="text-center mb-8">
-                <div className="text-6xl mb-4">🍺</div>
+                <img src="logo-hellfest.png" alt="Hellfest" className="w-24 h-24 mx-auto mb-4" style={{ filter: 'drop-shadow(0 0 10px #39ff14)' }} />
                 <h1 className="text-2xl font-bold text-white mb-2">Gestion Fûts</h1>
                 <p className="text-green-400 font-bold">HELLFEST 2026</p>
               </div>
@@ -563,6 +595,11 @@
       const [userName, setUserName] = useState('');
       const [isOnline, setIsOnline] = useState(true);
       const [connectedUsers, setConnectedUsers] = useState([]);
+
+      // Masquer l'écran de chargement au montage
+      useEffect(() => {
+        hideLoadingScreen();
+      }, []);
 
       // Config & Data
       const [config, setConfig] = useState({
@@ -2835,7 +2872,7 @@
           <div className="bg-neutral-900 border-b border-red-900 p-3">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <span className="text-2xl">🍺</span>
+                <img src="logo-hellfest.png" alt="Hellfest" className="w-10 h-10" style={{ filter: 'drop-shadow(0 0 5px #39ff14)' }} />
                 <div>
                   <h1 className="font-bold text-green-400">HELLFEST 2026</h1>
                   <p className="text-xs text-neutral-400">Gestion des Fûts</p>
@@ -5127,7 +5164,7 @@
                 {/* Contenu du tutoriel selon l'étape */}
                 {tutorielStep === 0 && (
                   <div className="p-6 text-center">
-                    <div className="text-6xl mb-4">🍺</div>
+                    <img src="logo-hellfest.png" alt="Hellfest" className="w-20 h-20 mx-auto mb-4" style={{ filter: 'drop-shadow(0 0 10px #39ff14)' }} />
                     <h2 className="text-2xl font-bold text-green-400 mb-2">Bienvenue !</h2>
                     <p className="text-neutral-300 mb-4">
                       Application de gestion des fûts pour les Bars Nomades du Hellfest 2026
@@ -5440,7 +5477,11 @@
                       <div
                         key={bar.id}
                         className="absolute transform -translate-x-1/2 -translate-y-full"
-                        style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                        style={{ 
+                          left: `${pos.x}%`, 
+                          top: `${pos.y}%`,
+                          zIndex: isPopupOpen ? 50 : 10
+                        }}
                       >
                         {/* Marqueur - taille responsive */}
                         <div 
