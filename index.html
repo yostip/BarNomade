@@ -1530,12 +1530,24 @@
 
       // ==================== FONCTIONS ANNULATION ====================
       const annulerVente = async (venteId) => {
-        if (!confirm('Annuler cette vente ?')) return;
+        // Récupérer la vente pour avoir les infos du créneau
+        const vente = historiqueVentes.find(v => v.id === venteId);
+        if (!vente) return;
+        
+        if (!confirm('Annuler cette vente ?\n\nLe créneau sera de nouveau disponible pour une nouvelle saisie.')) return;
+        
+        // Marquer la vente comme annulée
         await database.ref(`sessions/${session}/historiqueVentes/${venteId}`).update({
           annule: true,
           annulePar: userName,
           annuleLe: Date.now()
         });
+        
+        // LIBÉRER LE CRÉNEAU pour permettre une nouvelle saisie
+        const creneauKey = `J${vente.jour}_${vente.barId}_${vente.creneau}`;
+        await database.ref(`sessions/${session}/creneauxUtilises/${creneauKey}`).remove();
+        
+        showToast('✅ Vente annulée, créneau libéré');
       };
 
       const annulerMouvementFut = async (mouvementId) => {
