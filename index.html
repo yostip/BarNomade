@@ -693,6 +693,12 @@
       const [adminEmail, setAdminEmail] = useState('');
       const [showEmailConfig, setShowEmailConfig] = useState(false);
 
+      // Vue Plan du festival
+      const [showPlanView, setShowPlanView] = useState(false);
+      const [planEditMode, setPlanEditMode] = useState(false);
+      const [barPositions, setBarPositions] = useState({});
+      const [selectedBarForPlan, setSelectedBarForPlan] = useState(null);
+
       // Timer refresh pour les fûts
       const [, setTimerRefresh] = useState(0);
 
@@ -754,6 +760,15 @@
             }
           } else {
             setBarsNomades([]);
+          }
+        });
+
+        // Sync positions des bars sur le plan
+        sessionRef.child('barPositions').on('value', (snap) => {
+          if (snap.val()) {
+            setBarPositions(snap.val());
+          } else {
+            setBarPositions({});
           }
         });
 
@@ -1441,6 +1456,43 @@
       const sauvegarderConfig = async (newConfig) => {
         await database.ref(`sessions/${session}/config`).update(newConfig);
         setShowParametres(false);
+      };
+
+      // ==================== GESTION VUE PLAN ====================
+      const sauvegarderPositionBar = async (barId, x, y) => {
+        await database.ref(`sessions/${session}/barPositions/${barId}`).set({ x, y });
+      };
+
+      const handlePlanClick = (e) => {
+        if (!planEditMode || !selectedBarForPlan) return;
+        
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = ((e.clientX - rect.left) / rect.width) * 100;
+        const y = ((e.clientY - rect.top) / rect.height) * 100;
+        
+        sauvegarderPositionBar(selectedBarForPlan, x, y);
+        
+        // Passer au bar suivant non positionné
+        const barsNonPositionnes = barsNomades.filter(b => !barPositions[b.id]);
+        const currentIndex = barsNonPositionnes.findIndex(b => b.id === selectedBarForPlan);
+        if (currentIndex < barsNonPositionnes.length - 1) {
+          setSelectedBarForPlan(barsNonPositionnes[currentIndex + 1].id);
+        } else {
+          setSelectedBarForPlan(null);
+          setPlanEditMode(false);
+          showToast('✅ Tous les bars sont positionnés !');
+        }
+      };
+
+      const supprimerPositionBar = async (barId) => {
+        await database.ref(`sessions/${session}/barPositions/${barId}`).remove();
+      };
+
+      const resetAllPositions = async () => {
+        if (confirm('Réinitialiser toutes les positions des bars sur le plan ?')) {
+          await database.ref(`sessions/${session}/barPositions`).remove();
+          showToast('Positions réinitialisées');
+        }
       };
 
       // ==================== RÉINITIALISATION ====================
@@ -5247,18 +5299,200 @@
               <button
                 onClick={() => setShowQuickFut(true)}
                 disabled={isLoading}
-                className="px-5 py-3 bg-amber-600 hover:bg-amber-500 rounded-xl font-medium text-sm flex items-center gap-2 disabled:opacity-50"
+                className="px-4 py-3 bg-amber-600 hover:bg-amber-500 rounded-xl font-medium text-sm flex items-center gap-2 disabled:opacity-50"
               >
                 ➕ Fût
               </button>
               <button
                 onClick={() => setShowModalVentes(true)}
-                className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-medium text-sm flex items-center gap-2"
+                className="px-4 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-medium text-sm flex items-center gap-2"
               >
                 💰 Vente
               </button>
+              <button
+                onClick={() => setShowPlanView(true)}
+                className="px-4 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-medium text-sm flex items-center gap-2"
+              >
+                🗺️ Plan
+              </button>
             </div>
           </div>
+
+          {/* ==================== MODAL VUE PLAN DU FESTIVAL ==================== */}
+          {showPlanView && (
+            <div className="fixed inset-0 bg-black/95 flex flex-col z-50">
+              {/* Header */}
+              <div className="bg-blue-900 px-4 py-3 flex items-center justify-between">
+                <h3 className="text-xl font-bold">🗺️ Plan du Festival</h3>
+                <div className="flex items-center gap-2">
+                  {isCreator && (
+                    <button 
+                      onClick={() => {
+                        setPlanEditMode(!planEditMode);
+                        if (!planEditMode) {
+                          const premierNonPlace = barsNomades.find(b => !barPositions[b.id]);
+                          setSelectedBarForPlan(premierNonPlace ? premierNonPlace.id : null);
+                        }
+                      }}
+                      className={`px-3 py-1 rounded-lg text-sm ${planEditMode ? 'bg-orange-600' : 'bg-neutral-700'}`}
+                    >
+                      {planEditMode ? '✏️ Mode placement ON' : '⚙️ Configurer'}
+                    </button>
+                  )}
+                  <button onClick={() => { setShowPlanView(false); setPlanEditMode(false); }} className="text-2xl">✕</button>
+                </div>
+              </div>
+
+              {/* Instructions mode placement */}
+              {planEditMode && (
+                <div className="bg-orange-900/50 px-4 py-2 border-b border-orange-700">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      {selectedBarForPlan ? (
+                        <p className="text-sm">
+                          👆 Cliquez sur le plan pour positionner : <span className="font-bold text-orange-300">
+                            {barsNomades.find(b => b.id === selectedBarForPlan)?.nom || 'Bar'}
+                          </span>
+                        </p>
+                      ) : (
+                        <p className="text-sm text-green-400">✅ Tous les bars sont positionnés !</p>
+                      )}
+                    </div>
+                    <button 
+                      onClick={resetAllPositions}
+                      className="text-xs px-2 py-1 bg-red-600/50 rounded hover:bg-red-600"
+                    >
+                      🔄 Reset
+                    </button>
+                  </div>
+                  
+                  {/* Liste des bars à positionner */}
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {barsNomades.map(bar => {
+                      const isPositioned = !!barPositions[bar.id];
+                      const isSelected = selectedBarForPlan === bar.id;
+                      return (
+                        <button
+                          key={bar.id}
+                          onClick={() => setSelectedBarForPlan(bar.id)}
+                          className={`px-2 py-1 rounded text-xs transition-all ${
+                            isSelected 
+                              ? 'bg-orange-500 ring-2 ring-white' 
+                              : isPositioned 
+                                ? 'bg-green-700' 
+                                : 'bg-neutral-700'
+                          }`}
+                        >
+                          {bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom} {isPositioned && '✓'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Container du plan */}
+              <div className="flex-1 overflow-auto p-2">
+                <div 
+                  className="relative mx-auto"
+                  style={{ maxWidth: '100%', maxHeight: '100%' }}
+                  onClick={handlePlanClick}
+                >
+                  {/* Image du plan */}
+                  <img 
+                    src="plan-hellfest.jpg" 
+                    alt="Plan Hellfest" 
+                    className={`w-full h-auto rounded-lg ${planEditMode ? 'cursor-crosshair' : ''}`}
+                    draggable={false}
+                  />
+                  
+                  {/* Marqueurs des bars */}
+                  {barsNomades.map(bar => {
+                    const pos = barPositions[bar.id];
+                    if (!pos) return null;
+                    
+                    const barFuts = bar.futs || [];
+                    const isFull = barFuts.length >= config.maxFutsParBar;
+                    const isEmpty = barFuts.length === 0;
+                    const statusColor = isFull ? 'bg-red-500' : isEmpty ? 'bg-green-500' : 'bg-yellow-500';
+                    const isBiere = bar.type === 'biere';
+                    
+                    return (
+                      <div
+                        key={bar.id}
+                        className="absolute transform -translate-x-1/2 -translate-y-full group"
+                        style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                      >
+                        {/* Marqueur */}
+                        <div className={`relative cursor-pointer transition-transform hover:scale-110 ${planEditMode ? 'animate-bounce' : ''}`}>
+                          {/* Pin */}
+                          <div className={`w-10 h-10 ${statusColor} rounded-full border-4 border-white shadow-lg flex items-center justify-center text-lg`}>
+                            {isBiere ? '🍺' : '🍎'}
+                          </div>
+                          {/* Compteur */}
+                          <div className="absolute -top-1 -right-1 w-5 h-5 bg-black border-2 border-white rounded-full flex items-center justify-center text-xs font-bold">
+                            {barFuts.length}
+                          </div>
+                          {/* Pointe du pin */}
+                          <div className={`absolute left-1/2 -bottom-2 transform -translate-x-1/2 w-0 h-0 border-l-[8px] border-r-[8px] border-t-[12px] border-l-transparent border-r-transparent ${
+                            isFull ? 'border-t-red-500' : isEmpty ? 'border-t-green-500' : 'border-t-yellow-500'
+                          }`} />
+                        </div>
+                        
+                        {/* Popup au survol */}
+                        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block z-10">
+                          <div className="bg-neutral-900/95 rounded-lg p-3 min-w-[150px] shadow-xl border border-neutral-600">
+                            <p className="font-bold text-sm mb-1">{isBiere ? '🍺' : '🍎'} {bar.nom}</p>
+                            <div className="flex items-center gap-1 mb-2">
+                              {Array.from({ length: config.maxFutsParBar }).map((_, idx) => (
+                                <span key={idx} className={`text-sm ${idx < barFuts.length ? '' : 'opacity-30'}`}>🛢️</span>
+                              ))}
+                              <span className={`text-sm font-bold ml-1 ${isFull ? 'text-red-400' : isEmpty ? 'text-green-400' : 'text-yellow-400'}`}>
+                                {barFuts.length}/{config.maxFutsParBar}
+                              </span>
+                            </div>
+                            {barFuts.length > 0 && (
+                              <div className="text-xs text-neutral-400 space-y-1">
+                                {barFuts.map((fut, idx) => {
+                                  const durationColor = fut.dateAttribution ? getFutDurationColor(fut.dateAttribution) : '';
+                                  const duration = fut.dateAttribution ? formatDuration(fut.dateAttribution) : '';
+                                  return (
+                                    <div key={idx} className={`px-1 rounded ${durationColor}`}>
+                                      Fût {idx + 1} {duration && `• ${duration}`}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            <p className={`text-xs mt-2 font-medium ${isFull ? 'text-red-400' : isEmpty ? 'text-green-400' : 'text-yellow-400'}`}>
+                              {isFull ? '🔴 COMPLET' : isEmpty ? '🟢 DISPONIBLE' : '🟡 EN SERVICE'}
+                            </p>
+                            
+                            {/* Bouton supprimer position en mode edit */}
+                            {planEditMode && (
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); supprimerPositionBar(bar.id); }}
+                                className="mt-2 w-full text-xs bg-red-600/50 hover:bg-red-600 rounded py-1"
+                              >
+                                🗑️ Supprimer position
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Légende */}
+              <div className="bg-neutral-800 px-4 py-2 flex items-center justify-center gap-6 text-sm">
+                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-green-500 rounded-full"></span> Disponible</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-yellow-500 rounded-full"></span> En service</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-red-500 rounded-full"></span> Complet</span>
+              </div>
+            </div>
+          )}
 
           {/* ==================== MODAL SÉLECTION RAPIDE FÛT ==================== */}
           {showQuickFut && (
