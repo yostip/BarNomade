@@ -3448,62 +3448,118 @@
                 <h3 className="text-xl font-bold mb-4">💰 Saisie Vente</h3>
                 
                 {(() => {
-                  // Compter les créneaux en attente pour le jour
-                  const creneauxEnAttenteJour = Object.entries(creneauxEnAttente)
-                    .filter(([key, val]) => val.jour === jourActuel)
-                    .map(([key, val]) => ({ key, ...val }));
-                  
-                  // Déterminer le créneau en cours global (premier créneau non complété et non en attente)
+                  // Fonction : vérifier si un bar a "traité" un créneau (au moins une vente enregistrée OU verrouillé)
+                  const barATraiteCreneau = (barId, creneauId) => {
+                    const key = `J${jourActuel}_${barId}_${creneauId}`;
+                    // Verrouillé = traité
+                    if (creneauxUtilises[key]) return true;
+                    // Ou au moins une vente enregistrée pour ce bar/créneau
+                    return historiqueVentes.some(v => 
+                      !v.annule && v.jour === jourActuel && v.barId === barId && v.creneau === creneauId
+                    );
+                  };
+
+                  // Fonction : vérifier si un bar est verrouillé (ne peut plus saisir)
+                  const barEstVerrouille = (barId, creneauId) => {
+                    const key = `J${jourActuel}_${barId}_${creneauId}`;
+                    return !!creneauxUtilises[key];
+                  };
+
+                  // Fonction : vérifier si un bar a des saisies non verrouillées (équip. défaillant)
+                  const barPeutResaisir = (barId, creneauId) => {
+                    if (barEstVerrouille(barId, creneauId)) return false;
+                    // A déjà des ventes mais pas verrouillé = peut ajouter
+                    return historiqueVentes.some(v => 
+                      !v.annule && v.jour === jourActuel && v.barId === barId && v.creneau === creneauId
+                    );
+                  };
+
+                  // Ventes existantes pour un bar/créneau (pour affichage)
+                  const getVentesBarCreneau = (barId, creneauId) => {
+                    return historiqueVentes.filter(v => 
+                      !v.annule && v.jour === jourActuel && v.barId === barId && v.creneau === creneauId
+                    );
+                  };
+
+                  // Déterminer le créneau en cours (premier créneau non traité par tous)
                   const getCreneauEnCours = () => {
                     for (const creneau of creneaux) {
-                      // Vérifier si tous les bars ont clôturé ce créneau (saisi ou en attente)
-                      const tousTraites = barsNomades.every(bar => {
-                        const key = `J${jourActuel}_${bar.id}_${creneau.id}`;
-                        return creneauxUtilises[key] || creneauxEnAttente[key];
-                      });
+                      const tousTraites = barsNomades.every(bar => barATraiteCreneau(bar.id, creneau.id));
                       if (!tousTraites) {
                         return creneau;
                       }
                     }
-                    return null; // Tous les créneaux sont traités
+                    return null;
                   };
                   
                   const creneauEnCours = getCreneauEnCours();
-                  
-                  // Bars qui n'ont pas encore traité le créneau en cours
-                  const barsDisponibles = creneauEnCours ? barsNomades.filter(bar => {
-                    const key = `J${jourActuel}_${bar.id}_${creneauEnCours.id}`;
-                    return !creneauxUtilises[key] && !creneauxEnAttente[key];
-                  }) : [];
-                  
-                  // Bars qui ont déjà saisi
-                  const barsEnAttente = creneauEnCours ? barsNomades.filter(bar => {
-                    const key = `J${jourActuel}_${bar.id}_${creneauEnCours.id}`;
-                    return creneauxUtilises[key];
-                  }) : [];
 
-                  // Bars avec données en attente pour ce créneau
-                  const barsEnAttenteDonnees = creneauEnCours ? barsNomades.filter(bar => {
-                    const key = `J${jourActuel}_${bar.id}_${creneauEnCours.id}`;
-                    return creneauxEnAttente[key];
-                  }) : [];
+                  // Créneaux avec saisies non verrouillées (peuvent re-saisir)
+                  const creneauxOuverts = [];
+                  creneaux.forEach(creneau => {
+                    barsNomades.forEach(bar => {
+                      if (barPeutResaisir(bar.id, creneau.id)) {
+                        const ventes = getVentesBarCreneau(bar.id, creneau.id);
+                        creneauxOuverts.push({
+                          barId: bar.id,
+                          barNom: bar.nom,
+                          barType: bar.type,
+                          creneauId: creneau.id,
+                          creneauLabel: creneau.label,
+                          nbVentes: ventes.length,
+                          totalMontant: ventes.reduce((sum, v) => sum + (v.montant || 0), 0)
+                        });
+                      }
+                    });
+                  });
+                  
+                  // Bars qui n'ont pas encore traité le créneau en cours (peuvent saisir)
+                  const barsASaisir = creneauEnCours ? barsNomades.filter(bar => 
+                    !barATraiteCreneau(bar.id, creneauEnCours.id)
+                  ) : [];
+                  
+                  // Bars verrouillés sur le créneau en cours
+                  const barsVerrouilles = creneauEnCours ? barsNomades.filter(bar => 
+                    barEstVerrouille(bar.id, creneauEnCours.id)
+                  ) : [];
+
+                  // Bars qui peuvent re-saisir sur le créneau en cours
+                  const barsResaisie = creneauEnCours ? barsNomades.filter(bar => 
+                    barPeutResaisir(bar.id, creneauEnCours.id)
+                  ) : [];
                   
                   return (
                     <div className="space-y-4">
-                      {/* Alerte créneaux en attente de données */}
-                      {creneauxEnAttenteJour.length > 0 && (
+                      {/* Alerte : créneaux ouverts (peuvent re-saisir ou clôturer) */}
+                      {creneauxOuverts.length > 0 && (
                         <div className="bg-orange-900/30 border border-orange-600 rounded-xl p-3">
-                          <p className="text-xs text-orange-400 font-bold mb-2">⏳ {creneauxEnAttenteJour.length} créneau(x) en attente de données :</p>
-                          <div className="space-y-1">
-                            {creneauxEnAttenteJour.map(c => (
-                              <div key={c.key} className="flex items-center justify-between text-xs">
-                                <span className="text-orange-300">{c.barNom} - {c.creneau}</span>
+                          <p className="text-xs text-orange-400 font-bold mb-2">
+                            ⚠️ {creneauxOuverts.length} bar/créneau(x) avec saisie(s) partielle(s) :
+                          </p>
+                          <div className="space-y-2 max-h-32 overflow-y-auto">
+                            {creneauxOuverts.map((c, idx) => (
+                              <div key={idx} className="flex items-center justify-between text-xs bg-neutral-800 rounded p-2">
+                                <div>
+                                  <span className="text-orange-300">{c.barType === 'biere' ? '🍺' : '🍎'} {c.barNom}</span>
+                                  <span className="text-neutral-400"> - {c.creneauLabel}</span>
+                                  <span className="text-neutral-500 ml-2">({c.nbVentes} saisie(s), {c.totalMontant.toFixed(2)}€)</span>
+                                </div>
                                 <button 
-                                  onClick={() => annulerCreneauEnAttente(c.key)}
-                                  className="text-red-400 hover:text-red-300 px-1"
-                                  title="Retirer de la liste"
+                                  onClick={async () => {
+                                    const key = `J${jourActuel}_${c.barId}_${c.creneauId}`;
+                                    await database.ref(`sessions/${session}/creneauxUtilises/${key}`).set({
+                                      barId: c.barId,
+                                      creneau: c.creneauId,
+                                      jour: jourActuel,
+                                      timestamp: Date.now(),
+                                      user: userName
+                                    });
+                                    showToast(`✅ Créneau ${c.creneauLabel} clôturé pour ${c.barNom}`);
+                                  }}
+                                  className="px-2 py-1 bg-green-600 hover:bg-green-500 rounded text-xs"
+                                  title="Clôturer ce créneau"
                                 >
-                                  ✕
+                                  🔒 Clôturer
                                 </button>
                               </div>
                             ))}
@@ -3511,25 +3567,25 @@
                         </div>
                       )}
 
-                      {/* Affichage du créneau en cours global */}
+                      {/* Affichage du créneau en cours */}
                       {creneauEnCours ? (
                         <div className="bg-blue-900/30 border border-blue-600 rounded-xl p-3 text-center">
                           <p className="text-xs text-neutral-400">Créneau en cours :</p>
                           <p className="text-2xl font-bold text-blue-400">{creneauEnCours.label}</p>
                           <p className="text-xs text-neutral-500 mt-1">
-                            {barsDisponibles.length} bar(s) restant(s) à traiter
+                            {barsASaisir.length} bar(s) à saisir
+                            {barsResaisie.length > 0 && ` • ${barsResaisie.length} en saisie partielle`}
                           </p>
                         </div>
                       ) : (
                         <div className="bg-green-900/30 border border-green-600 rounded-xl p-4 text-center">
                           <p className="text-3xl mb-2">🎉</p>
                           <p className="text-green-400 font-bold">Tous les créneaux sont traités !</p>
-                          <p className="text-xs text-neutral-400 mt-1">
-                            {creneauxEnAttenteJour.length > 0 
-                              ? `${creneauxEnAttenteJour.length} créneau(x) en attente de données récupérables`
-                              : 'Journée complète pour tous les bars'
-                            }
-                          </p>
+                          {creneauxOuverts.length > 0 && (
+                            <p className="text-xs text-orange-400 mt-1">
+                              ⚠️ {creneauxOuverts.length} créneau(x) avec saisies partielles à clôturer
+                            </p>
+                          )}
                         </div>
                       )}
                       
@@ -3548,16 +3604,27 @@
                             >
                               <option value="">Sélectionner...</option>
                               {barsNomades.map(bar => {
-                                const key = `J${jourActuel}_${bar.id}_${creneauEnCours.id}`;
-                                const dejaSaisi = creneauxUtilises[key];
-                                const enAttente = creneauxEnAttente[key];
+                                const verrouille = barEstVerrouille(bar.id, creneauEnCours.id);
+                                const peutResaisir = barPeutResaisir(bar.id, creneauEnCours.id);
+                                const ventesExistantes = getVentesBarCreneau(bar.id, creneauEnCours.id);
+                                
+                                let statut = '';
+                                let disabled = false;
+                                
+                                if (verrouille) {
+                                  statut = '✅ Clôturé';
+                                  disabled = true;
+                                } else if (peutResaisir) {
+                                  statut = `⚠️ ${ventesExistantes.length} saisie(s) - Peut ajouter`;
+                                }
+                                
                                 return (
                                   <option 
                                     key={bar.id} 
                                     value={bar.id}
-                                    disabled={dejaSaisi}
+                                    disabled={disabled}
                                   >
-                                    {bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom} {dejaSaisi ? '✓ Saisi' : enAttente ? '⏳ En attente' : ''}
+                                    {bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom} {statut}
                                   </option>
                                 );
                               })}
@@ -3565,34 +3632,44 @@
                           </div>
                           
                           {/* Statut des bars */}
-                          {(barsEnAttente.length > 0 || barsEnAttenteDonnees.length > 0) && (
-                            <div className="bg-neutral-800 rounded-lg p-3">
-                              {barsEnAttente.length > 0 && (
-                                <>
-                                  <p className="text-xs text-neutral-400 mb-2">Bars ayant saisi ce créneau :</p>
-                                  <div className="flex flex-wrap gap-1 mb-2">
-                                    {barsEnAttente.map(bar => (
-                                      <span key={bar.id} className="px-2 py-1 bg-green-900/50 text-green-400 rounded text-xs">
-                                        ✓ {bar.nom}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </>
-                              )}
-                              {barsEnAttenteDonnees.length > 0 && (
-                                <>
-                                  <p className="text-xs text-neutral-400 mb-2">Bars en attente de données :</p>
-                                  <div className="flex flex-wrap gap-1">
-                                    {barsEnAttenteDonnees.map(bar => (
-                                      <span key={bar.id} className="px-2 py-1 bg-orange-900/50 text-orange-400 rounded text-xs">
-                                        ⏳ {bar.nom}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          )}
+                          <div className="bg-neutral-800 rounded-lg p-3 space-y-2">
+                            {barsVerrouilles.length > 0 && (
+                              <div>
+                                <p className="text-xs text-neutral-400 mb-1">✅ Clôturés :</p>
+                                <div className="flex flex-wrap gap-1">
+                                  {barsVerrouilles.map(bar => (
+                                    <span key={bar.id} className="px-2 py-0.5 bg-green-900/50 text-green-400 rounded text-xs">
+                                      {bar.nom}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {barsResaisie.length > 0 && (
+                              <div>
+                                <p className="text-xs text-neutral-400 mb-1">⚠️ Saisie partielle (peuvent ajouter) :</p>
+                                <div className="flex flex-wrap gap-1">
+                                  {barsResaisie.map(bar => (
+                                    <span key={bar.id} className="px-2 py-0.5 bg-orange-900/50 text-orange-400 rounded text-xs">
+                                      {bar.nom}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {barsASaisir.length > 0 && (
+                              <div>
+                                <p className="text-xs text-neutral-400 mb-1">⏳ À saisir :</p>
+                                <div className="flex flex-wrap gap-1">
+                                  {barsASaisir.map(bar => (
+                                    <span key={bar.id} className="px-2 py-0.5 bg-neutral-700 text-neutral-300 rounded text-xs">
+                                      {bar.nom}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </>
                       )}
 
@@ -3671,25 +3748,15 @@
                   );
                 })()}
 
-                <div className="flex flex-col gap-2 mt-6">
-                  <div className="flex gap-2">
-                    <button onClick={() => { setShowModalVentes(false); setVenteBarId(''); setVenteCreneau(''); }} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
-                    <button 
-                      onClick={enregistrerVente} 
-                      disabled={isLoading || !venteBarId || !venteCreneau}
-                      className="flex-1 py-3 bg-emerald-600 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isLoading ? '⏳ En cours...' : '✓ Enregistrer'}
-                    </button>
-                  </div>
-                  {venteBarId && venteCreneau && (
-                    <button 
-                      onClick={() => marquerCreneauEnAttente(venteBarId, venteCreneau)}
-                      className="w-full py-3 bg-orange-600/80 hover:bg-orange-600 rounded-lg text-sm"
-                    >
-                      ⏳ Données à récupérer plus tard (PAD HS)
-                    </button>
-                  )}
+                <div className="flex gap-2 mt-6">
+                  <button onClick={() => { setShowModalVentes(false); setVenteBarId(''); setVenteCreneau(''); }} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
+                  <button 
+                    onClick={enregistrerVente} 
+                    disabled={isLoading || !venteBarId || !venteCreneau}
+                    className="flex-1 py-3 bg-emerald-600 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isLoading ? '⏳ En cours...' : '✓ Enregistrer'}
+                  </button>
                 </div>
               </div>
             </div>
