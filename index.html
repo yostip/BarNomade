@@ -95,6 +95,15 @@
     const app = firebase.initializeApp(firebaseConfig);
     const database = firebase.database();
 
+    // ==================== VÉRIFICATION MOT DE PASSE (GLOBAL) ====================
+    const verifyPassword = (input, type) => {
+      if (type === 'super_admin') {
+        return input === 'HF2026Admin';
+      } else {
+        return input === 'Hellfest26';
+      }
+    };
+
     // ==================== ICONS ====================
     const Icon = ({ name, className }) => {
       const ref = useRef(null);
@@ -127,19 +136,6 @@
       const [allSessions, setAllSessions] = useState([]);
       const [loadingSessions, setLoadingSessions] = useState(false);
       const [createPassword, setCreatePassword] = useState('');
-      
-      // Hash SHA-256 des mots de passe (plus de stockage en clair)
-      // SUPER_ADMIN: "HF2026Admin" -> hash
-      // ADMIN: "Hellfest26" -> hash
-      const SUPER_ADMIN_HASH = "a3f8c2d1e5b9a4c7f2d8e1b5a9c3f7d2e6b4a8c1f5d9e3b7a2c6f4d8e2b5a9c3"; // placeholder, sera calculé
-      // Vérification mot de passe (simplifié)
-      const verifyPassword = (input, type) => {
-        if (type === 'super_admin') {
-          return input === 'HF2026Admin';
-        } else {
-          return input === 'Hellfest26';
-        }
-      };
 
       // Lire le paramètre URL ?session=XXX au chargement
       React.useEffect(() => {
@@ -1179,7 +1175,9 @@
       };
 
       const validerAdmin = () => {
+        console.log('validerAdmin appelé, mot de passe:', adminPassword);
         const isValid = verifyPassword(adminPassword, 'admin');
+        console.log('isValid:', isValid);
         if (isValid) {
           setIsAdmin(true);
           setShowModalAdmin(false);
@@ -3276,15 +3274,28 @@
                 <h3 className="text-xl font-bold mb-4">🔐 Accès Admin</h3>
                 <input
                   type="password"
+                  autoFocus
                   value={adminPassword}
                   onChange={(e) => setAdminPassword(e.target.value)}
                   placeholder="Mot de passe"
                   className="w-full px-4 py-3 bg-neutral-800 rounded-lg mb-4"
-                  onKeyDown={(e) => e.key === 'Enter' && validerAdmin()}
+                  onKeyDown={(e) => { if (e.key === 'Enter') validerAdmin(); }}
                 />
                 <div className="flex gap-2">
-                  <button onClick={() => setShowModalAdmin(false)} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
-                  <button onClick={validerAdmin} className="flex-1 py-3 bg-red-600 rounded-lg font-medium">Valider</button>
+                  <button 
+                    type="button"
+                    onClick={() => setShowModalAdmin(false)} 
+                    className="flex-1 py-3 bg-neutral-700 rounded-lg"
+                  >
+                    Annuler
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => validerAdmin()} 
+                    className="flex-1 py-3 bg-red-600 rounded-lg font-medium"
+                  >
+                    Valider
+                  </button>
                 </div>
               </div>
             </div>
