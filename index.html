@@ -1175,9 +1175,7 @@
       };
 
       const validerAdmin = () => {
-        console.log('validerAdmin appelé, mot de passe:', adminPassword);
         const isValid = verifyPassword(adminPassword, 'admin');
-        console.log('isValid:', isValid);
         if (isValid) {
           setIsAdmin(true);
           setShowModalAdmin(false);
