@@ -132,41 +132,13 @@
       // SUPER_ADMIN: "HF2026Admin" -> hash
       // ADMIN: "Hellfest26" -> hash
       const SUPER_ADMIN_HASH = "a3f8c2d1e5b9a4c7f2d8e1b5a9c3f7d2e6b4a8c1f5d9e3b7a2c6f4d8e2b5a9c3"; // placeholder, sera calculé
-      const ADMIN_HASH = "b4e9d2c6a8f3b7e1d5c9a2f6b8e4d1c7a3f9b5e2d8c4a7f1b6e3d9c5a8f2b4e7"; // placeholder
-      
-      // Fonction de hash SHA-256
-      const hashPassword = async (password) => {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(password + '_HELLFEST2026_SALT');
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-      };
-      
-      // Vérification mot de passe (async)
-      const verifyPassword = async (input, type) => {
-        // Mots de passe valides selon le type
-        const validPasswords = type === 'super_admin' 
-          ? ['HF2026Admin'] 
-          : ['Hellfest26'];
-        
-        // Vérification directe d'abord (fallback simple)
-        if (validPasswords.includes(input)) {
-          return true;
+      // Vérification mot de passe (simplifié)
+      const verifyPassword = (input, type) => {
+        if (type === 'super_admin') {
+          return input === 'HF2026Admin';
+        } else {
+          return input === 'Hellfest26';
         }
-        
-        // Vérification par hash (sécurité renforcée)
-        try {
-          const inputHash = await hashPassword(input);
-          for (const pwd of validPasswords) {
-            const pwdHash = await hashPassword(pwd);
-            if (inputHash === pwdHash) return true;
-          }
-        } catch (e) {
-          console.error('Erreur hash:', e);
-        }
-        
-        return false;
       };
 
       // Lire le paramètre URL ?session=XXX au chargement
@@ -267,8 +239,8 @@
         }
       };
 
-      const authentifierSuperAdmin = async () => {
-        const isValid = await verifyPassword(superAdminPassword, 'super_admin');
+      const authentifierSuperAdmin = () => {
+        const isValid = verifyPassword(superAdminPassword, 'super_admin');
         if (isValid) {
           setSuperAdminAuth(true);
           loadAllSessions();
@@ -291,7 +263,7 @@
           setError('Entre ton prénom');
           return;
         }
-        const isValidPassword = await verifyPassword(createPassword, 'super_admin');
+        const isValidPassword = verifyPassword(createPassword, 'super_admin');
         if (!isValidPassword) {
           setError('Mot de passe incorrect. Seul un administrateur peut créer une session.');
           return;
@@ -1206,8 +1178,8 @@
         }
       };
 
-      const validerAdmin = async () => {
-        const isValid = await verifyPassword(adminPassword, 'admin');
+      const validerAdmin = () => {
+        const isValid = verifyPassword(adminPassword, 'admin');
         if (isValid) {
           setIsAdmin(true);
           setShowModalAdmin(false);
@@ -1535,7 +1507,7 @@
 
       // ==================== RÉINITIALISATION ====================
       const reinitialiserDonnees = async (avecExport) => {
-        const isValid = await verifyPassword(reinitPassword, 'admin');
+        const isValid = verifyPassword(reinitPassword, 'admin');
         if (!isValid) {
           alert('Mot de passe incorrect');
           return;
