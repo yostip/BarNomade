@@ -145,23 +145,28 @@
       
       // Vérification mot de passe (async)
       const verifyPassword = async (input, type) => {
-        const hash = await hashPassword(input);
-        if (type === 'super_admin') {
-          // Mots de passe acceptés pour Super Admin
-          const validPasswords = ['HF2026Admin'];
-          for (const pwd of validPasswords) {
-            if (await hashPassword(pwd) === hash) return true;
-          }
-          // Fallback direct pour la transition
-          return input === 'HF2026Admin';
-        } else {
-          // Mots de passe acceptés pour Admin
-          const validPasswords = ['Hellfest26'];
-          for (const pwd of validPasswords) {
-            if (await hashPassword(pwd) === hash) return true;
-          }
-          return input === 'Hellfest26';
+        // Mots de passe valides selon le type
+        const validPasswords = type === 'super_admin' 
+          ? ['HF2026Admin'] 
+          : ['Hellfest26'];
+        
+        // Vérification directe d'abord (fallback simple)
+        if (validPasswords.includes(input)) {
+          return true;
         }
+        
+        // Vérification par hash (sécurité renforcée)
+        try {
+          const inputHash = await hashPassword(input);
+          for (const pwd of validPasswords) {
+            const pwdHash = await hashPassword(pwd);
+            if (inputHash === pwdHash) return true;
+          }
+        } catch (e) {
+          console.error('Erreur hash:', e);
+        }
+        
+        return false;
       };
 
       // Lire le paramètre URL ?session=XXX au chargement
