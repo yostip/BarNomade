@@ -642,7 +642,6 @@
       const [venteNumEquipement, setVenteNumEquipement] = useState('');
       const [venteDonneesPartielles, setVenteDonneesPartielles] = useState(false);
       const [creneauxUtilises, setCreneauxUtilises] = useState({});
-      const [creneauxEnAttente, setCreneauxEnAttente] = useState({});
       
       // Réinitialisation
       const [showModalReinit, setShowModalReinit] = useState(false);
@@ -807,15 +806,6 @@
             setCreneauxUtilises(snap.val());
           } else {
             setCreneauxUtilises({});
-          }
-        });
-
-        // Sync créneaux en attente de données
-        sessionRef.child('creneauxEnAttente').on('value', (snap) => {
-          if (snap.val()) {
-            setCreneauxEnAttente(snap.val());
-          } else {
-            setCreneauxEnAttente({});
           }
         });
 
@@ -1452,10 +1442,8 @@
               timestamp: Date.now(),
               user: userName
             });
-            // Si ce créneau était en attente, le retirer de la liste
-            if (creneauxEnAttente[creneauKey]) {
-              await database.ref(`sessions/${session}/creneauxEnAttente/${creneauKey}`).remove();
-            }
+            // Nettoyer d'éventuelles données héritées
+            await database.ref(`sessions/${session}/creneauxEnAttente/${creneauKey}`).remove();
           }
 
           await addAuditLog('VENTE', `${montant.toFixed(2)}€ - ${bar?.nom || 'Bar inconnu'} (${venteCreneau})`);
@@ -1480,41 +1468,6 @@
       };
 
       // Marquer un créneau comme "en attente de données"
-      const marquerCreneauEnAttente = async (barId, creneau) => {
-        if (!barId || !creneau) return;
-        
-        const bar = barsNomades.find(b => b.id === barId);
-        const creneauKey = `J${jourActuel}_${barId}_${creneau}`;
-        
-        await database.ref(`sessions/${session}/creneauxEnAttente/${creneauKey}`).set({
-          barId,
-          barNom: bar?.nom || 'Bar inconnu',
-          creneau,
-          jour: jourActuel,
-          timestamp: Date.now(),
-          user: userName
-        });
-        
-        await addAuditLog('CRENEAU_ATTENTE', `${bar?.nom || 'Bar'} - ${creneau} marqué en attente`);
-        showToast(`⏳ Créneau ${creneau} marqué "en attente de données"`);
-        
-        setShowModalVentes(false);
-        setVenteBarId('');
-        setVenteCreneau('');
-      };
-
-      // Compléter un créneau en attente (le retirer de la liste en attente après enregistrement)
-      const completerCreneauEnAttente = async (barId, creneau) => {
-        const creneauKey = `J${jourActuel}_${barId}_${creneau}`;
-        await database.ref(`sessions/${session}/creneauxEnAttente/${creneauKey}`).remove();
-      };
-
-      // Annuler un créneau en attente
-      const annulerCreneauEnAttente = async (creneauKey) => {
-        await database.ref(`sessions/${session}/creneauxEnAttente/${creneauKey}`).remove();
-        showToast('✅ Créneau retiré de la liste d\'attente');
-      };
-
       const sauvegarderConfig = async (newConfig) => {
         await database.ref(`sessions/${session}/config`).update(newConfig);
         setShowParametres(false);
@@ -5350,7 +5303,7 @@
                         Utilisez le bouton <span className="bg-amber-600 px-2 py-1 rounded text-xs font-bold">➕ Fût</span> en bas de l'écran
                       </p>
                       <p className="text-xs text-neutral-400">
-                        Sélectionnez ensuite le bar qui reçoit le fût.
+                        Sélectionnez le bar qui reçoit le fût (🍺 bière ou 🍎 cidre).
                       </p>
                     </div>
                     <div className="bg-neutral-800 p-3 rounded-lg">
@@ -5388,7 +5341,12 @@
                       <div className="flex items-center gap-2 bg-neutral-800 p-2 rounded">
                         <span>♻️</span>
                         <span className="text-neutral-300">Non terminé</span>
-                        <span className="text-xs text-neutral-500 ml-auto">Reste du contenu</span>
+                        <span className="text-xs text-neutral-500 ml-auto">Reprendre demain</span>
+                      </div>
+                      <div className="flex items-center gap-2 bg-green-900/30 p-2 rounded border border-green-600">
+                        <span>🔄</span>
+                        <span className="text-green-300">Fût plein</span>
+                        <span className="text-xs text-green-500 ml-auto">Réintègre le stock</span>
                       </div>
                     </div>
                   </div>
@@ -5397,45 +5355,70 @@
                 {tutorielStep === 3 && (
                   <div className="p-6">
                     <div className="text-4xl mb-4 text-center">💰</div>
-                    <h3 className="text-xl font-bold mb-3 text-center">Enregistrer une vente</h3>
+                    <h3 className="text-xl font-bold mb-3 text-center">Enregistrer les ventes</h3>
                     <div className="bg-emerald-900/30 p-4 rounded-xl mb-4">
                       <p className="text-sm text-neutral-300 mb-2">
                         Utilisez le bouton <span className="bg-emerald-600 px-2 py-1 rounded text-xs font-bold">💰 Vente</span> en bas de l'écran
                       </p>
                     </div>
-                    <div className="bg-neutral-800 p-3 rounded-lg text-sm">
-                      <p className="text-neutral-300 mb-2">Renseignez :</p>
+                    <div className="bg-neutral-800 p-3 rounded-lg text-sm mb-3">
+                      <p className="text-neutral-300 mb-2">Renseignez par créneau :</p>
                       <ul className="text-neutral-400 text-xs space-y-1 ml-4">
-                        <li>• Le bar nomade</li>
-                        <li>• Le montant en €</li>
-                        <li>• Optionnel : détails (pintes, pichets...)</li>
-                        <li>• Si équipement défaillant : cochez la case</li>
+                        <li>• Le montant total en €</li>
+                        <li>• Nombre de pintes, pichets, gobelets</li>
                       </ul>
+                    </div>
+                    <div className="bg-orange-900/30 p-3 rounded-lg text-xs border border-orange-600/50">
+                      <p className="text-orange-300 font-bold mb-1">⚠️ PAD défaillant ?</p>
+                      <p className="text-orange-200">Cochez la case : le créneau restera ouvert pour ajouter les données du PAD de remplacement.</p>
                     </div>
                   </div>
                 )}
                 
                 {tutorielStep === 4 && (
                   <div className="p-6">
-                    <div className="text-4xl mb-4 text-center">👥</div>
-                    <h3 className="text-xl font-bold mb-3 text-center">Gérer les bénévoles</h3>
-                    <div className="bg-indigo-900/30 p-4 rounded-xl mb-4">
+                    <div className="text-4xl mb-4 text-center">🗺️</div>
+                    <h3 className="text-xl font-bold mb-3 text-center">Vue Plan du Festival</h3>
+                    <div className="bg-purple-900/30 p-4 rounded-xl mb-4">
                       <p className="text-sm text-neutral-300 mb-2">
-                        Cliquez sur <span className="bg-indigo-600 px-2 py-1 rounded text-xs font-bold">👥 Bénévoles</span>
+                        Utilisez le bouton <span className="bg-purple-600 px-2 py-1 rounded text-xs font-bold">🗺️ Plan</span> en bas de l'écran
                       </p>
                     </div>
                     <div className="bg-neutral-800 p-3 rounded-lg text-sm">
-                      <p className="text-neutral-300 mb-2">Vous pouvez :</p>
+                      <p className="text-neutral-300 mb-2">Visualisez en temps réel :</p>
                       <ul className="text-neutral-400 text-xs space-y-1 ml-4">
-                        <li>• Affecter vendeur, serveur, runner par créneau</li>
-                        <li>• Voir la synthèse de tous les bars</li>
-                        <li>• Copier le planning du jour précédent</li>
+                        <li>• Position des bars sur le plan</li>
+                        <li>• 🟢 Vert = fûts disponibles</li>
+                        <li>• 🟡 Jaune = en service</li>
+                        <li>• 🔴 Rouge = complet</li>
                       </ul>
+                      <p className="text-neutral-500 text-xs mt-2">💡 Super Admin peut positionner les bars</p>
                     </div>
                   </div>
                 )}
                 
                 {tutorielStep === 5 && (
+                  <div className="p-6">
+                    <div className="text-4xl mb-4 text-center">🔐</div>
+                    <h3 className="text-xl font-bold mb-3 text-center">Niveaux d'accès</h3>
+                    <div className="space-y-3 text-sm">
+                      <div className="bg-neutral-800 p-3 rounded-lg">
+                        <p className="text-neutral-300 font-bold">👤 Bénévole</p>
+                        <p className="text-neutral-500 text-xs">Voir les fûts, consulter le plan</p>
+                      </div>
+                      <div className="bg-red-900/30 p-3 rounded-lg border border-red-600/30">
+                        <p className="text-red-300 font-bold">🔐 Admin</p>
+                        <p className="text-neutral-400 text-xs">+ Attribuer/retourner fûts, saisir ventes, gérer bénévoles, exports</p>
+                      </div>
+                      <div className="bg-amber-900/30 p-3 rounded-lg border border-amber-600/30">
+                        <p className="text-amber-300 font-bold">👑 Super Admin</p>
+                        <p className="text-neutral-400 text-xs">+ Créer sessions, configurer bars, positionner sur le plan, RGPD</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {tutorielStep === 6 && (
                   <div className="p-6 text-center">
                     <div className="text-6xl mb-4">🎉</div>
                     <h3 className="text-xl font-bold mb-3">C'est parti !</h3>
@@ -5446,7 +5429,7 @@
                       <p className="text-neutral-400 mb-2">💡 Astuces :</p>
                       <ul className="text-xs text-neutral-500 space-y-1">
                         <li>• Cliquez sur le code session pour voir les infos</li>
-                        <li>• Les admins ont accès aux statistiques (📈)</li>
+                        <li>• Installez l'app (PWA) pour un accès rapide</li>
                         <li>• Le tutoriel est accessible dans les infos session</li>
                       </ul>
                     </div>
@@ -5456,7 +5439,7 @@
                 {/* Navigation */}
                 <div className="bg-neutral-800 px-6 py-4 flex items-center justify-between">
                   <div className="flex gap-1">
-                    {[0, 1, 2, 3, 4, 5].map(i => (
+                    {[0, 1, 2, 3, 4, 5, 6].map(i => (
                       <div 
                         key={i} 
                         className={`w-2 h-2 rounded-full ${tutorielStep === i ? 'bg-red-500' : 'bg-neutral-600'}`}
@@ -5474,7 +5457,7 @@
                       </button>
                     )}
                     
-                    {tutorielStep < 5 ? (
+                    {tutorielStep < 6 ? (
                       <button 
                         onClick={() => setTutorielStep(prev => prev + 1)}
                         className="px-4 py-2 bg-red-600 rounded-lg text-sm font-medium"
