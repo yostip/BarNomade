@@ -143,13 +143,6 @@ var role=snap.val()||"visiteur";
 window._currentRole=role;
 if(role==="visiteur"){
 localStorage.setItem("gestionFuts_isAdmin","false");
-var css=document.getElementById("visitor-css");
-if(!css){
-css=document.createElement("style");
-css.id="visitor-css";
-css.textContent="button:has-text('Admin'),button:has-text('Fût'),button:has-text('Vente'),button:has-text('Bénévole'){display:none!important}";
-document.head.appendChild(css);
-}
 document.querySelectorAll("button").forEach(function(b){
 var t=b.textContent||"";
 if(t.indexOf("Admin")>-1||t.indexOf("Fût")>-1||t.indexOf("Vente")>-1||t.indexOf("Bénévole")>-1||t.indexOf("bénévole")>-1){
@@ -172,23 +165,27 @@ localStorage.setItem("gestionFuts_isAdmin","true");
 }});
 }
 
-// Ecouter changement de role
+// Ecouter changement de role EN CONTINU
 function listenRole(){
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
 if(!sc||!cu)return;
-var initialRole=null;
 firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").on("value",function(snap){
 var role=snap.val()||"visiteur";
-if(initialRole===null){initialRole=role;return;}
-if(role!==initialRole){
+var oldRole=window._currentRole;
+if(oldRole&&role!==oldRole){
 if(role==="secretaire"){
-alert("Vous avez ete promu Secretaire!");
+alert("Vous avez ete promu Secretaire! La page va se recharger.");
+localStorage.setItem("gestionFuts_isAdmin","true");
+setTimeout(function(){location.reload();},100);
 }else if(role==="visiteur"){
-alert("Vous etes maintenant Visiteur.");
+alert("Vous etes maintenant Visiteur. La page va se recharger.");
+localStorage.setItem("gestionFuts_isAdmin","false");
+setTimeout(function(){location.reload();},100);
 }
-location.reload();
-}});
+}
+window._currentRole=role;
+});
 }
 
 // Boutons dans panel (admin seulement)
@@ -201,48 +198,64 @@ if(!isAdm&&!isCr)return;
 document.querySelectorAll('[class*="bg-neutral-800 px-3 py-2 rounded"]').forEach(function(el){
 if(el.dataset.btnAdded)return;
 el.dataset.btnAdded="1";
-var spans=el.querySelectorAll("span");
-var userName=null;
+var txt=el.textContent||"";
+if(txt.indexOf("(vous)")>-1)return;
+if(txt.indexOf("Super Admin")>-1)return;
 var userRole=null;
-spans.forEach(function(sp){
-var t=sp.textContent||"";
-if(t.indexOf("Visiteur")>-1)userRole="visiteur";
-if(t.indexOf("Secr")>-1)userRole="secretaire";
-if(t.indexOf("Admin")>-1)userRole="admin";
-if(t.indexOf("Super Admin")>-1)userRole="superadmin";
-});
-var firstText=el.textContent.split("👁")[0].split("📝")[0].split("🔐")[0].split("👑")[0].trim();
-if(firstText.indexOf("(vous)")>-1)return;
-userName=firstText.replace(/[^a-zA-Z0-9àâäéèêëïîôùûüç\s\-_]/g,"").trim();
-if(!userName||userRole==="superadmin"||userRole==="admin")return;
+if(txt.indexOf("Visiteur")>-1)userRole="visiteur";
+if(txt.indexOf("Secréta")>-1||txt.indexOf("Secreta")>-1||txt.indexOf("créta")>-1)userRole="secretaire";
+var match=txt.match(/^[●•]?\s*([A-Za-z0-9àâäéèêëïîôùûüç_\-\s]+)/);
+var userName=match?match[1].trim().split(" ")[0]:"";
+if(!userName)return;
+if(txt.indexOf("Admin")>-1&&txt.indexOf("Super")===-1&&txt.indexOf("Visiteur")===-1&&txt.indexOf("Secr")===-1)return;
 var ejectBtn=el.querySelector('button[class*="bg-red-600"]');
 if(!ejectBtn)return;
+if(el.querySelector(".role-btn"))return;
 var btn=document.createElement("button");
+btn.className="role-btn";
 btn.style.marginRight="8px";
+btn.style.padding="4px 8px";
+btn.style.borderRadius="4px";
+btn.style.fontSize="12px";
+btn.style.fontWeight="500";
+btn.style.cursor="pointer";
 if(userRole==="visiteur"){
-btn.className="px-2 py-1 bg-green-600 hover:bg-green-500 rounded text-xs font-medium";
+btn.style.backgroundColor="#16a34a";
 btn.textContent="→Sec";
+btn.title="Promouvoir en Secretaire";
+btn.onmouseover=function(){btn.style.backgroundColor="#22c55e";};
+btn.onmouseout=function(){btn.style.backgroundColor="#16a34a";};
 btn.onclick=function(e){
 e.stopPropagation();
 if(confirm("Promouvoir "+userName+" en Secretaire?")){
 firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"secretaire"});
+el.dataset.btnAdded="";
 }};
+ejectBtn.parentElement.insertBefore(btn,ejectBtn);
 }else if(userRole==="secretaire"){
-btn.className="px-2 py-1 bg-orange-600 hover:bg-orange-500 rounded text-xs font-medium";
+btn.style.backgroundColor="#ea580c";
 btn.textContent="→Vis";
+btn.title="Retrograder en Visiteur";
+btn.onmouseover=function(){btn.style.backgroundColor="#f97316";};
+btn.onmouseout=function(){btn.style.backgroundColor="#ea580c";};
 btn.onclick=function(e){
 e.stopPropagation();
 if(confirm("Retrograder "+userName+" en Visiteur?")){
 firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"visiteur"});
+el.dataset.btnAdded="";
 }};
-}else{return;}
 ejectBtn.parentElement.insertBefore(btn,ejectBtn);
+}
 });
 }
 
+// Init
 setTimeout(checkEjection,500);
-setTimeout(applyRestrictions,800);
-setTimeout(listenRole,1000);
+setTimeout(function(){
+applyRestrictions();
+window._currentRole=window._currentRole||null;
+},600);
+setTimeout(listenRole,800);
 setTimeout(addPanelButtons,1500);
 setInterval(applyRestrictions,3000);
 setInterval(addPanelButtons,2000);
