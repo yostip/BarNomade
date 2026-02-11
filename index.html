@@ -111,20 +111,24 @@ Total actuel : ${i.totalMontant.toFixed(2)}\u20AC (${i.nbVentes} PAD)`))return;c
 // === PATCH VISITEUR/SECRETAIRE ===
 (function(){
 var knownUsers={};
+var userExistedOnce=false;
 
-// Detecter si on a ete ejecte
+// Detecter si on a ete ejecte (seulement si on existait avant)
 function listenForEjection(){
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
 if(!sc||!cu)return;
 firebase.database().ref("sessions/"+sc+"/users/"+cu).on("value",function(snap){
-if(!snap.exists()){
+if(snap.exists()){
+userExistedOnce=true;
+}else if(userExistedOnce){
 alert("Vous avez ete deconnecte de la session.");
 localStorage.removeItem("gestionFuts_session");
 localStorage.removeItem("gestionFuts_userName");
 localStorage.removeItem("gestionFuts_isAdmin");
 localStorage.removeItem("gestionFuts_isCreator");
-location.reload();
+localStorage.removeItem("gestionFuts_backups");
+location.href=location.pathname;
 }
 });
 }
@@ -147,14 +151,31 @@ if(txt.indexOf("Vente")!==-1){b.style.display="none";}
 if(txt.indexOf("Bénévole")!==-1){b.style.display="none";}
 if(txt.indexOf("bénévole")!==-1){b.style.display="none";}
 });
-document.querySelectorAll('[class*="bg-green-600"]').forEach(function(el){
-if(el.tagName==="BUTTON"){el.style.display="none";}
+var header=document.querySelector("header")||document.querySelector('[class*="flex gap-2 mb"]')||document.querySelector('[class*="flex gap-2"]');
+if(!header){
+var allDivs=document.querySelectorAll("div.flex.gap-2");
+allDivs.forEach(function(d){
+var btns=d.querySelectorAll("button");
+if(btns.length===2){
+var hasGreen=false;
+var hasGray=false;
+btns.forEach(function(b){
+if(b.className.indexOf("bg-green-600")!==-1)hasGreen=true;
+if(b.className.indexOf("bg-neutral-700")!==-1)hasGray=true;
 });
-document.querySelectorAll('[class*="bg-neutral-700"]').forEach(function(el){
-if(el.tagName==="BUTTON"){
-var svg=el.querySelector("svg");
-var txt=el.textContent||"";
-if(svg||txt.indexOf("Param")!==-1||txt===""){el.style.display="none";}
+if(hasGreen&&hasGray){
+d.style.display="none";
+}
+}
+});
+}
+document.querySelectorAll("button").forEach(function(b){
+var cls=b.className||"";
+if(cls.indexOf("bg-green-600")!==-1&&b.querySelector("svg")){
+b.style.display="none";
+}
+if(cls.indexOf("bg-neutral-700")!==-1&&b.querySelector("svg")){
+b.style.display="none";
 }
 });
 document.querySelectorAll("div").forEach(function(d){
@@ -241,6 +262,7 @@ btn.onclick=function(e){
 e.stopPropagation();
 if(confirm("Retrograder "+uname+" en Visiteur (lecture seule)?")){
 firebase.database().ref("sessions/"+sc+"/users/"+uname).update({role:"visiteur"});
+setTimeout(function(){location.reload();},500);
 }};
 }else if(role==="visiteur"){
 btn.className="btn-role px-2 py-1 bg-green-600 hover:bg-green-500 rounded text-xs font-medium mr-2";
@@ -250,6 +272,7 @@ btn.onclick=function(e){
 e.stopPropagation();
 if(confirm("Promouvoir "+uname+" en Secretaire?")){
 firebase.database().ref("sessions/"+sc+"/users/"+uname).update({role:"secretaire"});
+setTimeout(function(){location.reload();},500);
 }};
 }else{return;}
 ejectBtn.parentElement.insertBefore(btn,ejectBtn);
