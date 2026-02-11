@@ -200,10 +200,13 @@ window._currentRole=role;
 if(oldRole&&oldRole!==role){
 if(role==="secretaire"){
 alert("Vous avez ete promu Secretaire! Vous pouvez maintenant effectuer des actions.");
-location.reload();
+localStorage.setItem("gestionFuts_isAdmin","true");
+document.querySelectorAll("button").forEach(function(b){b.style.display="";});
+document.querySelectorAll("div").forEach(function(d){d.style.display="";});
 }else if(role==="visiteur"&&oldRole==="secretaire"){
 alert("Vous etes maintenant Visiteur (lecture seule).");
-location.reload();
+localStorage.setItem("gestionFuts_isAdmin","false");
+applyVisitorRestrictions();
 }}});
 }
 
@@ -262,7 +265,6 @@ btn.onclick=function(e){
 e.stopPropagation();
 if(confirm("Retrograder "+uname+" en Visiteur (lecture seule)?")){
 firebase.database().ref("sessions/"+sc+"/users/"+uname).update({role:"visiteur"});
-setTimeout(function(){location.reload();},500);
 }};
 }else if(role==="visiteur"){
 btn.className="btn-role px-2 py-1 bg-green-600 hover:bg-green-500 rounded text-xs font-medium mr-2";
@@ -272,7 +274,6 @@ btn.onclick=function(e){
 e.stopPropagation();
 if(confirm("Promouvoir "+uname+" en Secretaire?")){
 firebase.database().ref("sessions/"+sc+"/users/"+uname).update({role:"secretaire"});
-setTimeout(function(){location.reload();},500);
 }};
 }else{return;}
 ejectBtn.parentElement.insertBefore(btn,ejectBtn);
