@@ -110,32 +110,21 @@ Total actuel : ${i.totalMontant.toFixed(2)}\u20AC (${i.nbVentes} PAD)`))return;c
 
 // === PATCH SYSTÈME VISITEUR/SECRÉTAIRE v31 ===
 (function(){
-  // Fonctions de promotion/rétrogradation
-  window._promoteToSecretaire=async(s,u)=>{await firebase.database().ref("sessions/"+s+"/users/"+u+"/role").set("secretaire")};
-  window._demoteToVisiteur=async(s,u)=>{await firebase.database().ref("sessions/"+s+"/users/"+u+"/role").set("visiteur")};
-  
-  // Synchroniser le rôle depuis Firebase au chargement
-  const syncRole=()=>{
-    const sc=localStorage.getItem("gestionFuts_session"),cu=localStorage.getItem("gestionFuts_userName");
-    if(!sc||!cu)return;
-    firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").once("value",snap=>{
-      const role=snap.val()||"visiteur";
-      window._userRole=role;
-      // Mettre à jour isAdmin selon le rôle
-      if(role==="superadmin"||role==="admin"){
-        localStorage.setItem("gestionFuts_isAdmin","true");
-      }else if(role==="secretaire"){
-        localStorage.setItem("gestionFuts_isAdmin","true"); // Secrétaire peut agir
-      }else{
-        localStorage.setItem("gestionFuts_isAdmin","false");
-      }
-      // Corriger isCreator si pas super admin
-      if(role!=="superadmin"){
-        localStorage.removeItem("gestionFuts_isCreator");
-      }
-    });
+  // Fonctions de promotion/rétrogradation avec CONFIRMATION
+  window._promoteToSecretaire=async(s,u)=>{
+    if(!confirm("Promouvoir "+u+" en Secrétaire ?
+
+Il pourra : attribuer/retourner des fûts, saisir des ventes, gérer les bénévoles.")){return}
+    await firebase.database().ref("sessions/"+s+"/users/"+u).update({role:"secretaire"});
+    alert("✅ "+u+" est maintenant Secrétaire");
   };
-  setTimeout(syncRole,1000);
+  window._demoteToVisiteur=async(s,u)=>{
+    if(!confirm("Rétrograder "+u+" en Visiteur ?
+
+Il ne pourra plus effectuer d'actions, seulement consulter.")){return}
+    await firebase.database().ref("sessions/"+s+"/users/"+u).update({role:"visiteur"});
+    alert("✅ "+u+" est maintenant Visiteur (lecture seule)");
+  };
   
   // Observer pour ajouter boutons promotion/rétrogradation
   const obs=new MutationObserver(()=>{
@@ -163,13 +152,31 @@ Total actuel : ${i.totalMontant.toFixed(2)}\u20AC (${i.nbVentes} PAD)`))return;c
   });
   obs.observe(document.body,{childList:!0,subtree:!0});
   
-  // Restreindre les visiteurs
-  const restrictVisitors=()=>{
+  // Écouter les changements de rôle EN TEMPS RÉEL pour le user courant
+  const listenRoleChanges=()=>{
     const sc=localStorage.getItem("gestionFuts_session"),cu=localStorage.getItem("gestionFuts_userName");
     if(!sc||!cu)return;
     firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").on("value",snap=>{
       const role=snap.val()||"visiteur";
+      const oldRole=window._userRole;
       window._userRole=role;
+      
+      // Notifier si le rôle a changé
+      if(oldRole && oldRole!==role){
+        if(role==="secretaire"){
+          alert("🎉 Vous avez été promu Secrétaire !
+
+Vous pouvez maintenant effectuer des actions.");
+          localStorage.setItem("gestionFuts_isAdmin","true");
+          location.reload(); // Recharger pour activer les boutons
+        }else if(role==="visiteur" && oldRole==="secretaire"){
+          alert("ℹ️ Vous êtes maintenant Visiteur (lecture seule).");
+          localStorage.setItem("gestionFuts_isAdmin","false");
+          location.reload();
+        }
+      }
+      
+      // Appliquer les restrictions selon le rôle
       if(role==="visiteur"){
         localStorage.setItem("gestionFuts_isAdmin","false");
         document.querySelectorAll("button").forEach(b=>{
@@ -182,8 +189,18 @@ Total actuel : ${i.totalMontant.toFixed(2)}\u20AC (${i.nbVentes} PAD)`))return;c
       }
     });
   };
-  setTimeout(restrictVisitors,2000);
-  setInterval(restrictVisitors,5000); // Répéter pour les nouveaux éléments
+  setTimeout(listenRoleChanges,1500);
+  
+  // Répéter la restriction pour les nouveaux éléments du DOM
+  setInterval(()=>{
+    if(window._userRole==="visiteur"){
+      document.querySelectorAll("button").forEach(b=>{
+        if(/Fût|Vente|Retour|Affecter|Enregistrer/.test(b.textContent)){
+          b.disabled=true;b.style.opacity="0.5";b.title="Mode visiteur - lecture seule";
+        }
+      });
+    }
+  },3000);
 })();
 // === FIN PATCH ===
 </script>
