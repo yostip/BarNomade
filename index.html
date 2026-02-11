@@ -4,62 +4,40 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Bar Nomade">
-  <meta name="theme-color" content="#39ff14">
-  <meta name="description" content="Gestion des fûts pour les bars nomades du Hellfest 2026">
+  <meta name="mobile-web-app-capable" content="yes">
   <title>Gestion Fûts - Hellfest 2026</title>
-  
-  <link rel="manifest" href="manifest.json">
-  <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
-  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
-  
-  <link rel="preconnect" href="https://unpkg.com">
-  <link rel="preconnect" href="https://cdn.tailwindcss.com">
-  <link rel="preconnect" href="https://www.gstatic.com">
-  
+  <script src="https://cdn.tailwindcss.com"></script>
   <style>
     * { -webkit-tap-highlight-color: transparent; }
-    body { overscroll-behavior: none; background: #000; }
-    @media (display-mode: standalone) { body { padding-top: env(safe-area-inset-top); } }
-    #loading-screen { position: fixed; inset: 0; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; color: #39ff14; }
+    body { font-family: system-ui, -apple-system, sans-serif; overscroll-behavior: none; }
+    #loading-screen { position: fixed; inset: 0; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; }
     #loading-screen.hidden { display: none; }
-    .loader-logo { width: 80px; height: 80px; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-    .animate-pulse-slow { animation: pulse 2s ease-in-out infinite; }
+    .loader { width: 50px; height: 50px; border: 4px solid #333; border-top-color: #39ff14; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-  
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
-  
-  <script src="https://cdn.jsdelivr.net/npm/js-sha256@0.9.0/src/sha256.min.js"></script>
-  
-  <script>
-    window.loadJsPDF = () => !window.jspdf && new Promise(r => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'; s.onload = r; document.head.appendChild(s); });
-    window.loadAutoTable = () => new Promise(r => { if (window.jspdfAutoTableLoaded) { r(); return; } const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js'; s.onload = () => { window.jspdfAutoTableLoaded = true; r(); }; document.head.appendChild(s); });
-    window.loadXLSX = () => !window.XLSX && new Promise(r => { const s = document.createElement('script'); s.src = 'https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js'; s.onload = r; document.head.appendChild(s); });
-    window.loadChartJS = () => !window.Chart && new Promise(r => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'; s.onload = r; document.head.appendChild(s); });
-  </script>
 </head>
-<body class="bg-black">
+<body class="bg-black text-white min-h-screen">
   <div id="loading-screen">
-    <img src="logo-hellfest.png" alt="Hellfest" class="loader-logo">
-    <p style="margin-top: 20px; font-size: 18px;">Chargement...</p>
-    <p style="margin-top: 8px; font-size: 12px; color: #39ff14; font-weight: bold;">HELLFEST 2026</p>
+    <div class="loader"></div>
+    <p style="margin-top: 20px; font-size: 14px; color: #39ff14;">HELLFEST 2026</p>
   </div>
   
   <div id="root"></div>
   
-  <script type="text/babel">
-const { useState, useEffect, useCallback, useRef } = React;
+  <!-- Firebase et dépendances (chargés EN PREMIER) -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/js-sha256@0.9.0/src/sha256.min.js"></script>
+  
+  <!-- Preact + htm (ultra léger ~5KB) -->
+  <script type="module">
+import { h, render } from 'https://esm.sh/preact@10.19.3';
+import { useState, useEffect, useRef, useCallback } from 'https://esm.sh/preact@10.19.3/hooks';
+import htm from 'https://esm.sh/htm@3.1.1';
 
-// ==================== CONFIGURATION ====================
+const html = htm.bind(h);
+
+// Firebase init
 const firebaseConfig = {
   apiKey: "AIzaSyCgl30syyCEJif9q96E2jzv-aTXxXgvgv0",
   authDomain: "gestion-futs-hellfest.firebaseapp.com",
@@ -69,14 +47,12 @@ const firebaseConfig = {
   messagingSenderId: "107509834680",
   appId: "1:107509834680:web:3a58295d3268b5d19f654d"
 };
-
 const app = firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
-// ==================== SÉCURITÉ HASH SHA-256 ====================
-const HASH_SUPER_ADMIN = "a1f86d4b304cb14f61f415122ab573659b81a20cb6c33f4cdb813578fa9b01ec"; // HF2026Admin
-const HASH_ADMIN = "992a785802be9620a8fbabefd5bf0468624d22be7d376943f7a0f1184bb61d6a"; // Hellfest26
-
+// Hash mots de passe
+const HASH_SUPER_ADMIN = "a1f86d4b304cb14f61f415122ab573659b81a20cb6c33f4cdb813578fa9b01ec";
+const HASH_ADMIN = "992a785802be9620a8fbabefd5bf0468624d22be7d376943f7a0f1184bb61d6a";
 const verifyPassword = (password, targetRole) => {
   const hash = sha256(password);
   if (targetRole === "superadmin") return hash === HASH_SUPER_ADMIN;
@@ -84,2060 +60,917 @@ const verifyPassword = (password, targetRole) => {
   return false;
 };
 
-// ==================== SYSTÈME DE RÔLES ====================
-const ROLES = { SUPERADMIN: 'superadmin', ADMIN: 'admin', SECRETAIRE: 'secretaire', VISITEUR: 'visiteur' };
-
+// Rôles et permissions
+const ROLES = { SUPERADMIN: "superadmin", ADMIN: "admin", SECRETAIRE: "secretaire", VISITEUR: "visiteur" };
 const PERMISSIONS = {
-  view_bars: ['superadmin', 'admin', 'secretaire', 'visiteur'],
-  view_plan: ['superadmin', 'admin', 'secretaire', 'visiteur'],
-  view_stocks: ['superadmin', 'admin', 'secretaire', 'visiteur'],
-  attribuer_fut: ['superadmin', 'admin', 'secretaire'],
-  retourner_fut: ['superadmin', 'admin', 'secretaire'],
-  enregistrer_vente: ['superadmin', 'admin', 'secretaire'],
-  saisir_benevoles: ['superadmin', 'admin', 'secretaire'],
-  gerer_bars: ['superadmin', 'admin'],
-  configurer_creneaux: ['superadmin', 'admin'],
-  copier_planning: ['superadmin', 'admin'],
-  positionner_bars: ['superadmin', 'admin'],
-  exports: ['superadmin', 'admin'],
-  voir_historiques: ['superadmin', 'admin'],
-  annuler_mouvement: ['superadmin', 'admin'],
-  dashboard: ['superadmin', 'admin'],
-  ejecter_secretaire: ['superadmin', 'admin'],
-  ejecter_visiteur: ['superadmin', 'admin'],
-  promouvoir_secretaire: ['superadmin', 'admin'],
-  retrograder_visiteur: ['superadmin', 'admin'],
-  ejecter_admin: ['superadmin'],
-  modifier_config: ['superadmin'],
-  reinitialisation_rgpd: ['superadmin'],
-  gerer_sessions: ['superadmin'],
-  promouvoir_admin: ['superadmin']
+  view_bars: ["superadmin", "admin", "secretaire", "visiteur"],
+  attribuer_fut: ["superadmin", "admin", "secretaire"],
+  retourner_fut: ["superadmin", "admin", "secretaire"],
+  enregistrer_vente: ["superadmin", "admin", "secretaire"],
+  saisir_benevoles: ["superadmin", "admin", "secretaire"],
+  gerer_bars: ["superadmin", "admin"],
+  exports: ["superadmin", "admin"],
+  voir_historiques: ["superadmin", "admin"],
+  annuler_mouvement: ["superadmin", "admin"],
+  dashboard: ["superadmin", "admin"],
+  ejecter_secretaire: ["superadmin", "admin"],
+  promouvoir_secretaire: ["superadmin", "admin"],
+  ejecter_admin: ["superadmin"],
+  modifier_config: ["superadmin"],
+  reinitialisation_rgpd: ["superadmin"],
+  promouvoir_admin: ["superadmin"]
 };
-
 const canDo = (role, action) => PERMISSIONS[action]?.includes(role) || false;
+const getRoleLabel = (role) => ({ superadmin: "👑 Super Admin", admin: "🔐 Admin", secretaire: "📝 Secrétaire", visiteur: "👁️ Visiteur" }[role] || "👁️ Visiteur");
+const getRoleColor = (role) => ({ superadmin: "text-yellow-400", admin: "text-blue-400", secretaire: "text-green-400", visiteur: "text-neutral-400" }[role] || "text-neutral-400");
 
-const getRoleLabel = (role) => {
-  const labels = { superadmin: '👑 Super Admin', admin: '🔐 Admin', secretaire: '📝 Secrétaire', visiteur: '👁️ Visiteur' };
-  return labels[role] || labels.visiteur;
-};
+// Utilitaires
+const hideLoadingScreen = () => document.getElementById('loading-screen')?.classList.add('hidden');
+const formatDate = (ts) => ts ? new Date(ts).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
 
-const getRoleColor = (role) => {
-  const colors = { superadmin: 'bg-red-900 text-red-300', admin: 'bg-orange-900 text-orange-300', secretaire: 'bg-blue-900 text-blue-300', visiteur: 'bg-neutral-700 text-neutral-300' };
-  return colors[role] || colors.visiteur;
-};
+// Badge rôle
+const RoleBadge = ({ role }) => html`<span class="text-xs px-2 py-0.5 rounded-full bg-neutral-800 ${getRoleColor(role)}">${getRoleLabel(role)}</span>`;
 
-// ==================== UTILITAIRES ====================
-const hideLoadingScreen = () => {
-  const loader = document.getElementById('loading-screen');
-  if (loader) loader.classList.add('hidden');
-};
-
-const purgeLocalStorage = () => {
-  ['gestionFuts_session', 'gestionFuts_userName', 'gestionFuts_role', 'gestionFuts_isCreator', 'gestionFuts_backups', 'gestionFuts_tutorielVu'].forEach(k => localStorage.removeItem(k));
-};
-
-const formatDate = (ts) => new Date(ts).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-const formatTime = (ts) => new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-
-// ==================== COMPOSANT BADGE RÔLE ====================
-const RoleBadge = ({ role, small = false }) => (
-  <span className={`${getRoleColor(role)} px-2 py-0.5 rounded ${small ? 'text-xs' : 'text-sm'}`}>
-    {getRoleLabel(role)}
-  </span>
-);
-
-// ==================== COMPOSANT LOGIN ====================
-const LoginScreen = ({ onJoinSession }) => {
+// ==================== LOGIN SCREEN ====================
+const LoginScreen = ({ onLogin }) => {
   const [mode, setMode] = useState('choice');
   const [sessionCode, setSessionCode] = useState('');
   const [userName, setUserName] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [savedSession, setSavedSession] = useState(null);
-  const [checkingSaved, setCheckingSaved] = useState(true);
-  const [showSuperAdmin, setShowSuperAdmin] = useState(false);
-  const [superAdminPassword, setSuperAdminPassword] = useState('');
-  const [superAdminMode, setSuperAdminMode] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [showSuperAdminPanel, setShowSuperAdminPanel] = useState(false);
   const [allSessions, setAllSessions] = useState([]);
-  const [loadingSessions, setLoadingSessions] = useState(false);
 
-  // Vérifier session sauvegardée
   useEffect(() => {
-    const checkSaved = async () => {
-      const saved = localStorage.getItem('gestionFuts_session');
-      const savedUser = localStorage.getItem('gestionFuts_userName');
-      const savedRole = localStorage.getItem('gestionFuts_role');
-      const savedCreator = localStorage.getItem('gestionFuts_isCreator');
-      
-      if (saved && savedUser) {
-        const snap = await database.ref(`sessions/${saved}`).once('value');
-        if (snap.exists()) {
-          setSavedSession({ code: saved, userName: savedUser, role: savedRole || 'visiteur', isCreator: savedCreator === 'true' });
-        } else {
-          purgeLocalStorage();
-        }
-      }
-      setCheckingSaved(false);
+    hideLoadingScreen();
+    const saved = localStorage.getItem('gestionFuts_session');
+    if (saved) {
+      const { session, userName, isCreator, role } = JSON.parse(saved);
+      database.ref(`sessions/${session}`).once('value', snap => {
+        if (snap.exists()) onLogin(session, userName, isCreator, role || 'visiteur');
+        else localStorage.removeItem('gestionFuts_session');
+      });
+    }
+  }, []);
+
+  const loadAllSessions = async () => {
+    const snap = await database.ref('sessions').once('value');
+    if (snap.exists()) {
+      setAllSessions(Object.entries(snap.val()).map(([code, data]) => ({
+        code, createdAt: data.config?.createdAt, createdBy: data.config?.createdBy,
+        usersCount: data.users ? Object.keys(data.users).length : 0
+      })));
+    }
+  };
+
+  const createSession = async () => {
+    if (!userName.trim()) return setError('Nom requis');
+    if (!verifyPassword(password, 'superadmin')) return setError('Mot de passe Super Admin incorrect');
+    setLoading(true);
+    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const config = {
+      stockInitialBiere: 150, stockInitialCidre: 50, maxFutsParBar: 3, nombreJours: 4,
+      prixPinte: 7, prixPichet: 17, prixGobelet: 5, volumePinte: 0.5, volumePichet: 1.5,
+      volumeFutBiere: 30, volumeFutCidre: 20, seuilPerte: 15, createdAt: Date.now(), createdBy: userName.trim()
     };
-    checkSaved();
-  }, []);
-
-  // Vérifier URL
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const sessionParam = params.get('session');
-    if (sessionParam) {
-      setSessionCode(sessionParam.toUpperCase());
-      setMode('join');
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-  }, []);
-
-  const rejoindreSessionSauvegardee = async () => {
-    if (!savedSession) return;
-    setLoading(true);
-    await database.ref(`sessions/${savedSession.code}/users/${savedSession.userName}`).update({ lastActive: Date.now() });
-    onJoinSession(savedSession.code, savedSession.userName, savedSession.isCreator, savedSession.role);
+    const creneaux = [{ id: 'c1', label: '14h-16h' }, { id: 'c2', label: '16h-18h' }, { id: 'c3', label: '18h-20h' }, { id: 'c4', label: '20h-22h' }, { id: 'c5', label: '22h-00h' }, { id: 'c6', label: '00h-02h' }];
+    const bars = [{ id: 'bar1', nom: 'Bar Central', type: 'biere', futs: [] }, { id: 'bar2', nom: 'Bar Nord', type: 'biere', futs: [] }, { id: 'bar3', nom: 'Bar Cidre', type: 'cidre', futs: [] }];
+    
+    await database.ref(`sessions/${code}`).set({ config, jourActuel: 1, creneaux, barsNomades: bars.reduce((acc, b) => ({ ...acc, [b.id]: b }), {}) });
+    await database.ref(`sessions/${code}/users/${userName.trim()}`).set({ role: 'superadmin', joinedAt: Date.now(), lastActive: Date.now() });
+    
+    localStorage.setItem('gestionFuts_session', JSON.stringify({ session: code, userName: userName.trim(), isCreator: true, role: 'superadmin' }));
+    onLogin(code, userName.trim(), true, 'superadmin');
   };
 
-  const oublierSession = () => {
-    purgeLocalStorage();
-    setSavedSession(null);
-  };
-
-  const creerSession = async () => {
-    if (!userName.trim()) { setError('Entrez votre prénom'); return; }
+  const joinSession = async () => {
+    if (!sessionCode.trim() || !userName.trim()) return setError('Code et nom requis');
     setLoading(true);
-    setError('');
-    
-    if (!verifyPassword(password, 'superadmin')) {
-      setError('Mot de passe Super Admin incorrect');
-      setLoading(false);
-      return;
-    }
-    
-    const code = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'.split('').sort(() => Math.random() - 0.5).slice(0, 6).join('');
-    
-    await database.ref(`sessions/${code}`).set({
-      config: {
-        createdAt: Date.now(),
-        createdBy: userName.trim(),
-        stockInitialBiere: 50,
-        stockInitialCidre: 20,
-        maxFutsParBar: 3,
-        nombreJours: 4,
-        prixPinte: 6,
-        prixPichet: 15,
-        prixGobelet: 2,
-        volumePinte: 0.5,
-        volumePichet: 1.5,
-        volumeFutBiere: 30,
-        volumeFutCidre: 20,
-        seuilPerte: 10
-      },
-      jourActuel: 1,
-      creneaux: [
-        { id: 'c1', label: '11h-13h' },
-        { id: 'c2', label: '13h-15h' },
-        { id: 'c3', label: '15h-17h' },
-        { id: 'c4', label: '17h-19h' },
-        { id: 'c5', label: '19h-21h' },
-        { id: 'c6', label: '21h-23h' },
-        { id: 'c7', label: '23h-01h' }
-      ],
-      users: {
-        [userName.trim()]: { role: 'superadmin', joinedAt: Date.now(), lastActive: Date.now() }
-      }
-    });
-    
-    localStorage.setItem('gestionFuts_session', code);
-    localStorage.setItem('gestionFuts_userName', userName.trim());
-    localStorage.setItem('gestionFuts_role', 'superadmin');
-    localStorage.setItem('gestionFuts_isCreator', 'true');
-    
-    onJoinSession(code, userName.trim(), true, 'superadmin');
-  };
-
-  const rejoindreSession = async () => {
-    if (!userName.trim()) { setError('Entrez votre prénom'); return; }
-    if (!sessionCode.trim()) { setError('Entrez le code session'); return; }
-    
-    setLoading(true);
-    setError('');
-    
     const code = sessionCode.trim().toUpperCase();
     const snap = await database.ref(`sessions/${code}`).once('value');
-    
-    if (!snap.exists()) {
-      setError('Session introuvable');
-      setLoading(false);
-      return;
-    }
+    if (!snap.exists()) { setLoading(false); return setError('Session introuvable'); }
     
     let role = 'visiteur';
+    if (password && verifyPassword(password, 'superadmin')) role = 'superadmin';
+    else if (password && verifyPassword(password, 'admin')) role = 'admin';
+    
     let finalName = userName.trim();
-    
-    if (password) {
-      if (verifyPassword(password, 'superadmin')) {
-        role = 'superadmin';
-      } else if (verifyPassword(password, 'admin')) {
-        role = 'admin';
-      } else {
-        setError('Mot de passe incorrect');
-        setLoading(false);
-        return;
-      }
-    }
-    
-    // Vérifier nom unique
     const usersSnap = await database.ref(`sessions/${code}/users`).once('value');
-    const existingUsers = usersSnap.val() || {};
-    
-    if (existingUsers[finalName]) {
-      const existingUser = existingUsers[finalName];
-      const timeSinceActive = Date.now() - (existingUser.lastActive || 0);
-      const isStale = timeSinceActive > 120000;
-      
-      if (!isStale) {
-        let suffix = 2;
-        while (existingUsers[`${userName.trim()} ${suffix}`]) suffix++;
-        const suggested = `${userName.trim()} ${suffix}`;
-        if (!confirm(`"${finalName}" est déjà utilisé.\n\nVoulez-vous vous connecter sous "${suggested}" ?`)) {
-          setLoading(false);
-          return;
-        }
-        finalName = suggested;
-      }
+    if (usersSnap.exists() && usersSnap.val()[finalName]) {
+      finalName = `${finalName}_${Date.now().toString(36).slice(-4)}`;
     }
     
-    await database.ref(`sessions/${code}/users/${finalName}`).set({
-      role,
-      joinedAt: Date.now(),
-      lastActive: Date.now()
-    });
-    
-    localStorage.setItem('gestionFuts_session', code);
-    localStorage.setItem('gestionFuts_userName', finalName);
-    localStorage.setItem('gestionFuts_role', role);
-    localStorage.setItem('gestionFuts_isCreator', 'false');
-    
-    onJoinSession(code, finalName, false, role);
+    await database.ref(`sessions/${code}/users/${finalName}`).set({ role, joinedAt: Date.now(), lastActive: Date.now() });
+    localStorage.setItem('gestionFuts_session', JSON.stringify({ session: code, userName: finalName, isCreator: false, role }));
+    onLogin(code, finalName, false, role);
   };
 
-  const ouvrirPanelSuperAdmin = async () => {
-    if (!verifyPassword(superAdminPassword, 'superadmin')) {
-      setError('Mot de passe incorrect');
-      return;
-    }
-    setSuperAdminMode(true);
-    setLoadingSessions(true);
-    const snap = await database.ref('sessions').once('value');
-    const data = snap.val() || {};
-    const sessions = Object.entries(data).map(([code, s]) => ({
-      code,
-      createdAt: s.config?.createdAt || 0,
-      createdBy: s.config?.createdBy || 'Inconnu',
-      nombreBars: s.barsNomades ? Object.keys(s.barsNomades).length : 0,
-      nombreUsers: s.users ? Object.keys(s.users).length : 0
-    })).sort((a, b) => b.createdAt - a.createdAt);
-    setAllSessions(sessions);
-    setLoadingSessions(false);
+  const deleteSession = async (code) => {
+    if (!confirm(`Supprimer la session ${code} ?`)) return;
+    await database.ref(`sessions/${code}`).remove();
+    loadAllSessions();
   };
 
-  const supprimerSession = async (code) => {
-    if (confirm(`Supprimer définitivement la session ${code} ?\n\nCette action est irréversible.`)) {
-      await database.ref(`sessions/${code}`).remove();
-      setAllSessions(prev => prev.filter(s => s.code !== code));
-      if (localStorage.getItem('gestionFuts_session') === code) {
-        purgeLocalStorage();
-        setSavedSession(null);
-      }
-    }
-  };
-
-  if (checkingSaved) {
-    return <div className="min-h-screen bg-black flex items-center justify-center"><div className="text-green-400">Chargement...</div></div>;
-  }
-
-  // Panel Super Admin
-  if (superAdminMode) {
-    return (
-      <div className="min-h-screen bg-black text-white p-4">
-        <div className="max-w-lg mx-auto">
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-xl font-bold text-red-500">👑 Panel Super Admin</h1>
-            <button onClick={() => setSuperAdminMode(false)} className="text-neutral-400">✕ Fermer</button>
+  // Rendu
+  if (showSuperAdminPanel) {
+    return html`
+      <div class="min-h-screen bg-black p-4">
+        <div class="max-w-lg mx-auto">
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="text-xl font-bold text-yellow-400">👑 Panel Super Admin</h2>
+            <button onClick=${() => setShowSuperAdminPanel(false)} class="text-neutral-400">✕</button>
           </div>
-          
-          <div className="bg-neutral-900 rounded-xl p-4 mb-4">
-            <h2 className="font-bold mb-3">Sessions ({allSessions.length})</h2>
-            {loadingSessions ? (
-              <p className="text-neutral-400">Chargement...</p>
-            ) : allSessions.length === 0 ? (
-              <p className="text-neutral-400">Aucune session</p>
-            ) : (
-              <div className="space-y-2">
-                {allSessions.map(s => (
-                  <div key={s.code} className="bg-neutral-800 p-3 rounded-lg flex items-center justify-between">
-                    <div>
-                      <p className="font-mono text-red-400 font-bold">{s.code}</p>
-                      <p className="text-xs text-neutral-400">
-                        {s.createdBy} • {s.nombreBars} bars • {s.nombreUsers} users
-                        <br />{new Date(s.createdAt).toLocaleDateString('fr-FR')}
-                      </p>
-                    </div>
-                    <button onClick={() => supprimerSession(s.code)} className="px-3 py-1 bg-red-600 rounded text-sm">🗑️</button>
-                  </div>
-                ))}
+          <div class="space-y-2">
+            ${allSessions.map(s => html`
+              <div key=${s.code} class="flex items-center justify-between bg-neutral-900 p-3 rounded-lg">
+                <div>
+                  <p class="font-mono font-bold">${s.code}</p>
+                  <p class="text-xs text-neutral-400">${s.createdBy} • ${s.usersCount} users</p>
+                </div>
+                <button onClick=${() => deleteSession(s.code)} class="text-red-400 text-sm">🗑️</button>
               </div>
-            )}
+            `)}
+            ${allSessions.length === 0 && html`<p class="text-neutral-500 text-center py-4">Aucune session</p>`}
           </div>
-          
-          <button onClick={() => { purgeLocalStorage(); alert('Données locales purgées'); }} className="w-full py-3 bg-orange-900 hover:bg-orange-800 rounded-xl text-sm">
-            🧹 Purger les données locales
-          </button>
+          <button onClick=${() => { localStorage.clear(); location.reload(); }} class="w-full mt-6 py-3 bg-red-900 rounded-lg">🧹 Purger localStorage</button>
         </div>
       </div>
-    );
+    `;
   }
 
-  // Session sauvegardée
-  if (savedSession) {
-    return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
-        <div className="w-full max-w-sm">
-          <div className="text-center mb-8">
-            <img src="logo-hellfest.png" alt="Hellfest" className="w-20 h-20 mx-auto mb-4" />
-            <h1 className="text-2xl font-black text-green-400">GESTION FÛTS</h1>
-          </div>
-          
-          <div className="bg-neutral-900 rounded-2xl p-6">
-            <p className="text-neutral-400 text-sm mb-2">Session précédente :</p>
-            <p className="text-2xl font-mono font-bold text-red-400 mb-1">{savedSession.code}</p>
-            <p className="text-sm text-neutral-300 mb-4">
-              {savedSession.userName} <RoleBadge role={savedSession.role} small />
-            </p>
-            
-            <button onClick={rejoindreSessionSauvegardee} disabled={loading} className="w-full py-4 bg-green-600 hover:bg-green-500 rounded-xl font-bold text-lg mb-3">
-              {loading ? '⏳ Connexion...' : '▶️ Reprendre'}
-            </button>
-            
-            <button onClick={oublierSession} className="w-full py-3 bg-neutral-800 rounded-xl text-neutral-400">
-              Autre session
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <img src="logo-hellfest.png" alt="Hellfest" className="w-20 h-20 mx-auto mb-4" />
-          <h1 className="text-2xl font-black text-green-400">GESTION FÛTS</h1>
-          <p className="text-neutral-400 text-sm">Hellfest 2026</p>
+  return html`
+    <div class="min-h-screen bg-black flex items-center justify-center p-4">
+      <div class="w-full max-w-sm">
+        <div class="text-center mb-8">
+          <h1 class="text-3xl font-black text-white">🍺 GESTION FÛTS</h1>
+          <p class="text-[#39ff14] font-bold">HELLFEST 2026</p>
         </div>
         
-        {mode === 'choice' && (
-          <div className="space-y-4">
-            <button onClick={() => setMode('join')} className="w-full py-4 bg-green-600 hover:bg-green-500 rounded-xl font-bold text-lg">
-              📲 Rejoindre une session
-            </button>
-            <button onClick={() => setMode('create')} className="w-full py-4 bg-red-600 hover:bg-red-500 rounded-xl font-bold text-lg">
-              ➕ Créer une session
-            </button>
-            
-            <button onClick={() => setShowSuperAdmin(!showSuperAdmin)} className="w-full py-2 text-neutral-500 text-xs">
-              {showSuperAdmin ? '▲ Masquer' : '🔧 Administration'}
-            </button>
-            
-            {showSuperAdmin && (
-              <div className="bg-neutral-900 p-4 rounded-xl">
-                <input type="password" value={superAdminPassword} onChange={e => setSuperAdminPassword(e.target.value)} placeholder="Mot de passe Super Admin" className="w-full px-4 py-2 bg-neutral-800 rounded-lg mb-2" />
-                <button onClick={ouvrirPanelSuperAdmin} className="w-full py-2 bg-red-900 rounded-lg text-sm">👑 Accéder</button>
-                {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
-              </div>
-            )}
-          </div>
-        )}
+        ${error && html`<div class="bg-red-900/50 text-red-300 p-3 rounded-lg mb-4 text-sm">${error}</div>`}
         
-        {mode === 'create' && (
-          <div className="bg-neutral-900 rounded-2xl p-6">
-            <h2 className="text-xl font-bold mb-4">Créer une session</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-neutral-400 mb-1">Votre prénom</label>
-                <input type="text" value={userName} onChange={e => setUserName(e.target.value)} placeholder="Prénom" className="w-full px-4 py-3 bg-neutral-800 rounded-xl" />
-              </div>
-              <div>
-                <label className="block text-sm text-neutral-400 mb-1">Mot de passe Super Admin</label>
-                <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" className="w-full px-4 py-3 bg-neutral-800 rounded-xl" />
-              </div>
-              {error && <p className="text-red-400 text-sm">{error}</p>}
-              <button onClick={creerSession} disabled={loading} className="w-full py-4 bg-red-600 hover:bg-red-500 rounded-xl font-bold">
-                {loading ? '⏳ Création...' : '✓ Créer la session'}
-              </button>
-              <button onClick={() => { setMode('choice'); setError(''); }} className="w-full py-3 bg-neutral-800 rounded-xl text-neutral-400">← Retour</button>
-            </div>
+        ${mode === 'choice' && html`
+          <div class="space-y-3">
+            <button onClick=${() => setMode('create')} class="w-full py-4 bg-red-600 hover:bg-red-700 rounded-xl font-bold text-lg">➕ Créer une session</button>
+            <button onClick=${() => setMode('join')} class="w-full py-4 bg-neutral-800 hover:bg-neutral-700 rounded-xl font-bold text-lg">🔗 Rejoindre</button>
+            <button onClick=${() => { loadAllSessions(); setShowSuperAdminPanel(true); }} class="w-full py-3 bg-yellow-600/20 text-yellow-400 rounded-xl text-sm">👑 Panel Super Admin</button>
           </div>
-        )}
+        `}
         
-        {mode === 'join' && (
-          <div className="bg-neutral-900 rounded-2xl p-6">
-            <h2 className="text-xl font-bold mb-4">Rejoindre une session</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-neutral-400 mb-1">Code session</label>
-                <input type="text" value={sessionCode} onChange={e => setSessionCode(e.target.value.toUpperCase())} placeholder="ABC123" className="w-full px-4 py-3 bg-neutral-800 rounded-xl font-mono text-center text-xl tracking-widest" maxLength={6} />
-              </div>
-              <div>
-                <label className="block text-sm text-neutral-400 mb-1">Votre prénom</label>
-                <input type="text" value={userName} onChange={e => setUserName(e.target.value)} placeholder="Prénom" className="w-full px-4 py-3 bg-neutral-800 rounded-xl" />
-              </div>
-              <div>
-                <label className="block text-sm text-neutral-400 mb-1">Mot de passe <span className="text-neutral-500">(optionnel)</span></label>
-                <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Laisser vide = Visiteur" className="w-full px-4 py-3 bg-neutral-800 rounded-xl" />
-                <p className="text-xs text-neutral-500 mt-1">Sans mdp → Visiteur (attente promotion par Admin)</p>
-              </div>
-              {error && <p className="text-red-400 text-sm">{error}</p>}
-              <button onClick={rejoindreSession} disabled={loading} className="w-full py-4 bg-green-600 hover:bg-green-500 rounded-xl font-bold">
-                {loading ? '⏳ Connexion...' : '✓ Rejoindre'}
-              </button>
-              <button onClick={() => { setMode('choice'); setError(''); }} className="w-full py-3 bg-neutral-800 rounded-xl text-neutral-400">← Retour</button>
-            </div>
+        ${mode === 'create' && html`
+          <div class="space-y-4">
+            <input type="text" value=${userName} onInput=${e => setUserName(e.target.value)} placeholder="Votre nom" class="w-full px-4 py-3 bg-neutral-900 rounded-xl" />
+            <input type="password" value=${password} onInput=${e => setPassword(e.target.value)} placeholder="Mot de passe Super Admin" class="w-full px-4 py-3 bg-neutral-900 rounded-xl" />
+            <button onClick=${createSession} disabled=${loading} class="w-full py-4 bg-red-600 rounded-xl font-bold disabled:opacity-50">${loading ? '...' : '🚀 Créer'}</button>
+            <button onClick=${() => setMode('choice')} class="w-full py-3 text-neutral-400">← Retour</button>
           </div>
-        )}
+        `}
+        
+        ${mode === 'join' && html`
+          <div class="space-y-4">
+            <input type="text" value=${sessionCode} onInput=${e => setSessionCode(e.target.value.toUpperCase())} placeholder="Code session" class="w-full px-4 py-3 bg-neutral-900 rounded-xl font-mono text-center text-xl tracking-widest" maxlength="6" />
+            <input type="text" value=${userName} onInput=${e => setUserName(e.target.value)} placeholder="Votre nom" class="w-full px-4 py-3 bg-neutral-900 rounded-xl" />
+            <input type="password" value=${password} onInput=${e => setPassword(e.target.value)} placeholder="Mot de passe (optionnel)" class="w-full px-4 py-3 bg-neutral-900 rounded-xl" />
+            <button onClick=${joinSession} disabled=${loading} class="w-full py-4 bg-emerald-600 rounded-xl font-bold disabled:opacity-50">${loading ? '...' : '🔗 Rejoindre'}</button>
+            <button onClick=${() => setMode('choice')} class="w-full py-3 text-neutral-400">← Retour</button>
+          </div>
+        `}
       </div>
     </div>
-  );
+  `;
 };
 
-// ==================== COMPOSANT PRINCIPAL ====================
+// ==================== MAIN APP ====================
 const MainApp = ({ session, userName, isCreator, initialRole, onLogout }) => {
-  // États principaux
-  const [role, setRole] = useState(initialRole);
-  const [config, setConfig] = useState({
-    stockInitialBiere: 50, stockInitialCidre: 20, maxFutsParBar: 3, nombreJours: 4,
-    prixPinte: 6, prixPichet: 15, prixGobelet: 2, volumePinte: 0.5, volumePichet: 1.5,
-    volumeFutBiere: 30, volumeFutCidre: 20, seuilPerte: 10
-  });
+  // États données
+  const [config, setConfig] = useState({ stockInitialBiere: 150, stockInitialCidre: 50, maxFutsParBar: 3, nombreJours: 4, prixPinte: 7, prixPichet: 17, prixGobelet: 5, volumePinte: 0.5, volumePichet: 1.5, volumeFutBiere: 30, volumeFutCidre: 20, seuilPerte: 15 });
   const [jourActuel, setJourActuel] = useState(1);
   const [barsNomades, setBarsNomades] = useState([]);
   const [historique, setHistorique] = useState([]);
   const [historiqueVentes, setHistoriqueVentes] = useState([]);
   const [creneaux, setCreneaux] = useState([]);
-  const [benevoles, setBenevoles] = useState({});
-  const [connectedUsers, setConnectedUsers] = useState([]);
-  const [usersData, setUsersData] = useState({});
-  const [barPositions, setBarPositions] = useState({});
+  const [users, setUsers] = useState({});
+  const [role, setRole] = useState(initialRole);
   const [futsEnAttente, setFutsEnAttente] = useState([]);
+  const [barPositions, setBarPositions] = useState({});
+  const [benevoles, setBenevoles] = useState({});
+  const [adminEmail, setAdminEmail] = useState('');
   
   // États UI
-  const [loading, setLoading] = useState(false);
   const [notification, setNotification] = useState('');
+  const [showModalSession, setShowModalSession] = useState(false);
   const [showModalAttribution, setShowModalAttribution] = useState(false);
   const [showModalVente, setShowModalVente] = useState(false);
   const [showModalParametres, setShowModalParametres] = useState(false);
-  const [showModalSession, setShowModalSession] = useState(false);
-  const [showModalExport, setShowModalExport] = useState(false);
   const [showModalHistorique, setShowModalHistorique] = useState(false);
   const [showModalHistoriqueVentes, setShowModalHistoriqueVentes] = useState(false);
-  const [showModalBenevoles, setShowModalBenevoles] = useState(false);
   const [showModalDashboard, setShowModalDashboard] = useState(false);
   const [showModalPlan, setShowModalPlan] = useState(false);
-  const [showModalQR, setShowModalQR] = useState(false);
+  const [showModalExport, setShowModalExport] = useState(false);
+  const [showModalBenevoles, setShowModalBenevoles] = useState(false);
   const [showModalReset, setShowModalReset] = useState(false);
-  const [showTutoriel, setShowTutoriel] = useState(false);
-  const [newArrivals, setNewArrivals] = useState([]);
-  const [selectedBar, setSelectedBar] = useState(null);
+  const [showModalQR, setShowModalQR] = useState(false);
   const [editingPlan, setEditingPlan] = useState(false);
-  const [filterHistorique, setFilterHistorique] = useState('all');
-  const [adminEmail, setAdminEmail] = useState('');
+  const [newArrivals, setNewArrivals] = useState([]);
   
   const isDisconnectingRef = useRef(false);
   const sessionRef = database.ref(`sessions/${session}`);
-  const firebaseRefs = useRef([]);
   
-  // Permissions
+  const isAdmin = role === 'admin' || role === 'superadmin';
   const isSuperAdmin = role === 'superadmin';
-  const isAdmin = role === 'admin' || isSuperAdmin;
   const isSecretaire = role === 'secretaire' || isAdmin;
-  const isVisiteur = role === 'visiteur';
-  
+
+  // Notifications
+  const showNotification = (msg) => { setNotification(msg); setTimeout(() => setNotification(''), 3000); };
+
+  // Firebase listeners
+  useEffect(() => {
+    hideLoadingScreen();
+    const refs = [];
+    const addRef = (path, cb) => { const ref = sessionRef.child(path); ref.on('value', cb); refs.push(ref); };
+    
+    addRef('config', snap => { if (snap.exists()) { const cfg = snap.val(); setConfig(cfg); if (cfg.adminEmail) setAdminEmail(cfg.adminEmail); } });
+    addRef('jourActuel', snap => { if (snap.exists()) setJourActuel(snap.val()); });
+    addRef('barsNomades', snap => { if (snap.exists()) setBarsNomades(Object.values(snap.val())); });
+    addRef('historique', snap => { if (snap.exists()) setHistorique(Object.values(snap.val()).sort((a, b) => b.timestamp - a.timestamp)); else setHistorique([]); });
+    addRef('historiqueVentes', snap => { if (snap.exists()) setHistoriqueVentes(Object.values(snap.val()).sort((a, b) => b.timestamp - a.timestamp)); else setHistoriqueVentes([]); });
+    addRef('creneaux', snap => { if (snap.exists()) setCreneaux(snap.val()); });
+    addRef('users', snap => {
+      if (snap.exists()) {
+        const u = snap.val();
+        setUsers(u);
+        if (u[userName]) setRole(u[userName].role);
+        else if (!isDisconnectingRef.current) { alert('Vous avez été déconnecté'); onLogout(); }
+        // Nouveaux arrivants
+        const now = Date.now();
+        const arrivals = Object.entries(u).filter(([name, data]) => data.role === 'visiteur' && (now - data.joinedAt) < 60000).map(([name]) => name);
+        setNewArrivals(arrivals);
+      }
+    });
+    addRef('futsEnAttente', snap => { if (snap.exists()) setFutsEnAttente(Object.values(snap.val())); else setFutsEnAttente([]); });
+    addRef('barPositions', snap => { if (snap.exists()) setBarPositions(snap.val()); });
+    addRef('benevoles', snap => { if (snap.exists()) setBenevoles(snap.val()); else setBenevoles({}); });
+    
+    // Heartbeat
+    const hb = setInterval(() => sessionRef.child(`users/${userName}/lastActive`).set(Date.now()), 30000);
+    
+    return () => { refs.forEach(r => r.off()); clearInterval(hb); };
+  }, []);
+
   // Calculs stocks
   const futsSortisBiere = historique.filter(m => m.type === 'SORTIE' && m.typeFut === 'biere' && m.jour === jourActuel).length;
   const futsSortisCidre = historique.filter(m => m.type === 'SORTIE' && m.typeFut === 'cidre' && m.jour === jourActuel).length;
-  const futsRetoursBiere = historique.filter(m => ['RETOUR_VIDE', 'RETOUR_CASSE', 'RETOUR_PLEIN'].includes(m.type) && m.typeFut === 'biere' && m.jour === jourActuel).length;
-  const futsRetoursCidre = historique.filter(m => ['RETOUR_VIDE', 'RETOUR_CASSE', 'RETOUR_PLEIN'].includes(m.type) && m.typeFut === 'cidre' && m.jour === jourActuel).length;
+  const futsRetoursBiere = historique.filter(m => m.type === 'RETOUR_PLEIN' && m.typeFut === 'biere' && m.jour === jourActuel).length;
+  const futsRetoursCidre = historique.filter(m => m.type === 'RETOUR_PLEIN' && m.typeFut === 'cidre' && m.jour === jourActuel).length;
   const stockBiere = config.stockInitialBiere - futsSortisBiere + futsRetoursBiere;
   const stockCidre = config.stockInitialCidre - futsSortisCidre + futsRetoursCidre;
-  
-  // Chargement Firebase
-  useEffect(() => {
-    hideLoadingScreen();
-    
-    const addRef = (path, callback) => {
-      const ref = sessionRef.child(path);
-      ref.on('value', callback);
-      firebaseRefs.current.push(ref);
-    };
-    
-    addRef('config', snap => { 
-      if (snap.exists()) {
-        const cfg = snap.val();
-        setConfig(cfg);
-        if (cfg.adminEmail) setAdminEmail(cfg.adminEmail);
-      }
-    });
-    addRef('jourActuel', snap => { if (snap.exists()) setJourActuel(snap.val()); });
-    addRef('barsNomades', snap => {
-      const data = snap.val();
-      setBarsNomades(data ? Object.entries(data).map(([id, bar]) => ({ id, ...bar })) : []);
-    });
-    addRef('historique', snap => setHistorique(snap.val() ? Object.values(snap.val()) : []));
-    addRef('historiqueVentes', snap => setHistoriqueVentes(snap.val() ? Object.values(snap.val()) : []));
-    addRef('creneaux', snap => {
-      const data = snap.val();
-      if (data) setCreneaux(Array.isArray(data) ? data : Object.values(data));
-    });
-    addRef('benevoles', snap => setBenevoles(snap.val() || {}));
-    addRef('users', snap => {
-      const data = snap.val() || {};
-      setUsersData(data);
-      setConnectedUsers(Object.keys(data));
-      
-      if (data[userName]?.role && data[userName].role !== role) {
-        setRole(data[userName].role);
-        localStorage.setItem('gestionFuts_role', data[userName].role);
-      }
-      
-      if (canDo(role, 'promouvoir_secretaire')) {
-        const now = Date.now();
-        const newVisitors = Object.entries(data)
-          .filter(([name, u]) => u.role === 'visiteur' && name !== userName && (now - u.joinedAt) < 60000)
-          .map(([name]) => name);
-        if (newVisitors.length > 0) setNewArrivals(prev => [...new Set([...prev, ...newVisitors])]);
-      }
-    });
-    addRef('barPositions', snap => setBarPositions(snap.val() || {}));
-    addRef('futsEnAttente', snap => setFutsEnAttente(snap.val() ? Object.values(snap.val()) : []));
-    
-    const userRef = sessionRef.child(`users/${userName}`);
-    userRef.on('value', snap => {
-      if (!snap.exists() && !isDisconnectingRef.current) {
-        alert('Vous avez été déconnecté par un administrateur.');
-        purgeLocalStorage();
-        onLogout();
-      }
-    });
-    firebaseRefs.current.push(userRef);
-    
-    const interval = setInterval(() => sessionRef.child(`users/${userName}/lastActive`).set(Date.now()), 30000);
-    
-    if (!localStorage.getItem('gestionFuts_tutorielVu') && isCreator) setShowTutoriel(true);
-    
-    return () => {
-      firebaseRefs.current.forEach(ref => ref.off());
-      clearInterval(interval);
-    };
-  }, [session, userName]);
-  
-  const showNotification = (msg) => { setNotification(msg); setTimeout(() => setNotification(''), 3000); };
-  
-  // Gestion des rôles
-  const promouvoirSecretaire = async (targetUser) => {
-    if (!canDo(role, 'promouvoir_secretaire')) return;
-    await sessionRef.child(`users/${targetUser}/role`).set('secretaire');
-    setNewArrivals(prev => prev.filter(n => n !== targetUser));
-    showNotification(`✅ ${targetUser} → Secrétaire`);
-  };
-  
-  const retrograderVisiteur = async (targetUser) => {
-    if (!canDo(role, 'retrograder_visiteur')) return;
-    const targetRole = usersData[targetUser]?.role;
-    if (targetRole === 'admin' || targetRole === 'superadmin') { alert('Impossible de rétrograder un Admin'); return; }
-    await sessionRef.child(`users/${targetUser}/role`).set('visiteur');
-    showNotification(`${targetUser} → Visiteur`);
-  };
-  
-  const promouvoirAdmin = async (targetUser) => {
-    if (!canDo(role, 'promouvoir_admin')) return;
-    await sessionRef.child(`users/${targetUser}/role`).set('admin');
-    showNotification(`🔐 ${targetUser} → Admin`);
-  };
-  
-  const ejecterUtilisateur = async (targetUser) => {
-    const targetRole = usersData[targetUser]?.role;
-    if (targetRole === 'superadmin') { alert('Impossible d\'éjecter un Super Admin'); return; }
-    if (targetRole === 'admin' && !canDo(role, 'ejecter_admin')) { alert('Seul un Super Admin peut éjecter un Admin'); return; }
-    if (confirm(`Éjecter ${targetUser} ?`)) {
-      await sessionRef.child(`users/${targetUser}`).remove();
-      showNotification(`${targetUser} éjecté`);
-    }
-  };
-  
-  const deconnexion = () => {
-    if (confirm('Voulez-vous vous déconnecter ?')) {
-      isDisconnectingRef.current = true;
-      sessionRef.child(`users/${userName}`).remove();
-      purgeLocalStorage();
-      onLogout();
-    }
-  };
-  
-  // Gestion des fûts
-  const attribuerFut = async (barId, fromAttente = null) => {
-    if (!canDo(role, 'attribuer_fut')) { alert('Action non autorisée'); return; }
+
+  // Actions
+  const attribuerFut = async (barId, typeFut, futAttenteId = null) => {
     const bar = barsNomades.find(b => b.id === barId);
     if (!bar) return;
-    const futs = bar.futs || [];
-    if (futs.length >= config.maxFutsParBar) { alert('Limite atteinte'); return; }
-    const typeFut = bar.type;
-    if (!fromAttente) {
-      if (typeFut === 'biere' && stockBiere <= 0) { alert('Stock bière vide'); return; }
-      if (typeFut === 'cidre' && stockCidre <= 0) { alert('Stock cidre vide'); return; }
-    }
+    if ((bar.futs?.length || 0) >= config.maxFutsParBar) return showNotification('❌ Bar au maximum');
     
-    setLoading(true);
-    const newFut = { id: fromAttente?.id || Date.now(), dateAttribution: Date.now() };
-    await sessionRef.child(`barsNomades/${barId}/futs`).set([...futs, newFut]);
-    if (fromAttente) await sessionRef.child(`futsEnAttente/${fromAttente.id}`).remove();
+    const futId = futAttenteId || `fut_${Date.now()}`;
+    const newFut = { id: futId, dateAttribution: Date.now() };
     
-    await sessionRef.child(`historique/${Date.now()}`).set({
-      id: Date.now(), type: fromAttente ? 'REATTRIBUTION' : 'SORTIE',
-      barId, barNom: bar.nom, typeFut, jour: jourActuel, timestamp: Date.now(), user: userName
-    });
+    await sessionRef.child(`barsNomades/${barId}/futs`).set([...(bar.futs || []), newFut]);
+    await sessionRef.child('historique').push({ id: futId, type: 'SORTIE', barId, barNom: bar.nom, typeFut: futAttenteId ? futsEnAttente.find(f => f.id === futAttenteId)?.typeFut : typeFut, jour: jourActuel, timestamp: Date.now(), user: userName });
     
-    setLoading(false);
-    setShowModalAttribution(false);
-    showNotification(`🍺 Fût ${fromAttente ? 'réattribué' : 'attribué'} à ${bar.nom}`);
+    if (futAttenteId) await sessionRef.child(`futsEnAttente/${futAttenteId}`).remove();
+    showNotification(`✅ Fût attribué à ${bar.nom}`);
   };
-  
-  const retournerFut = async (barId, futId, typeRetour) => {
-    if (!canDo(role, 'retourner_fut')) { alert('Action non autorisée'); return; }
+
+  const retournerFut = async (barId, futId, etat) => {
     const bar = barsNomades.find(b => b.id === barId);
     if (!bar) return;
-    const futs = bar.futs || [];
-    const fut = futs.find(f => f.id === futId);
-    const newFuts = futs.filter(f => f.id !== futId);
+    const fut = bar.futs?.find(f => f.id === futId);
+    if (!fut) return;
     
-    setLoading(true);
-    await sessionRef.child(`barsNomades/${barId}/futs`).set(newFuts.length > 0 ? newFuts : null);
+    const newFuts = bar.futs.filter(f => f.id !== futId);
+    await sessionRef.child(`barsNomades/${barId}/futs`).set(newFuts.length ? newFuts : null);
     
-    if (typeRetour === 'RETOUR_PLEIN' && fut) {
+    const typeRetour = etat === 'vide' ? 'RETOUR_VIDE' : etat === 'casse' ? 'RETOUR_CASSE' : 'RETOUR_PLEIN';
+    await sessionRef.child('historique').push({ id: futId, type: typeRetour, barId, barNom: bar.nom, typeFut: bar.type, jour: jourActuel, timestamp: Date.now(), user: userName });
+    
+    if (etat === 'plein') {
       await sessionRef.child(`futsEnAttente/${futId}`).set({ id: futId, typeFut: bar.type, fromBar: bar.nom, timestamp: Date.now() });
     }
+    showNotification(`✅ Fût ${etat}`);
+  };
+
+  const enregistrerVente = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const barId = fd.get('barId');
+    const bar = barsNomades.find(b => b.id === barId);
+    const creneau = creneaux.find(c => c.id === fd.get('creneauId'));
     
-    await sessionRef.child(`historique/${Date.now()}`).set({
-      id: Date.now(), type: typeRetour, barId, barNom: bar.nom, typeFut: bar.type,
+    await sessionRef.child('historiqueVentes').push({
+      id: `vente_${Date.now()}`, barId, barNom: bar?.nom, barType: bar?.type,
+      creneauId: creneau?.id, creneauLabel: creneau?.label,
+      montant: parseFloat(fd.get('montant')) || 0,
+      pintes: parseInt(fd.get('pintes')) || 0, pichets: parseInt(fd.get('pichets')) || 0, gobelets: parseInt(fd.get('gobelets')) || 0,
       jour: jourActuel, timestamp: Date.now(), user: userName
     });
-    
-    setLoading(false);
-    showNotification(`✅ Fût retourné (${typeRetour.replace('RETOUR_', '')})`);
-  };
-  
-  const annulerMouvement = async (mouvementId) => {
-    if (!canDo(role, 'annuler_mouvement')) return;
-    const mouvement = historique.find(m => m.id === mouvementId);
-    if (!mouvement || !confirm(`Annuler ce mouvement ?\n\n${mouvement.type} - ${mouvement.barNom}`)) return;
-    
-    setLoading(true);
-    const bar = barsNomades.find(b => b.id === mouvement.barId);
-    if (bar) {
-      const futs = bar.futs || [];
-      if (mouvement.type === 'SORTIE' || mouvement.type === 'REATTRIBUTION') {
-        await sessionRef.child(`barsNomades/${mouvement.barId}/futs`).set(futs.slice(0, -1).length > 0 ? futs.slice(0, -1) : null);
-      } else if (['RETOUR_VIDE', 'RETOUR_CASSE', 'RETOUR_PLEIN'].includes(mouvement.type)) {
-        await sessionRef.child(`barsNomades/${mouvement.barId}/futs`).set([...futs, { id: Date.now(), dateAttribution: Date.now() }]);
-      }
-    }
-    await sessionRef.child(`historique/${mouvementId}`).remove();
-    setLoading(false);
-    showNotification('🔄 Mouvement annulé');
-  };
-  
-  // Gestion des ventes
-  const enregistrerVente = async (venteData) => {
-    if (!canDo(role, 'enregistrer_vente')) return;
-    const vente = { id: Date.now(), ...venteData, jour: jourActuel, timestamp: Date.now(), user: userName };
-    await sessionRef.child(`historiqueVentes/${vente.id}`).set(vente);
     setShowModalVente(false);
-    showNotification(`💰 Vente: ${vente.montant.toFixed(2)}€`);
+    showNotification('✅ Vente enregistrée');
   };
-  
-  const annulerVente = async (venteId) => {
-    if (!canDo(role, 'annuler_mouvement')) return;
-    const vente = historiqueVentes.find(v => v.id === venteId);
-    if (!vente || !confirm(`Annuler cette vente ?\n\n${vente.montant.toFixed(2)}€ - ${vente.barNom}`)) return;
-    await sessionRef.child(`historiqueVentes/${venteId}`).remove();
-    showNotification('🔄 Vente annulée');
+
+  const promouvoir = async (name, newRole) => {
+    await sessionRef.child(`users/${name}/role`).set(newRole);
+    showNotification(`✅ ${name} → ${getRoleLabel(newRole)}`);
   };
-  
-  // Gestion des bars
-  const ajouterBar = async (nom, type) => {
-    if (!canDo(role, 'gerer_bars')) return;
-    await sessionRef.child(`barsNomades/bar_${Date.now()}`).set({ nom, type, futs: [] });
-    showNotification(`✅ Bar "${nom}" créé`);
+
+  const ejecter = async (name) => {
+    if (!confirm(`Éjecter ${name} ?`)) return;
+    await sessionRef.child(`users/${name}`).remove();
+    showNotification(`✅ ${name} éjecté`);
   };
-  
-  const supprimerBar = async (barId) => {
-    if (!canDo(role, 'gerer_bars')) return;
-    const bar = barsNomades.find(b => b.id === barId);
-    if (bar?.futs?.length > 0) { alert('Retirez d\'abord les fûts'); return; }
-    if (confirm(`Supprimer "${bar?.nom}" ?`)) {
-      await sessionRef.child(`barsNomades/${barId}`).remove();
-      await sessionRef.child(`barPositions/${barId}`).remove();
-      showNotification('Bar supprimé');
-    }
+
+  const disconnect = () => {
+    isDisconnectingRef.current = true;
+    sessionRef.child(`users/${userName}`).remove();
+    localStorage.removeItem('gestionFuts_session');
+    onLogout();
   };
-  
-  const updateBarPosition = async (barId, x, y) => {
-    if (!canDo(role, 'positionner_bars')) return;
-    await sessionRef.child(`barPositions/${barId}`).set({ x, y });
-  };
-  
-  // Bénévoles
-  const getBenevoles = (barId, creneauId, jour) => benevoles[`${barId}_${creneauId}_J${jour}`] || '';
-  
-  const updateBenevole = async (barId, creneauId, jour, noms) => {
-    if (!canDo(role, 'saisir_benevoles')) return;
-    await sessionRef.child(`benevoles/${barId}_${creneauId}_J${jour}`).set(noms || null);
-  };
-  
-  const copierPlanningJourPrecedent = async () => {
-    if (!canDo(role, 'copier_planning') || jourActuel <= 1) return;
-    if (!confirm(`Copier le planning J${jourActuel - 1} vers J${jourActuel} ?`)) return;
-    const updates = {};
-    Object.entries(benevoles).forEach(([key, noms]) => {
-      if (key.endsWith(`_J${jourActuel - 1}`)) updates[key.replace(`_J${jourActuel - 1}`, `_J${jourActuel}`)] = noms;
-    });
-    await sessionRef.child('benevoles').update(updates);
-    showNotification(`✅ Planning copié`);
-  };
-  
-  // Configuration
+
   const changerJour = async (delta) => {
-    const newJour = jourActuel + delta;
-    if (newJour >= 1 && newJour <= config.nombreJours) await sessionRef.child('jourActuel').set(newJour);
+    const newJour = Math.max(1, Math.min(config.nombreJours, jourActuel + delta));
+    await sessionRef.child('jourActuel').set(newJour);
   };
-  
-  const reinitialiserRGPD = async () => {
-    if (!canDo(role, 'reinitialisation_rgpd')) return;
-    if (!confirm('⚠️ RÉINITIALISATION RGPD\n\nSupprimer tous les historiques et bénévoles ?')) return;
-    setLoading(true);
+
+  const ajouterBar = async (nom, type) => {
+    const id = `bar_${Date.now()}`;
+    await sessionRef.child(`barsNomades/${id}`).set({ id, nom, type, futs: [] });
+    showNotification('✅ Bar ajouté');
+  };
+
+  const supprimerBar = async (barId) => {
+    const bar = barsNomades.find(b => b.id === barId);
+    if (bar?.futs?.length > 0) return showNotification('❌ Retournez les fûts d\'abord');
+    await sessionRef.child(`barsNomades/${barId}`).remove();
+    showNotification('✅ Bar supprimé');
+  };
+
+  const annulerMouvement = async (mvt) => {
+    if (!confirm('Annuler ce mouvement ?')) return;
+    await sessionRef.child(`historique/${Object.keys((await sessionRef.child('historique').once('value')).val() || {}).find(k => (sessionRef.child('historique').once('value')).val()?.[k]?.id === mvt.id)}`).remove();
+    showNotification('✅ Mouvement annulé');
+  };
+
+  const resetRGPD = async () => {
+    if (!confirm('⚠️ ATTENTION: Cette action supprimera TOUTES les données de la session (historiques, ventes, bénévoles). Continuer ?')) return;
     await sessionRef.child('historique').remove();
     await sessionRef.child('historiqueVentes').remove();
     await sessionRef.child('benevoles').remove();
     await sessionRef.child('futsEnAttente').remove();
-    for (const bar of barsNomades) await sessionRef.child(`barsNomades/${bar.id}/futs`).remove();
-    setLoading(false);
+    for (const bar of barsNomades) {
+      await sessionRef.child(`barsNomades/${bar.id}/futs`).remove();
+    }
     setShowModalReset(false);
     showNotification('✅ Données réinitialisées');
   };
 
+  // Export PDF
+  const exportPDF = async () => {
+    // Charger les libs
+    if (!window.jspdf) await new Promise(r => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'; s.onload = r; document.head.appendChild(s); });
+    if (!window.jspdfAutoTableLoaded) await new Promise(r => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js'; s.onload = () => { window.jspdfAutoTableLoaded = true; r(); }; document.head.appendChild(s); });
+    
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    let y = 20;
+    
+    // Calculs
+    const caTotal = historiqueVentes.reduce((sum, v) => sum + (v.montant || 0), 0);
+    const futsConsommes = historique.filter(m => ['RETOUR_VIDE', 'RETOUR_CASSE'].includes(m.type));
+    const futsCasses = historique.filter(m => m.type === 'RETOUR_CASSE').length;
+    
+    // Page 1: Titre + Synthèse
+    pdf.setFillColor(0, 0, 0);
+    pdf.rect(0, 0, pageWidth, 40, 'F');
+    pdf.setTextColor(57, 255, 20);
+    pdf.setFontSize(22);
+    pdf.text('RAPPORT HELLFEST 2026', pageWidth / 2, 18, { align: 'center' });
+    pdf.setFontSize(11);
+    pdf.setTextColor(200, 200, 200);
+    pdf.text(`Session: ${session} | ${new Date().toLocaleString('fr-FR')}`, pageWidth / 2, 30, { align: 'center' });
+    y = 50;
+    
+    // KPIs
+    pdf.setTextColor(0, 0, 0);
+    pdf.setFontSize(14);
+    pdf.text('SYNTHÈSE', 15, y);
+    y += 8;
+    
+    pdf.autoTable({
+      startY: y,
+      head: [['Indicateur', 'Valeur']],
+      body: [
+        ['CA Total', `${caTotal.toFixed(2)} €`],
+        ['Fûts consommés', `${futsConsommes.length}`],
+        ['Fûts cassés', `${futsCasses}`],
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [57, 255, 20], textColor: [0, 0, 0] },
+      styles: { fontSize: 10 }
+    });
+    y = pdf.lastAutoTable.finalY + 12;
+    
+    // CA par jour
+    pdf.setFontSize(14);
+    pdf.text('CA PAR JOUR', 15, y);
+    y += 8;
+    
+    const jourData = Array.from({ length: config.nombreJours }, (_, i) => {
+      const j = i + 1;
+      const caJ = historiqueVentes.filter(v => v.jour === j).reduce((sum, v) => sum + (v.montant || 0), 0);
+      return [`J${j}`, `${caJ.toFixed(2)} €`];
+    });
+    
+    pdf.autoTable({
+      startY: y,
+      head: [['Jour', 'CA']],
+      body: jourData,
+      theme: 'striped',
+      headStyles: { fillColor: [245, 158, 11], textColor: [0, 0, 0] },
+      styles: { fontSize: 10, halign: 'center' }
+    });
+    y = pdf.lastAutoTable.finalY + 12;
+    
+    // CA par bar
+    pdf.setFontSize(14);
+    pdf.text('CA PAR BAR', 15, y);
+    y += 8;
+    
+    const barData = barsNomades.map(bar => {
+      const ca = historiqueVentes.filter(v => v.barId === bar.id).reduce((sum, v) => sum + (v.montant || 0), 0);
+      return [bar.nom, `${ca.toFixed(2)} €`];
+    }).sort((a, b) => parseFloat(b[1]) - parseFloat(a[1]));
+    
+    pdf.autoTable({
+      startY: y,
+      head: [['Bar', 'CA']],
+      body: barData,
+      theme: 'striped',
+      headStyles: { fillColor: [34, 197, 94], textColor: [0, 0, 0] },
+      styles: { fontSize: 10 }
+    });
+    
+    pdf.save(`rapport_hellfest_${session}.pdf`);
+    showNotification('📄 PDF généré');
+  };
 
-  // ==================== RENDU PRINCIPAL ====================
-  return (
-    <div className="min-h-screen bg-black text-white pb-24">
-      {/* Notification */}
-      {notification && (
-        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-green-900 text-green-100 px-4 py-2 rounded-xl shadow-lg">
-          {notification}
+  // Export CSV
+  const exportCSV = (type) => {
+    let csv, filename;
+    if (type === 'futs') {
+      const headers = ['Date', 'Type', 'Bar', 'Type Fût', 'Jour', 'Utilisateur'];
+      const rows = historique.map(m => [formatDate(m.timestamp), m.type, m.barNom, m.typeFut, `J${m.jour}`, m.user]);
+      csv = [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
+      filename = `historique_futs_${session}.csv`;
+    } else {
+      const headers = ['Date', 'Bar', 'Créneau', 'Montant', 'Pintes', 'Pichets', 'Gobelets', 'Jour'];
+      const rows = historiqueVentes.map(v => [formatDate(v.timestamp), v.barNom, v.creneauLabel, v.montant?.toFixed(2), v.pintes, v.pichets, v.gobelets, `J${v.jour}`]);
+      csv = [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
+      filename = `historique_ventes_${session}.csv`;
+    }
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    showNotification('📥 CSV exporté');
+  };
+
+  // ========== RENDER ==========
+  return html`
+    <div class="min-h-screen bg-black text-white pb-24">
+      <!-- Header -->
+      <div class="bg-neutral-900 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
+        <div>
+          <h1 class="font-bold text-lg">🍺 Hellfest J${jourActuel}</h1>
+          <p class="text-xs text-neutral-400">${userName} • <${RoleBadge} role=${role} /></p>
         </div>
-      )}
+        <button onClick=${() => setShowModalSession(true)} class="bg-neutral-800 px-3 py-2 rounded-lg text-sm font-mono">${session}</button>
+      </div>
       
-      {/* Nouveaux arrivants */}
-      {isAdmin && newArrivals.length > 0 && (
-        <div className="fixed top-4 right-4 z-50 animate-pulse-slow">
-          <div className="bg-green-900 border border-green-500 rounded-xl p-4 shadow-lg max-w-xs">
-            <p className="font-bold text-green-300 mb-2">🆕 Nouveaux arrivants</p>
-            {newArrivals.map(name => (
-              <div key={name} className="flex items-center justify-between bg-green-950 rounded-lg p-2 mb-2">
-                <span className="text-sm">{name}</span>
-                <button onClick={() => promouvoirSecretaire(name)} className="px-2 py-1 bg-green-600 hover:bg-green-500 rounded text-xs font-medium">→ Secrétaire</button>
+      <!-- Notification nouveaux arrivants -->
+      ${isAdmin && newArrivals.length > 0 && html`
+        <div class="mx-4 mt-2 p-3 bg-blue-900/50 rounded-lg border border-blue-600">
+          <p class="text-sm font-medium">🆕 Nouveaux arrivants: ${newArrivals.join(', ')}</p>
+          <div class="flex gap-2 mt-2">
+            ${newArrivals.map(name => html`
+              <button key=${name} onClick=${() => promouvoir(name, 'secretaire')} class="text-xs bg-green-600 px-2 py-1 rounded">${name} → Secrétaire</button>
+            `)}
+          </div>
+        </div>
+      `}
+      
+      <!-- Stocks -->
+      <div class="p-4 grid grid-cols-2 gap-3">
+        <div class="bg-amber-900/30 p-4 rounded-xl border border-amber-700">
+          <p class="text-xs text-amber-300">🍺 Stock Bière</p>
+          <p class="text-3xl font-black text-amber-400">${stockBiere}</p>
+          <p class="text-xs text-neutral-400">sur ${config.stockInitialBiere}</p>
+        </div>
+        <div class="bg-green-900/30 p-4 rounded-xl border border-green-700">
+          <p class="text-xs text-green-300">🍎 Stock Cidre</p>
+          <p class="text-3xl font-black text-green-400">${stockCidre}</p>
+          <p class="text-xs text-neutral-400">sur ${config.stockInitialCidre}</p>
+        </div>
+      </div>
+      
+      <!-- Fûts en attente -->
+      ${futsEnAttente.length > 0 && html`
+        <div class="mx-4 mb-4 p-3 bg-purple-900/30 rounded-xl border border-purple-600">
+          <p class="text-sm font-medium text-purple-300">📦 ${futsEnAttente.length} fût(s) en attente de réattribution</p>
+        </div>
+      `}
+      
+      <!-- Bars -->
+      <div class="px-4 space-y-3">
+        <h2 class="font-bold text-lg">Bars Nomades</h2>
+        ${barsNomades.map(bar => html`
+          <div key=${bar.id} class="bg-neutral-900 rounded-xl p-4">
+            <div class="flex items-center justify-between mb-3">
+              <div>
+                <p class="font-bold">${bar.type === 'biere' ? '🍺' : '🍎'} ${bar.nom}</p>
+                <p class="text-xs text-neutral-400">${bar.futs?.length || 0}/${config.maxFutsParBar} fûts</p>
               </div>
-            ))}
-            <button onClick={() => setNewArrivals([])} className="w-full text-xs text-green-400 mt-1">Ignorer</button>
-          </div>
-        </div>
-      )}
-      
-      {/* Header */}
-      <header className="bg-neutral-900 px-4 py-3 sticky top-0 z-40">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <img src="logo-hellfest.png" alt="" className="w-8 h-8" />
-            <div>
-              <h1 className="font-bold text-green-400">Gestion Fûts</h1>
-              <p className="text-xs text-neutral-400">Jour {jourActuel}/{config.nombreJours}</p>
+              ${isSecretaire && html`
+                <button onClick=${() => attribuerFut(bar.id, bar.type)} disabled=${(bar.futs?.length || 0) >= config.maxFutsParBar || (bar.type === 'biere' ? stockBiere : stockCidre) <= 0} class="bg-red-600 px-3 py-2 rounded-lg text-sm disabled:opacity-50">+ Fût</button>
+              `}
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <RoleBadge role={role} small />
-            <button onClick={() => setShowModalSession(true)} className="px-3 py-1 bg-neutral-800 rounded-lg text-sm font-mono text-red-400">{session}</button>
-          </div>
-        </div>
-      </header>
-      
-      {/* Contenu */}
-      <main className="p-4">
-        {/* Stocks */}
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div className="bg-amber-900/30 border border-amber-700 rounded-xl p-4">
-            <p className="text-xs text-amber-300">🍺 Stock Bière</p>
-            <p className="text-3xl font-black text-amber-400">{stockBiere}</p>
-            <p className="text-xs text-neutral-400">Sortis: {futsSortisBiere} | Retours: {futsRetoursBiere}</p>
-          </div>
-          <div className="bg-green-900/30 border border-green-700 rounded-xl p-4">
-            <p className="text-xs text-green-300">🍎 Stock Cidre</p>
-            <p className="text-3xl font-black text-green-400">{stockCidre}</p>
-            <p className="text-xs text-neutral-400">Sortis: {futsSortisCidre} | Retours: {futsRetoursCidre}</p>
-          </div>
-        </div>
-        
-        {/* Fûts en attente */}
-        {futsEnAttente.length > 0 && isSecretaire && (
-          <div className="bg-yellow-900/30 border border-yellow-600 rounded-xl p-3 mb-4">
-            <p className="text-xs text-yellow-300 font-bold mb-2">⏳ Fûts en attente ({futsEnAttente.length})</p>
-            <div className="flex flex-wrap gap-2">
-              {futsEnAttente.map(fut => (
-                <span key={fut.id} className="bg-yellow-800 px-2 py-1 rounded text-xs">
-                  {fut.typeFut === 'biere' ? '🍺' : '🍎'} de {fut.fromBar}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-        
-        {/* Message visiteur */}
-        {isVisiteur && (
-          <div className="bg-blue-900/30 border border-blue-600 rounded-xl p-4 mb-4 text-center">
-            <p className="text-blue-300 mb-2">👁️ Mode Visiteur</p>
-            <p className="text-sm text-neutral-400">Consultation uniquement. Un admin peut vous promouvoir.</p>
-          </div>
-        )}
-        
-        {/* Liste des bars */}
-        <div className="space-y-3">
-          {barsNomades.map(bar => {
-            const futs = bar.futs || [];
-            const isFull = futs.length >= config.maxFutsParBar;
-            const isBiere = bar.type === 'biere';
-            
-            return (
-              <div key={bar.id} className={`rounded-xl p-4 ${isBiere ? 'bg-amber-900/20 border border-amber-800' : 'bg-green-900/20 border border-green-800'}`}>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">{isBiere ? '🍺' : '🍎'}</span>
-                    <div>
-                      <p className="font-bold">{bar.nom}</p>
-                      <p className="text-xs text-neutral-400">{futs.length}/{config.maxFutsParBar} fûts</p>
-                    </div>
-                  </div>
-                  {isSecretaire && !isFull && (
-                    <button onClick={() => attribuerFut(bar.id)} disabled={loading || (isBiere ? stockBiere <= 0 : stockCidre <= 0)} className="px-3 py-1 bg-green-600 hover:bg-green-500 rounded-lg text-sm disabled:opacity-50">+ Fût</button>
-                  )}
-                </div>
-                
-                {futs.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {futs.map((fut, idx) => {
-                      const hours = (Date.now() - fut.dateAttribution) / 3600000;
-                      const color = hours < 1.5 ? 'bg-neutral-600' : hours < 3 ? 'bg-yellow-600' : hours < 4 ? 'bg-orange-600' : 'bg-red-600';
-                      return (
-                        <div key={fut.id} className={`${color} rounded-lg px-3 py-2 flex items-center gap-2`}>
-                          <span className="text-sm">🛢️ #{idx + 1}</span>
-                          <span className="text-xs opacity-70">{hours.toFixed(1)}h</span>
-                          {isSecretaire && (
-                            <div className="flex gap-1 ml-1">
-                              <button onClick={() => retournerFut(bar.id, fut.id, 'RETOUR_VIDE')} className="text-xs bg-black/30 px-2 py-1 rounded" title="Vide">📦</button>
-                              <button onClick={() => retournerFut(bar.id, fut.id, 'RETOUR_CASSE')} className="text-xs bg-black/30 px-2 py-1 rounded" title="Cassé">💥</button>
-                              <button onClick={() => retournerFut(bar.id, fut.id, 'RETOUR_PLEIN')} className="text-xs bg-black/30 px-2 py-1 rounded" title="Plein">🔄</button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          
-          {barsNomades.length === 0 && (
-            <div className="text-center py-8 text-neutral-500">
-              <p>Aucun bar configuré</p>
-              {isAdmin && <button onClick={() => setShowModalParametres(true)} className="mt-2 px-4 py-2 bg-neutral-800 rounded-lg text-sm">⚙️ Configurer</button>}
-            </div>
-          )}
-        </div>
-      </main>
-      
-      {/* Barre d'actions */}
-      {isSecretaire && (
-        <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-40">
-          <div className="flex gap-2 bg-neutral-900/95 backdrop-blur px-4 py-3 rounded-2xl shadow-lg border border-neutral-700">
-            <button onClick={() => setShowModalAttribution(true)} className="px-4 py-3 bg-amber-600 hover:bg-amber-500 rounded-xl font-medium text-sm">➕ Fût</button>
-            <button onClick={() => setShowModalVente(true)} className="px-4 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-medium text-sm">💰 Vente</button>
-            <button onClick={() => setShowModalPlan(true)} className="px-4 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-medium text-sm">🗺️</button>
-            {isAdmin && <button onClick={() => setShowModalDashboard(true)} className="px-4 py-3 bg-purple-600 hover:bg-purple-500 rounded-xl font-medium text-sm">📊</button>}
-          </div>
-        </div>
-      )}
-      
-      {isVisiteur && (
-        <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-40">
-          <button onClick={() => setShowModalPlan(true)} className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-medium">🗺️ Voir le Plan</button>
-        </div>
-      )}
-      
-      {/* Modal Session */}
-      {showModalSession && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-neutral-900 rounded-2xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold mb-4">📡 Session</h3>
-            
-            <div className="bg-neutral-800 p-4 rounded-xl mb-4 text-center">
-              <p className="text-sm text-neutral-400">Code à partager</p>
-              <p className="text-2xl font-mono font-bold text-red-400">{session}</p>
-              <button onClick={() => setShowModalQR(true)} className="mt-2 px-4 py-2 bg-blue-600 rounded-lg text-sm">📱 QR Code</button>
-            </div>
-            
-            <div className="mb-4">
-              <p className="text-sm text-neutral-400 mb-2">Utilisateurs ({connectedUsers.length})</p>
-              <div className="space-y-2 max-h-48 overflow-y-auto">
-                {connectedUsers.map(user => {
-                  const userData = usersData[user] || {};
-                  const userRole = userData.role || 'visiteur';
-                  const isMe = user === userName;
-                  const canManage = isAdmin && !isMe && userRole !== 'superadmin';
-                  
-                  return (
-                    <div key={user} className="bg-neutral-800 p-3 rounded-lg">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 bg-green-500 rounded-full" />
-                          <span className="text-sm">{user} {isMe && '(vous)'}</span>
-                        </div>
-                        <RoleBadge role={userRole} small />
+            ${bar.futs?.length > 0 && html`
+              <div class="space-y-2">
+                ${bar.futs.map(fut => html`
+                  <div key=${fut.id} class="flex items-center justify-between bg-neutral-800 p-2 rounded-lg text-sm">
+                    <span class="font-mono text-xs">${fut.id.slice(-6)}</span>
+                    ${isSecretaire && html`
+                      <div class="flex gap-1">
+                        <button onClick=${() => retournerFut(bar.id, fut.id, 'vide')} class="px-2 py-1 bg-orange-600 rounded text-xs">Vide</button>
+                        <button onClick=${() => retournerFut(bar.id, fut.id, 'casse')} class="px-2 py-1 bg-red-600 rounded text-xs">Cassé</button>
+                        <button onClick=${() => retournerFut(bar.id, fut.id, 'plein')} class="px-2 py-1 bg-blue-600 rounded text-xs">Plein</button>
                       </div>
-                      {canManage && (
-                        <div className="flex gap-1 mt-2 flex-wrap">
-                          {userRole === 'visiteur' && <button onClick={() => promouvoirSecretaire(user)} className="px-2 py-1 bg-blue-600 rounded text-xs">→ Secrétaire</button>}
-                          {userRole === 'secretaire' && <button onClick={() => retrograderVisiteur(user)} className="px-2 py-1 bg-orange-600 rounded text-xs">→ Visiteur</button>}
-                          {isSuperAdmin && userRole !== 'admin' && <button onClick={() => promouvoirAdmin(user)} className="px-2 py-1 bg-red-600 rounded text-xs">→ Admin</button>}
-                          <button onClick={() => ejecterUtilisateur(user)} className="px-2 py-1 bg-red-900 rounded text-xs">❌</button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            
-            {isAdmin && (
-              <div className="space-y-2 mb-4">
-                <button onClick={() => { setShowModalSession(false); setShowModalParametres(true); }} className="w-full py-2 bg-neutral-800 rounded-lg text-sm">⚙️ Paramètres</button>
-                <button onClick={() => { setShowModalSession(false); setShowModalBenevoles(true); }} className="w-full py-2 bg-neutral-800 rounded-lg text-sm">👥 Bénévoles</button>
-                <button onClick={() => { setShowModalSession(false); setShowModalHistorique(true); }} className="w-full py-2 bg-neutral-800 rounded-lg text-sm">📜 Historique Fûts</button>
-                <button onClick={() => { setShowModalSession(false); setShowModalHistoriqueVentes(true); }} className="w-full py-2 bg-neutral-800 rounded-lg text-sm">💰 Historique Ventes</button>
-                <button onClick={() => { setShowModalSession(false); setShowModalExport(true); }} className="w-full py-2 bg-neutral-800 rounded-lg text-sm">📥 Exports</button>
-              </div>
-            )}
-            
-            <div className="flex gap-2">
-              <button onClick={() => setShowModalSession(false)} className="flex-1 py-3 bg-neutral-700 rounded-lg">Fermer</button>
-              <button onClick={deconnexion} className="flex-1 py-3 bg-red-900 hover:bg-red-800 rounded-lg border border-red-700">🚪 Déconnexion</button>
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {/* Modal QR */}
-      {showModalQR && (
-        <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
-          <div className="bg-neutral-900 rounded-2xl w-full max-w-sm p-6 text-center">
-            <h3 className="text-xl font-bold mb-4">📱 QR Code</h3>
-            <div className="bg-white p-4 rounded-xl inline-block mb-4">
-              <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(window.location.origin + window.location.pathname + '?session=' + session)}`} alt="QR" width="200" height="200" />
-            </div>
-            <p className="text-2xl font-mono font-bold text-red-400 mb-4">{session}</p>
-            <button onClick={() => setShowModalQR(false)} className="w-full py-3 bg-neutral-700 rounded-lg">Fermer</button>
-          </div>
-        </div>
-      )}
-      
-      {/* Modal Attribution */}
-      {showModalAttribution && (
-        <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
-          <div className="bg-neutral-900 rounded-2xl w-full max-w-sm p-6">
-            <h3 className="text-xl font-bold mb-4">➕ Attribuer un fût</h3>
-            
-            {futsEnAttente.length > 0 && (
-              <div className="bg-yellow-900/30 border border-yellow-600 rounded-lg p-3 mb-4">
-                <p className="text-xs text-yellow-300 font-bold mb-2">Fûts en attente</p>
-                {futsEnAttente.map(fut => (
-                  <div key={fut.id} className="flex items-center justify-between bg-yellow-800/50 rounded p-2 mb-1">
-                    <span className="text-sm">{fut.typeFut === 'biere' ? '🍺' : '🍎'} de {fut.fromBar}</span>
-                    <select onChange={e => { if (e.target.value) attribuerFut(e.target.value, fut); }} className="bg-yellow-700 rounded px-2 py-1 text-xs">
-                      <option value="">Réattribuer à...</option>
-                      {barsNomades.filter(b => b.type === fut.typeFut && (b.futs || []).length < config.maxFutsParBar).map(b => (
-                        <option key={b.id} value={b.id}>{b.nom}</option>
-                      ))}
-                    </select>
+                    `}
                   </div>
-                ))}
+                `)}
               </div>
-            )}
-            
-            <div className="space-y-2 max-h-[50vh] overflow-y-auto">
-              {barsNomades.map(bar => {
-                const futs = bar.futs || [];
-                const isBiere = bar.type === 'biere';
-                const canAdd = futs.length < config.maxFutsParBar && (isBiere ? stockBiere > 0 : stockCidre > 0);
-                
-                return (
-                  <button key={bar.id} onClick={() => attribuerFut(bar.id)} disabled={!canAdd || loading}
-                    className={`w-full p-4 rounded-xl flex items-center justify-between ${canAdd ? (isBiere ? 'bg-amber-900/50 hover:bg-amber-900' : 'bg-green-900/50 hover:bg-green-900') : 'bg-neutral-800 opacity-50'}`}>
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl">{isBiere ? '🍺' : '🍎'}</span>
-                      <div className="text-left">
-                        <p className="font-medium">{bar.nom}</p>
-                        <p className="text-xs text-neutral-400">{futs.length}/{config.maxFutsParBar}</p>
-                      </div>
-                    </div>
-                    {canAdd ? <span className="text-green-400">→</span> : <span className="text-red-400 text-xs">Indispo</span>}
-                  </button>
-                );
-              })}
+            `}
+          </div>
+        `)}
+      </div>
+      
+      <!-- Barre d'actions -->
+      <div class="fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800 px-4 py-3">
+        <div class="flex gap-2 justify-center flex-wrap">
+          ${isSecretaire && html`<button onClick=${() => setShowModalVente(true)} class="px-4 py-2 bg-emerald-600 rounded-lg text-sm">💰 Vente</button>`}
+          ${isAdmin && html`<button onClick=${() => setShowModalDashboard(true)} class="px-4 py-2 bg-amber-600 rounded-lg text-sm">📊 Dashboard</button>`}
+          <button onClick=${() => setShowModalPlan(true)} class="px-4 py-2 bg-blue-600 rounded-lg text-sm">🗺️ Plan</button>
+          ${isAdmin && html`<button onClick=${() => setShowModalHistorique(true)} class="px-4 py-2 bg-purple-600 rounded-lg text-sm">📋 Histo</button>`}
+          ${isAdmin && html`<button onClick=${() => setShowModalExport(true)} class="px-4 py-2 bg-red-600 rounded-lg text-sm">📥 Export</button>`}
+          ${isAdmin && html`<button onClick=${() => setShowModalParametres(true)} class="px-4 py-2 bg-neutral-700 rounded-lg text-sm">⚙️</button>`}
+        </div>
+      </div>
+      
+      <!-- Notification toast -->
+      ${notification && html`
+        <div class="fixed top-16 left-4 right-4 bg-neutral-800 p-3 rounded-lg text-center z-50 animate-pulse">${notification}</div>
+      `}
+      
+      <!-- MODALS -->
+      
+      <!-- Modal Session -->
+      ${showModalSession && html`
+        <div class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div class="bg-neutral-900 rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+            <h3 class="text-xl font-bold mb-4">📱 Session</h3>
+            <div class="bg-neutral-800 p-4 rounded-xl mb-4 text-center">
+              <p class="text-3xl font-mono font-bold tracking-widest">${session}</p>
+              <button onClick=${() => setShowModalQR(true)} class="text-sm text-blue-400 mt-2">📷 QR Code</button>
             </div>
-            <button onClick={() => setShowModalAttribution(false)} className="w-full py-3 bg-neutral-700 rounded-lg mt-4">Fermer</button>
+            
+            <h4 class="font-bold mb-2">Utilisateurs (${Object.keys(users).length})</h4>
+            <div class="space-y-2 mb-4 max-h-60 overflow-y-auto">
+              ${Object.entries(users).map(([name, data]) => html`
+                <div key=${name} class="flex items-center justify-between bg-neutral-800 p-2 rounded-lg">
+                  <div>
+                    <p class="font-medium">${name} ${name === userName ? '(vous)' : ''}</p>
+                    <${RoleBadge} role=${data.role} />
+                  </div>
+                  ${isAdmin && name !== userName && html`
+                    <div class="flex gap-1">
+                      ${canDo(role, 'promouvoir_secretaire') && data.role === 'visiteur' && html`
+                        <button onClick=${() => promouvoir(name, 'secretaire')} class="text-xs bg-green-600 px-2 py-1 rounded">→ Sec</button>
+                      `}
+                      ${canDo(role, 'promouvoir_admin') && data.role === 'secretaire' && html`
+                        <button onClick=${() => promouvoir(name, 'admin')} class="text-xs bg-blue-600 px-2 py-1 rounded">→ Adm</button>
+                      `}
+                      ${canDo(role, 'retrograder_visiteur') && data.role === 'secretaire' && html`
+                        <button onClick=${() => promouvoir(name, 'visiteur')} class="text-xs bg-orange-600 px-2 py-1 rounded">→ Vis</button>
+                      `}
+                      ${((data.role === 'visiteur' && canDo(role, 'ejecter_visiteur')) || (data.role === 'secretaire' && canDo(role, 'ejecter_secretaire')) || (data.role === 'admin' && canDo(role, 'ejecter_admin'))) && html`
+                        <button onClick=${() => ejecter(name)} class="text-xs bg-red-600 px-2 py-1 rounded">✕</button>
+                      `}
+                    </div>
+                  `}
+                </div>
+              `)}
+            </div>
+            
+            <div class="flex gap-2">
+              <button onClick=${() => setShowModalSession(false)} class="flex-1 py-3 bg-neutral-700 rounded-lg">Fermer</button>
+              <button onClick=${disconnect} class="py-3 px-4 bg-red-600 rounded-lg">Quitter</button>
+            </div>
           </div>
         </div>
-      )}
+      `}
       
-      {/* Modal Vente */}
-      {showModalVente && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-neutral-900 rounded-2xl w-full max-w-md p-6">
-            <h3 className="text-xl font-bold mb-4">💰 Enregistrer une vente</h3>
-            <form onSubmit={e => {
-              e.preventDefault();
-              const fd = new FormData(e.target);
-              const bar = barsNomades.find(b => b.id === fd.get('barId'));
-              const creneau = creneaux.find(c => c.id === fd.get('creneauId'));
-              enregistrerVente({
-                barId: fd.get('barId'), barNom: bar?.nom, barType: bar?.type,
-                creneauId: fd.get('creneauId'), creneauLabel: creneau?.label,
-                montant: parseFloat(fd.get('montant')) || 0,
-                pintes: parseInt(fd.get('pintes')) || 0,
-                pichets: parseInt(fd.get('pichets')) || 0,
-                gobelets: parseInt(fd.get('gobelets')) || 0
-              });
-            }}>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm text-neutral-400 mb-1">Bar</label>
-                  <select name="barId" required className="w-full px-4 py-2 bg-neutral-800 rounded-lg">
-                    {barsNomades.map(bar => <option key={bar.id} value={bar.id}>{bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-neutral-400 mb-1">Créneau</label>
-                  <select name="creneauId" required className="w-full px-4 py-2 bg-neutral-800 rounded-lg">
-                    {creneaux.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-neutral-400 mb-1">Montant (€)</label>
-                  <input type="number" name="montant" step="0.01" min="0" required placeholder="0.00" className="w-full px-4 py-3 bg-neutral-800 rounded-lg text-xl" />
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <div><label className="block text-xs text-neutral-400 mb-1">Pintes</label><input type="number" name="pintes" min="0" defaultValue="0" className="w-full px-2 py-2 bg-neutral-800 rounded-lg text-center" /></div>
-                  <div><label className="block text-xs text-neutral-400 mb-1">Pichets</label><input type="number" name="pichets" min="0" defaultValue="0" className="w-full px-2 py-2 bg-neutral-800 rounded-lg text-center" /></div>
-                  <div><label className="block text-xs text-neutral-400 mb-1">Gobelets</label><input type="number" name="gobelets" min="0" defaultValue="0" className="w-full px-2 py-2 bg-neutral-800 rounded-lg text-center" /></div>
-                </div>
+      <!-- Modal Vente -->
+      ${showModalVente && isSecretaire && html`
+        <div class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div class="bg-neutral-900 rounded-2xl w-full max-w-sm p-6">
+            <h3 class="text-xl font-bold mb-4">💰 Nouvelle vente</h3>
+            <form onSubmit=${enregistrerVente} class="space-y-4">
+              <select name="barId" required class="w-full px-4 py-3 bg-neutral-800 rounded-lg">
+                <option value="">Sélectionner un bar</option>
+                ${barsNomades.map(bar => html`<option key=${bar.id} value=${bar.id}>${bar.type === 'biere' ? '🍺' : '🍎'} ${bar.nom}</option>`)}
+              </select>
+              <select name="creneauId" required class="w-full px-4 py-3 bg-neutral-800 rounded-lg">
+                ${creneaux.map(c => html`<option key=${c.id} value=${c.id}>${c.label}</option>`)}
+              </select>
+              <input type="number" name="montant" step="0.01" required placeholder="Montant (€)" class="w-full px-4 py-3 bg-neutral-800 rounded-lg" />
+              <div class="grid grid-cols-3 gap-2">
+                <input type="number" name="pintes" placeholder="Pintes" class="px-3 py-2 bg-neutral-800 rounded-lg text-center" />
+                <input type="number" name="pichets" placeholder="Pichets" class="px-3 py-2 bg-neutral-800 rounded-lg text-center" />
+                <input type="number" name="gobelets" placeholder="Gobelets" class="px-3 py-2 bg-neutral-800 rounded-lg text-center" />
               </div>
-              <div className="flex gap-2 mt-6">
-                <button type="button" onClick={() => setShowModalVente(false)} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
-                <button type="submit" className="flex-1 py-3 bg-emerald-600 rounded-lg font-medium">✓ Enregistrer</button>
+              <div class="flex gap-2">
+                <button type="button" onClick=${() => setShowModalVente(false)} class="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
+                <button type="submit" class="flex-1 py-3 bg-emerald-600 rounded-lg font-medium">Valider</button>
               </div>
             </form>
           </div>
         </div>
-      )}
+      `}
       
-      {/* Modal Plan */}
-      {showModalPlan && (
-        <div className="fixed inset-0 bg-black/95 flex flex-col z-50">
-          <div className="bg-blue-900 px-4 py-3 flex items-center justify-between">
-            <h3 className="font-bold">🗺️ Plan</h3>
-            <div className="flex items-center gap-2">
-              {isAdmin && <button onClick={() => setEditingPlan(!editingPlan)} className={`px-3 py-1 rounded text-sm ${editingPlan ? 'bg-green-600' : 'bg-neutral-700'}`}>{editingPlan ? '✓ Terminer' : '✏️ Éditer'}</button>}
-              <button onClick={() => setShowModalPlan(false)} className="text-2xl">✕</button>
-            </div>
+      <!-- Modal Dashboard -->
+      ${showModalDashboard && isAdmin && html`
+        <div class="fixed inset-0 bg-black/90 flex flex-col z-50">
+          <div class="bg-amber-900 px-4 py-3 flex items-center justify-between">
+            <h3 class="text-xl font-bold">📊 Dashboard J${jourActuel}</h3>
+            <button onClick=${() => setShowModalDashboard(false)} class="text-2xl">✕</button>
           </div>
-          <div className="flex-1 overflow-auto p-2">
-            <div className="relative mx-auto bg-neutral-800 rounded-lg overflow-hidden" style={{ aspectRatio: '1387/667', width: '100%', maxWidth: '1387px', minWidth: '600px' }}
-              onClick={e => {
-                if (!editingPlan || !selectedBar) return;
-                const rect = e.currentTarget.getBoundingClientRect();
-                const x = ((e.clientX - rect.left) / rect.width) * 100;
-                const y = ((e.clientY - rect.top) / rect.height) * 100;
-                updateBarPosition(selectedBar, x, y);
-                setSelectedBar(null);
-              }}>
-              <img src="plan-hellfest.jpg" alt="Plan" className="absolute inset-0 w-full h-full object-cover" />
-              {barsNomades.map(bar => {
-                const pos = barPositions[bar.id];
-                if (!pos) return null;
-                const futs = bar.futs || [];
-                const color = futs.length >= config.maxFutsParBar ? 'bg-red-500' : futs.length === 0 ? 'bg-green-500' : 'bg-yellow-500';
-                return (
-                  <div key={bar.id} className={`absolute transform -translate-x-1/2 -translate-y-full cursor-pointer ${selectedBar === bar.id ? 'ring-4 ring-white' : ''}`}
-                    style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
-                    onClick={e => { if (editingPlan) { e.stopPropagation(); setSelectedBar(bar.id); } }}>
-                    <div className={`w-10 h-10 ${color} rounded-full border-2 border-white shadow-lg flex items-center justify-center text-lg`}>
-                      {bar.type === 'biere' ? '🍺' : '🍎'}
-                    </div>
-                    <div className="absolute -top-1 -right-1 w-5 h-5 bg-black border border-white rounded-full flex items-center justify-center text-xs font-bold">{futs.length}</div>
-                    <div className="absolute top-full left-1/2 -translate-x-1/2 bg-black/80 px-2 py-1 rounded text-xs whitespace-nowrap mt-1">{bar.nom}</div>
-                  </div>
-                );
-              })}
-              {editingPlan && barsNomades.filter(b => !barPositions[b.id]).map(bar => (
-                <div key={bar.id} className={`absolute top-2 left-2 bg-neutral-700 px-2 py-1 rounded cursor-pointer ${selectedBar === bar.id ? 'ring-2 ring-white' : ''}`}
-                  onClick={() => setSelectedBar(bar.id)}>
-                  {bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom}
+          <div class="flex-1 overflow-y-auto p-4">
+            <div class="max-w-2xl mx-auto space-y-4">
+              <div class="grid grid-cols-2 gap-3">
+                <div class="bg-emerald-900/30 p-4 rounded-xl border border-emerald-700">
+                  <p class="text-xs text-emerald-300">💰 CA Jour</p>
+                  <p class="text-3xl font-black text-emerald-400">${historiqueVentes.filter(v => v.jour === jourActuel).reduce((sum, v) => sum + (v.montant || 0), 0).toFixed(0)} €</p>
                 </div>
-              ))}
+                <div class="bg-blue-900/30 p-4 rounded-xl border border-blue-700">
+                  <p class="text-xs text-blue-300">🛢️ Fûts sortis</p>
+                  <p class="text-3xl font-black text-blue-400">${historique.filter(m => m.type === 'SORTIE' && m.jour === jourActuel).length}</p>
+                </div>
+              </div>
+              
+              <div class="bg-neutral-800 p-4 rounded-xl">
+                <h4 class="font-bold mb-3">📊 CA par bar</h4>
+                ${barsNomades.map(bar => {
+                  const ca = historiqueVentes.filter(v => v.barId === bar.id && v.jour === jourActuel).reduce((sum, v) => sum + (v.montant || 0), 0);
+                  return html`
+                    <div key=${bar.id} class="flex items-center justify-between py-2 border-b border-neutral-700 last:border-0">
+                      <span>${bar.type === 'biere' ? '🍺' : '🍎'} ${bar.nom}</span>
+                      <span class="font-bold text-emerald-400">${ca.toFixed(0)} €</span>
+                    </div>
+                  `;
+                })}
+              </div>
+              
+              <div class="bg-neutral-800 p-4 rounded-xl">
+                <h4 class="font-bold mb-3">📅 CA Total Festival</h4>
+                <p class="text-2xl font-bold text-emerald-400">${historiqueVentes.reduce((sum, v) => sum + (v.montant || 0), 0).toFixed(0)} €</p>
+              </div>
             </div>
-          </div>
-          <div className="bg-neutral-800 px-4 py-2 flex items-center justify-center gap-4 text-xs">
-            <span className="flex items-center gap-1"><span className="w-3 h-3 bg-green-500 rounded-full" /> Dispo</span>
-            <span className="flex items-center gap-1"><span className="w-3 h-3 bg-yellow-500 rounded-full" /> En service</span>
-            <span className="flex items-center gap-1"><span className="w-3 h-3 bg-red-500 rounded-full" /> Complet</span>
           </div>
         </div>
-      )}
+      `}
       
-      {/* Modal Paramètres */}
-      {showModalParametres && isAdmin && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-neutral-900 rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold mb-4">⚙️ Paramètres</h3>
+      <!-- Modal Plan -->
+      ${showModalPlan && html`
+        <div class="fixed inset-0 bg-black/90 flex flex-col z-50">
+          <div class="bg-blue-900 px-4 py-3 flex items-center justify-between">
+            <h3 class="text-xl font-bold">🗺️ Plan</h3>
+            <div class="flex gap-2">
+              ${isAdmin && html`
+                <button onClick=${() => setEditingPlan(!editingPlan)} class=${`px-3 py-1 rounded text-sm ${editingPlan ? 'bg-green-600' : 'bg-neutral-700'}`}>${editingPlan ? '✓ OK' : '✏️ Éditer'}</button>
+              `}
+              <button onClick=${() => setShowModalPlan(false)} class="text-2xl">✕</button>
+            </div>
+          </div>
+          <div class="flex-1 relative bg-neutral-900" onClick=${(e) => {
+            if (!editingPlan || !isAdmin) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * 100;
+            const y = ((e.clientY - rect.top) / rect.height) * 100;
+            // Popup pour sélectionner un bar
+          }}>
+            ${barsNomades.map(bar => {
+              const pos = barPositions[bar.id] || { x: 50, y: 50 };
+              const futsCount = bar.futs?.length || 0;
+              const color = futsCount === 0 ? 'bg-green-500' : futsCount >= config.maxFutsParBar ? 'bg-red-500' : 'bg-yellow-500';
+              return html`
+                <div key=${bar.id} class="absolute transform -translate-x-1/2 -translate-y-1/2" style=${{ left: `${pos.x}%`, top: `${pos.y}%` }}>
+                  <div class=${`${color} px-2 py-1 rounded text-xs font-bold whitespace-nowrap`}>
+                    ${bar.type === 'biere' ? '🍺' : '🍎'} ${bar.nom} (${futsCount})
+                  </div>
+                </div>
+              `;
+            })}
+            <div class="absolute bottom-4 left-4 text-xs text-neutral-500">
+              🟢 Disponible | 🟡 En service | 🔴 Complet
+            </div>
+          </div>
+        </div>
+      `}
+      
+      <!-- Modal Historique -->
+      ${showModalHistorique && isAdmin && html`
+        <div class="fixed inset-0 bg-black/90 flex flex-col z-50">
+          <div class="bg-purple-900 px-4 py-3 flex items-center justify-between">
+            <h3 class="text-xl font-bold">📋 Historique Fûts</h3>
+            <button onClick=${() => setShowModalHistorique(false)} class="text-2xl">✕</button>
+          </div>
+          <div class="flex-1 overflow-y-auto p-4">
+            <div class="space-y-2">
+              ${historique.slice(0, 50).map(mvt => html`
+                <div key=${mvt.id} class="flex items-center justify-between bg-neutral-800 p-3 rounded-lg">
+                  <div>
+                    <p class="font-medium">${mvt.type} - ${mvt.barNom}</p>
+                    <p class="text-xs text-neutral-400">${formatDate(mvt.timestamp)} • ${mvt.user}</p>
+                  </div>
+                  ${canDo(role, 'annuler_mouvement') && html`
+                    <button onClick=${() => annulerMouvement(mvt)} class="text-red-400 text-sm">✕</button>
+                  `}
+                </div>
+              `)}
+              ${historique.length === 0 && html`<p class="text-center text-neutral-500 py-8">Aucun mouvement</p>`}
+            </div>
+          </div>
+        </div>
+      `}
+      
+      <!-- Modal Export -->
+      ${showModalExport && isAdmin && html`
+        <div class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div class="bg-neutral-900 rounded-2xl w-full max-w-sm p-6">
+            <h3 class="text-xl font-bold mb-4">📥 Exporter</h3>
+            <div class="space-y-2">
+              <button onClick=${() => exportCSV('futs')} disabled=${historique.length === 0} class="w-full py-3 bg-purple-600 rounded-lg disabled:opacity-50">📋 CSV Fûts (${historique.length})</button>
+              <button onClick=${() => exportCSV('ventes')} disabled=${historiqueVentes.length === 0} class="w-full py-3 bg-emerald-600 rounded-lg disabled:opacity-50">💰 CSV Ventes (${historiqueVentes.length})</button>
+              <button onClick=${exportPDF} class="w-full py-3 bg-red-600 rounded-lg">📄 PDF Rapport</button>
+            </div>
+            <button onClick=${() => setShowModalExport(false)} class="w-full py-3 bg-neutral-700 rounded-lg mt-4">Fermer</button>
+          </div>
+        </div>
+      `}
+      
+      <!-- Modal Paramètres -->
+      ${showModalParametres && isAdmin && html`
+        <div class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div class="bg-neutral-900 rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+            <h3 class="text-xl font-bold mb-4">⚙️ Paramètres</h3>
             
-            {isSuperAdmin && (
-              <div className="space-y-4 mb-6">
-                <h4 className="font-bold text-sm text-neutral-400">Stocks initiaux</h4>
-                <div className="grid grid-cols-2 gap-3">
-                  <div><label className="block text-xs text-neutral-400 mb-1">🍺 Bière</label><input type="number" id="cfg_biere" defaultValue={config.stockInitialBiere} className="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
-                  <div><label className="block text-xs text-neutral-400 mb-1">🍎 Cidre</label><input type="number" id="cfg_cidre" defaultValue={config.stockInitialCidre} className="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
+            ${isSuperAdmin && html`
+              <div class="space-y-4 mb-6">
+                <h4 class="font-bold text-sm text-neutral-400">Stocks initiaux</h4>
+                <div class="grid grid-cols-2 gap-3">
+                  <div><label class="block text-xs text-neutral-400 mb-1">🍺 Bière</label><input type="number" id="cfg_biere" value=${config.stockInitialBiere} class="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
+                  <div><label class="block text-xs text-neutral-400 mb-1">🍎 Cidre</label><input type="number" id="cfg_cidre" value=${config.stockInitialCidre} class="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div><label className="block text-xs text-neutral-400 mb-1">Max fûts/bar</label><input type="number" id="cfg_max" defaultValue={config.maxFutsParBar} className="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
-                  <div><label className="block text-xs text-neutral-400 mb-1">Nb jours</label><input type="number" id="cfg_jours" defaultValue={config.nombreJours} className="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div><label class="block text-xs text-neutral-400 mb-1">Max fûts/bar</label><input type="number" id="cfg_max" value=${config.maxFutsParBar} class="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
+                  <div><label class="block text-xs text-neutral-400 mb-1">Nb jours</label><input type="number" id="cfg_jours" value=${config.nombreJours} class="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
                 </div>
-                
-                <h4 className="font-bold text-sm text-neutral-400 pt-2">💰 Prix de vente</h4>
-                <div className="grid grid-cols-3 gap-2">
-                  <div><label className="block text-xs text-neutral-400 mb-1">Pinte (€)</label><input type="number" step="0.5" id="cfg_prixPinte" defaultValue={config.prixPinte} className="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
-                  <div><label className="block text-xs text-neutral-400 mb-1">Pichet (€)</label><input type="number" step="0.5" id="cfg_prixPichet" defaultValue={config.prixPichet} className="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
-                  <div><label className="block text-xs text-neutral-400 mb-1">Gobelet (€)</label><input type="number" step="0.5" id="cfg_prixGobelet" defaultValue={config.prixGobelet} className="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
-                </div>
-                
-                <h4 className="font-bold text-sm text-neutral-400 pt-2">📐 Volumes</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="block text-xs text-neutral-400 mb-1">Pinte (L)</label><input type="number" step="0.1" id="cfg_volPinte" defaultValue={config.volumePinte} className="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
-                  <div><label className="block text-xs text-neutral-400 mb-1">Pichet (L)</label><input type="number" step="0.1" id="cfg_volPichet" defaultValue={config.volumePichet} className="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="block text-xs text-neutral-400 mb-1">Fût bière (L)</label><input type="number" id="cfg_volFutBiere" defaultValue={config.volumeFutBiere} className="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
-                  <div><label className="block text-xs text-neutral-400 mb-1">Fût cidre (L)</label><input type="number" id="cfg_volFutCidre" defaultValue={config.volumeFutCidre} className="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
-                </div>
-                
-                <h4 className="font-bold text-sm text-neutral-400 pt-2">⚠️ Seuil alerte</h4>
-                <div><label className="block text-xs text-neutral-400 mb-1">Seuil perte acceptable (%)</label><input type="number" id="cfg_seuilPerte" defaultValue={config.seuilPerte} className="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
-                
-                <h4 className="font-bold text-sm text-neutral-400 pt-2">📧 Email admin (optionnel)</h4>
-                <div><input type="email" id="cfg_adminEmail" defaultValue={adminEmail} placeholder="admin@exemple.com" className="w-full px-3 py-2 bg-neutral-800 rounded-lg" /></div>
               </div>
-            )}
+            `}
             
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="font-bold text-sm text-neutral-400">Jour actuel</h4>
-              </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => changerJour(-1)} disabled={jourActuel <= 1} className="px-4 py-2 bg-neutral-700 rounded-lg disabled:opacity-50">←</button>
-                <span className="flex-1 text-center text-2xl font-bold">J{jourActuel}</span>
-                <button onClick={() => changerJour(1)} disabled={jourActuel >= config.nombreJours} className="px-4 py-2 bg-neutral-700 rounded-lg disabled:opacity-50">→</button>
+            <div class="mb-6">
+              <h4 class="font-bold text-sm text-neutral-400 mb-2">Jour actuel</h4>
+              <div class="flex items-center gap-2">
+                <button onClick=${() => changerJour(-1)} disabled=${jourActuel <= 1} class="px-4 py-2 bg-neutral-700 rounded-lg disabled:opacity-50">←</button>
+                <span class="flex-1 text-center text-2xl font-bold">J${jourActuel}</span>
+                <button onClick=${() => changerJour(1)} disabled=${jourActuel >= config.nombreJours} class="px-4 py-2 bg-neutral-700 rounded-lg disabled:opacity-50">→</button>
               </div>
             </div>
             
-            <div className="mb-6">
-              <h4 className="font-bold text-sm text-neutral-400 mb-3">Bars Nomades</h4>
-              <div className="space-y-2 mb-3 max-h-40 overflow-y-auto">
-                {barsNomades.map(bar => (
-                  <div key={bar.id} className="flex items-center justify-between bg-neutral-800 p-2 rounded-lg">
-                    <span>{bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom}</span>
-                    <button onClick={() => supprimerBar(bar.id)} className="text-red-400 text-sm px-2">✕</button>
+            <div class="mb-6">
+              <h4 class="font-bold text-sm text-neutral-400 mb-3">Bars Nomades</h4>
+              <div class="space-y-2 mb-3 max-h-40 overflow-y-auto">
+                ${barsNomades.map(bar => html`
+                  <div key=${bar.id} class="flex items-center justify-between bg-neutral-800 p-2 rounded-lg">
+                    <span>${bar.type === 'biere' ? '🍺' : '🍎'} ${bar.nom}</span>
+                    <button onClick=${() => supprimerBar(bar.id)} class="text-red-400 text-sm px-2">✕</button>
                   </div>
-                ))}
+                `)}
               </div>
-              <div className="flex gap-2">
-                <input type="text" id="newBarNom" placeholder="Nom" className="flex-1 px-3 py-2 bg-neutral-800 rounded-lg text-sm" />
-                <select id="newBarType" className="px-3 py-2 bg-neutral-800 rounded-lg text-sm">
+              <div class="flex gap-2">
+                <input type="text" id="newBarNom" placeholder="Nom" class="flex-1 px-3 py-2 bg-neutral-800 rounded-lg text-sm" />
+                <select id="newBarType" class="px-3 py-2 bg-neutral-800 rounded-lg text-sm">
                   <option value="biere">🍺</option>
                   <option value="cidre">🍎</option>
                 </select>
-                <button onClick={() => {
+                <button onClick=${() => {
                   const nom = document.getElementById('newBarNom').value.trim();
                   const type = document.getElementById('newBarType').value;
                   if (nom) { ajouterBar(nom, type); document.getElementById('newBarNom').value = ''; }
-                }} className="px-4 py-2 bg-red-600 rounded-lg text-sm">+</button>
+                }} class="px-4 py-2 bg-red-600 rounded-lg text-sm">+</button>
               </div>
             </div>
             
-            <div className="flex gap-2">
-              <button onClick={() => setShowModalParametres(false)} className="flex-1 py-3 bg-neutral-700 rounded-lg">Fermer</button>
-              {isSuperAdmin && (
-                <button onClick={async () => {
-                  const newEmail = document.getElementById('cfg_adminEmail')?.value || '';
+            <div class="flex gap-2">
+              <button onClick=${() => setShowModalParametres(false)} class="flex-1 py-3 bg-neutral-700 rounded-lg">Fermer</button>
+              ${isSuperAdmin && html`
+                <button onClick=${async () => {
                   await sessionRef.child('config').update({
                     stockInitialBiere: parseInt(document.getElementById('cfg_biere')?.value) || config.stockInitialBiere,
                     stockInitialCidre: parseInt(document.getElementById('cfg_cidre')?.value) || config.stockInitialCidre,
                     maxFutsParBar: parseInt(document.getElementById('cfg_max')?.value) || config.maxFutsParBar,
-                    nombreJours: parseInt(document.getElementById('cfg_jours')?.value) || config.nombreJours,
-                    prixPinte: parseFloat(document.getElementById('cfg_prixPinte')?.value) || config.prixPinte,
-                    prixPichet: parseFloat(document.getElementById('cfg_prixPichet')?.value) || config.prixPichet,
-                    prixGobelet: parseFloat(document.getElementById('cfg_prixGobelet')?.value) || config.prixGobelet,
-                    volumePinte: parseFloat(document.getElementById('cfg_volPinte')?.value) || config.volumePinte,
-                    volumePichet: parseFloat(document.getElementById('cfg_volPichet')?.value) || config.volumePichet,
-                    volumeFutBiere: parseInt(document.getElementById('cfg_volFutBiere')?.value) || config.volumeFutBiere,
-                    volumeFutCidre: parseInt(document.getElementById('cfg_volFutCidre')?.value) || config.volumeFutCidre,
-                    seuilPerte: parseInt(document.getElementById('cfg_seuilPerte')?.value) || config.seuilPerte,
-                    adminEmail: newEmail
+                    nombreJours: parseInt(document.getElementById('cfg_jours')?.value) || config.nombreJours
                   });
-                  setAdminEmail(newEmail);
                   setShowModalParametres(false);
                   showNotification('✅ Sauvegardé');
-                }} className="flex-1 py-3 bg-red-600 rounded-lg font-medium">💾 Sauver</button>
-              )}
+                }} class="flex-1 py-3 bg-red-600 rounded-lg font-medium">💾 Sauver</button>
+              `}
             </div>
             
-            {isSuperAdmin && (
-              <button onClick={() => { setShowModalParametres(false); setShowModalReset(true); }} className="w-full mt-4 py-3 bg-red-900 hover:bg-red-800 rounded-lg border border-red-600">🔒 Réinitialisation RGPD</button>
-            )}
+            ${isSuperAdmin && html`
+              <button onClick=${() => { setShowModalParametres(false); setShowModalReset(true); }} class="w-full mt-4 py-3 bg-red-900 hover:bg-red-800 rounded-lg border border-red-600">🔒 Réinitialisation RGPD</button>
+            `}
           </div>
         </div>
-      )}
+      `}
       
-      {/* Modal Reset RGPD */}
-      {showModalReset && isSuperAdmin && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-red-950 rounded-2xl w-full max-w-md p-6 border border-red-700">
-            <h3 className="text-xl font-bold mb-4 text-red-400">⚠️ Réinitialisation RGPD</h3>
-            <div className="bg-red-900/50 rounded-lg p-4 mb-4 text-sm">
-              <p className="font-bold text-yellow-400 mb-2">Suppression :</p>
-              <ul className="text-red-300 space-y-1 ml-4">
-                <li>• Historiques fûts et ventes</li>
-                <li>• Affectations bénévoles</li>
-                <li>• Fûts attribués</li>
-              </ul>
-              <p className="text-green-400 mt-3">Les bars seront conservés.</p>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => setShowModalReset(false)} className="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
-              <button onClick={reinitialiserRGPD} disabled={loading} className="flex-1 py-3 bg-red-600 rounded-lg font-medium">{loading ? '⏳...' : '🗑️ Confirmer'}</button>
+      <!-- Modal Reset RGPD -->
+      ${showModalReset && isSuperAdmin && html`
+        <div class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div class="bg-neutral-900 rounded-2xl w-full max-w-sm p-6">
+            <h3 class="text-xl font-bold mb-4 text-red-400">⚠️ Réinitialisation RGPD</h3>
+            <p class="text-sm text-neutral-400 mb-4">Cette action supprimera définitivement tous les historiques, ventes et bénévoles.</p>
+            <div class="flex gap-2">
+              <button onClick=${() => setShowModalReset(false)} class="flex-1 py-3 bg-neutral-700 rounded-lg">Annuler</button>
+              <button onClick=${resetRGPD} class="flex-1 py-3 bg-red-600 rounded-lg font-medium">Confirmer</button>
             </div>
           </div>
         </div>
-      )}
+      `}
       
-      {/* Modal Historique Fûts */}
-      {showModalHistorique && isAdmin && (
-        <div className="fixed inset-0 bg-black/90 flex flex-col z-50">
-          <div className="bg-purple-900 px-4 py-3 flex items-center justify-between">
-            <h3 className="font-bold">📜 Historique Fûts</h3>
-            <button onClick={() => setShowModalHistorique(false)} className="text-2xl">✕</button>
-          </div>
-          <div className="p-4">
-            <div className="flex gap-2 mb-4 overflow-x-auto">
-              {['all', 'SORTIE', 'RETOUR_VIDE', 'RETOUR_CASSE', 'RETOUR_PLEIN'].map(f => (
-                <button key={f} onClick={() => setFilterHistorique(f)} className={`px-3 py-1 rounded-lg text-sm whitespace-nowrap ${filterHistorique === f ? 'bg-purple-600' : 'bg-neutral-700'}`}>
-                  {f === 'all' ? 'Tous' : f.replace('RETOUR_', '')}
-                </button>
-              ))}
+      <!-- Modal QR -->
+      ${showModalQR && html`
+        <div class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" onClick=${() => setShowModalQR(false)}>
+          <div class="bg-neutral-900 rounded-2xl p-6 text-center" onClick=${e => e.stopPropagation()}>
+            <h3 class="text-xl font-bold mb-4">📷 QR Code</h3>
+            <div class="bg-white p-4 rounded-xl inline-block mb-4">
+              <img src=${'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(session)} alt="QR" />
             </div>
-          </div>
-          <div className="flex-1 overflow-y-auto px-4 pb-4">
-            <div className="space-y-2">
-              {historique
-                .filter(m => m.jour === jourActuel && (filterHistorique === 'all' || m.type === filterHistorique))
-                .sort((a, b) => b.timestamp - a.timestamp)
-                .map(m => (
-                  <div key={m.id} className="bg-neutral-800 p-3 rounded-lg flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">{m.type} - {m.barNom}</p>
-                      <p className="text-xs text-neutral-400">{formatTime(m.timestamp)} par {m.user}</p>
-                    </div>
-                    <button onClick={() => annulerMouvement(m.id)} className="px-2 py-1 bg-red-900 rounded text-xs">🔄</button>
-                  </div>
-                ))}
-              {historique.filter(m => m.jour === jourActuel).length === 0 && (
-                <p className="text-center text-neutral-500 py-4">Aucun mouvement aujourd'hui</p>
-              )}
-            </div>
+            <p class="text-3xl font-mono font-bold">${session}</p>
           </div>
         </div>
-      )}
-      
-      {/* Modal Historique Ventes */}
-      {showModalHistoriqueVentes && isAdmin && (
-        <div className="fixed inset-0 bg-black/90 flex flex-col z-50">
-          <div className="bg-emerald-900 px-4 py-3 flex items-center justify-between">
-            <h3 className="font-bold">💰 Historique Ventes J{jourActuel}</h3>
-            <button onClick={() => setShowModalHistoriqueVentes(false)} className="text-2xl">✕</button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4">
-            <div className="bg-emerald-900/30 p-4 rounded-xl mb-4">
-              <p className="text-sm text-emerald-300">Total J{jourActuel}</p>
-              <p className="text-3xl font-black text-emerald-400">
-                {historiqueVentes.filter(v => v.jour === jourActuel).reduce((sum, v) => sum + (v.montant || 0), 0).toFixed(2)} €
-              </p>
-            </div>
-            <div className="space-y-2">
-              {historiqueVentes
-                .filter(v => v.jour === jourActuel)
-                .sort((a, b) => b.timestamp - a.timestamp)
-                .map(v => (
-                  <div key={v.id} className="bg-neutral-800 p-3 rounded-lg flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">{v.montant?.toFixed(2)} € - {v.barNom}</p>
-                      <p className="text-xs text-neutral-400">{v.creneauLabel} • {v.pintes}p {v.pichets}pi {v.gobelets}g • {formatTime(v.timestamp)}</p>
-                    </div>
-                    <button onClick={() => annulerVente(v.id)} className="px-2 py-1 bg-red-900 rounded text-xs">🔄</button>
-                  </div>
-                ))}
-              {historiqueVentes.filter(v => v.jour === jourActuel).length === 0 && (
-                <p className="text-center text-neutral-500 py-4">Aucune vente aujourd'hui</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {/* Modal Bénévoles */}
-      {showModalBenevoles && isAdmin && (
-        <div className="fixed inset-0 bg-black/90 flex flex-col z-50">
-          <div className="bg-pink-900 px-4 py-3 flex items-center justify-between">
-            <h3 className="font-bold">👥 Bénévoles J{jourActuel}</h3>
-            <div className="flex items-center gap-2">
-              {jourActuel > 1 && <button onClick={copierPlanningJourPrecedent} className="px-3 py-1 bg-pink-700 rounded text-sm">📋 Copier J{jourActuel - 1}</button>}
-              <button onClick={() => setShowModalBenevoles(false)} className="text-2xl">✕</button>
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4">
-            {barsNomades.map(bar => (
-              <div key={bar.id} className="bg-neutral-800 rounded-xl p-4 mb-4">
-                <h4 className="font-bold mb-3">{bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom}</h4>
-                <div className="space-y-2">
-                  {creneaux.map(c => (
-                    <div key={c.id} className="flex items-center gap-2">
-                      <span className="w-20 text-sm text-neutral-400">{c.label}</span>
-                      <input type="text" value={getBenevoles(bar.id, c.id, jourActuel)}
-                        onChange={e => updateBenevole(bar.id, c.id, jourActuel, e.target.value)}
-                        placeholder="Noms des bénévoles"
-                        className="flex-1 px-3 py-2 bg-neutral-700 rounded-lg text-sm" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      
-      {/* Modal Dashboard */}
-      {showModalDashboard && isAdmin && (() => {
-        // Calculs avancés
-        const ventesJour = historiqueVentes.filter(v => v.jour === jourActuel);
-        const caJour = ventesJour.reduce((sum, v) => sum + (v.montant || 0), 0);
-        const futsConsommesJour = historique.filter(m => ['RETOUR_VIDE', 'RETOUR_CASSE'].includes(m.type) && m.jour === jourActuel);
-        const futsConsommesBiere = futsConsommesJour.filter(m => m.typeFut === 'biere').length;
-        const futsConsommesCidre = futsConsommesJour.filter(m => m.typeFut === 'cidre').length;
-        const futsCassesJour = historique.filter(m => m.type === 'RETOUR_CASSE' && m.jour === jourActuel).length;
-        
-        // Volumes sortis (litres)
-        const volumeSortiBiere = futsConsommesBiere * config.volumeFutBiere;
-        const volumeSortiCidre = futsConsommesCidre * config.volumeFutCidre;
-        const volumeSortiTotal = volumeSortiBiere + volumeSortiCidre;
-        
-        // Volumes vendus (litres) - basé sur pintes et pichets déclarés
-        const pintesVendues = ventesJour.reduce((sum, v) => sum + (v.pintes || 0), 0);
-        const pichetsVendus = ventesJour.reduce((sum, v) => sum + (v.pichets || 0), 0);
-        const volumeVendu = (pintesVendues * config.volumePinte) + (pichetsVendus * config.volumePichet);
-        
-        // Écart et taux de perte
-        const ecartVolume = volumeSortiTotal - volumeVendu;
-        const tauxPerte = volumeSortiTotal > 0 ? ((ecartVolume / volumeSortiTotal) * 100) : 0;
-        const perteOK = tauxPerte <= config.seuilPerte;
-        
-        // CA théorique (basé sur volumes vendus aux prix configurés)
-        const caTheorique = (pintesVendues * config.prixPinte) + (pichetsVendus * config.prixPichet);
-        const ecartCA = caJour - caTheorique;
-        
-        // Ratio €/fût
-        const futsTotal = futsConsommesBiere + futsConsommesCidre;
-        const ratioParFut = futsTotal > 0 ? (caJour / futsTotal) : 0;
-        
-        // Meilleur bar
-        const barStats = barsNomades.map(bar => {
-          const ca = historiqueVentes.filter(v => v.barId === bar.id && v.jour === jourActuel).reduce((sum, v) => sum + (v.montant || 0), 0);
-          const futs = historique.filter(m => m.barId === bar.id && ['RETOUR_VIDE', 'RETOUR_CASSE'].includes(m.type) && m.jour === jourActuel).length;
-          return { ...bar, ca, futs, ratio: futs > 0 ? ca / futs : 0 };
-        }).sort((a, b) => b.ca - a.ca);
-        
-        return (
-        <div className="fixed inset-0 bg-black/90 flex flex-col z-50">
-          <div className="bg-amber-900 px-4 py-3 flex items-center justify-between">
-            <h3 className="text-xl font-bold">📊 Dashboard J{jourActuel}</h3>
-            <button onClick={() => setShowModalDashboard(false)} className="text-2xl">✕</button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4">
-            <div className="max-w-2xl mx-auto space-y-4">
-              {/* KPIs principaux */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-emerald-900/30 p-4 rounded-xl border border-emerald-700">
-                  <p className="text-xs text-emerald-300">💰 CA Jour</p>
-                  <p className="text-3xl font-black text-emerald-400">{caJour.toFixed(0)} €</p>
-                  <p className="text-xs text-neutral-400">{ratioParFut.toFixed(0)} €/fût</p>
-                </div>
-                <div className="bg-blue-900/30 p-4 rounded-xl border border-blue-700">
-                  <p className="text-xs text-blue-300">🛢️ Fûts consommés</p>
-                  <p className="text-3xl font-black text-blue-400">{futsTotal}</p>
-                  <p className="text-xs text-neutral-400">{futsConsommesBiere}🍺 + {futsConsommesCidre}🍎</p>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-orange-900/30 p-4 rounded-xl border border-orange-700">
-                  <p className="text-xs text-orange-300">📦 Retours vides</p>
-                  <p className="text-3xl font-black text-orange-400">
-                    {historique.filter(m => m.type === 'RETOUR_VIDE' && m.jour === jourActuel).length}
-                  </p>
-                </div>
-                <div className="bg-red-900/30 p-4 rounded-xl border border-red-700">
-                  <p className="text-xs text-red-300">💥 Cassés</p>
-                  <p className="text-3xl font-black text-red-400">{futsCassesJour}</p>
-                </div>
-              </div>
-              
-              {/* Écarts et pertes */}
-              <div className={`p-4 rounded-xl border ${perteOK ? 'bg-green-900/30 border-green-700' : 'bg-red-900/30 border-red-700'}`}>
-                <h4 className="font-bold mb-3">📉 Contrôle des écarts</h4>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-neutral-400">Volume sorti</p>
-                    <p className="font-bold">{volumeSortiTotal.toFixed(1)} L</p>
-                  </div>
-                  <div>
-                    <p className="text-neutral-400">Volume vendu (déclaré)</p>
-                    <p className="font-bold">{volumeVendu.toFixed(1)} L</p>
-                  </div>
-                  <div>
-                    <p className="text-neutral-400">Écart</p>
-                    <p className={`font-bold ${ecartVolume > 0 ? 'text-red-400' : 'text-green-400'}`}>{ecartVolume.toFixed(1)} L</p>
-                  </div>
-                  <div>
-                    <p className="text-neutral-400">Taux de perte</p>
-                    <p className={`font-bold ${perteOK ? 'text-green-400' : 'text-red-400'}`}>
-                      {tauxPerte.toFixed(1)}% {perteOK ? '✓' : '⚠️'}
-                    </p>
-                    <p className="text-xs text-neutral-500">Seuil: {config.seuilPerte}%</p>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Cohérence CA */}
-              <div className="bg-neutral-800 p-4 rounded-xl">
-                <h4 className="font-bold mb-3">🧮 Cohérence CA</h4>
-                <div className="grid grid-cols-3 gap-2 text-sm">
-                  <div>
-                    <p className="text-neutral-400">CA déclaré</p>
-                    <p className="font-bold text-emerald-400">{caJour.toFixed(0)} €</p>
-                  </div>
-                  <div>
-                    <p className="text-neutral-400">CA théorique</p>
-                    <p className="font-bold">{caTheorique.toFixed(0)} €</p>
-                    <p className="text-xs text-neutral-500">{pintesVendues}p + {pichetsVendus}pi</p>
-                  </div>
-                  <div>
-                    <p className="text-neutral-400">Écart</p>
-                    <p className={`font-bold ${ecartCA >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {ecartCA >= 0 ? '+' : ''}{ecartCA.toFixed(0)} €
-                    </p>
-                  </div>
-                </div>
-              </div>
-              
-              {/* CA par bar avec ratio */}
-              <div className="bg-neutral-800 p-4 rounded-xl">
-                <h4 className="font-bold mb-3">🏆 Classement bars</h4>
-                <div className="space-y-2">
-                  {barStats.map((bar, idx) => (
-                    <div key={bar.id} className="flex items-center justify-between bg-neutral-700/50 p-3 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${idx === 0 ? 'bg-yellow-500 text-black' : idx === 1 ? 'bg-neutral-400 text-black' : idx === 2 ? 'bg-orange-700' : 'bg-neutral-600'}`}>{idx + 1}</span>
-                        <div>
-                          <p className="font-medium">{bar.type === 'biere' ? '🍺' : '🍎'} {bar.nom}</p>
-                          <p className="text-xs text-neutral-400">{bar.futs} fûts • {bar.ratio.toFixed(0)} €/fût</p>
-                        </div>
-                      </div>
-                      <p className="font-bold text-emerald-400">{bar.ca.toFixed(0)} €</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              
-              {/* CA par créneau */}
-              <div className="bg-neutral-800 p-4 rounded-xl">
-                <h4 className="font-bold mb-3">⏰ CA par créneau</h4>
-                <div className="space-y-2">
-                  {creneaux.map(c => {
-                    const ca = historiqueVentes.filter(v => v.creneauId === c.id && v.jour === jourActuel).reduce((sum, v) => sum + (v.montant || 0), 0);
-                    const maxCA = Math.max(...creneaux.map(cr => historiqueVentes.filter(v => v.creneauId === cr.id && v.jour === jourActuel).reduce((s, v) => s + (v.montant || 0), 0)));
-                    const pct = maxCA > 0 ? (ca / maxCA) * 100 : 0;
-                    return (
-                      <div key={c.id} className="bg-neutral-700/50 p-2 rounded-lg">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-sm">{c.label}</span>
-                          <span className="font-bold text-emerald-400">{ca.toFixed(0)} €</span>
-                        </div>
-                        <div className="h-2 bg-neutral-600 rounded-full overflow-hidden">
-                          <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${pct}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              
-              {/* Résumé festival */}
-              <div className="bg-neutral-800 p-4 rounded-xl">
-                <h4 className="font-bold mb-3">📅 Résumé Festival</h4>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-neutral-400 text-sm">CA Total</p>
-                    <p className="text-2xl font-bold text-emerald-400">{historiqueVentes.reduce((sum, v) => sum + (v.montant || 0), 0).toFixed(0)} €</p>
-                  </div>
-                  <div>
-                    <p className="text-neutral-400 text-sm">Fûts consommés</p>
-                    <p className="text-2xl font-bold text-blue-400">{historique.filter(m => ['RETOUR_VIDE', 'RETOUR_CASSE'].includes(m.type)).length}</p>
-                  </div>
-                </div>
-                <div className="mt-4 grid grid-cols-4 gap-2">
-                  {Array.from({ length: config.nombreJours }, (_, i) => i + 1).map(j => {
-                    const caJ = historiqueVentes.filter(v => v.jour === j).reduce((sum, v) => sum + (v.montant || 0), 0);
-                    return (
-                      <div key={j} className={`p-2 rounded text-center ${j === jourActuel ? 'bg-amber-600' : 'bg-neutral-700'}`}>
-                        <p className="text-xs">J{j}</p>
-                        <p className="font-bold text-sm">{caJ.toFixed(0)}€</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        );
-      })()}
-      
-      {/* Modal Export */}
-      {showModalExport && isAdmin && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-neutral-900 rounded-2xl w-full max-w-sm p-6">
-            <h3 className="text-xl font-bold mb-4">📥 Exporter</h3>
-            <div className="space-y-2">
-              <button onClick={() => {
-                const headers = ['Date', 'Type', 'Bar', 'Type Fût', 'Jour', 'Utilisateur'];
-                const rows = historique.map(m => [formatDate(m.timestamp), m.type, m.barNom, m.typeFut, `J${m.jour}`, m.user]);
-                const csv = [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
-                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-                const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `historique_futs_${session}.csv`; a.click();
-              }} disabled={historique.length === 0} className="w-full py-3 bg-purple-600 rounded-lg disabled:opacity-50">📋 Historique Fûts ({historique.length})</button>
-              
-              <button onClick={() => {
-                const headers = ['Date', 'Bar', 'Créneau', 'Montant', 'Pintes', 'Pichets', 'Gobelets', 'Jour'];
-                const rows = historiqueVentes.map(v => [formatDate(v.timestamp), v.barNom, v.creneauLabel, v.montant?.toFixed(2), v.pintes, v.pichets, v.gobelets, `J${v.jour}`]);
-                const csv = [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
-                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-                const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `historique_ventes_${session}.csv`; a.click();
-              }} disabled={historiqueVentes.length === 0} className="w-full py-3 bg-emerald-600 rounded-lg disabled:opacity-50">💰 Historique Ventes ({historiqueVentes.length})</button>
-              
-              <button onClick={async () => {
-                // Charger les librairies
-                await window.loadJsPDF();
-                await window.loadAutoTable();
-                await window.loadChartJS();
-                
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4');
-                const pageWidth = pdf.internal.pageSize.getWidth();
-                const pageHeight = pdf.internal.pageSize.getHeight();
-                const margin = 15;
-                let y = 20;
-                
-                // Couleurs
-                const colors = {
-                  primary: [57, 255, 20], // vert fluo
-                  amber: [245, 158, 11],
-                  green: [34, 197, 94],
-                  red: [239, 68, 68],
-                  blue: [59, 130, 246],
-                  gray: [100, 100, 100]
-                };
-                
-                // ===== FONCTION HELPER POUR CRÉER GRAPHIQUES =====
-                const createChartImage = async (chartConfig, width = 400, height = 200) => {
-                  const canvas = document.createElement('canvas');
-                  canvas.width = width;
-                  canvas.height = height;
-                  const ctx = canvas.getContext('2d');
-                  
-                  // Fond blanc
-                  ctx.fillStyle = '#1a1a1a';
-                  ctx.fillRect(0, 0, width, height);
-                  
-                  const chart = new Chart(ctx, {
-                    ...chartConfig,
-                    options: {
-                      ...chartConfig.options,
-                      animation: false,
-                      responsive: false,
-                      maintainAspectRatio: false,
-                      plugins: {
-                        ...chartConfig.options?.plugins,
-                        legend: { 
-                          ...chartConfig.options?.plugins?.legend,
-                          labels: { color: '#fff', font: { size: 11 } }
-                        }
-                      },
-                      scales: chartConfig.type !== 'doughnut' && chartConfig.type !== 'pie' ? {
-                        x: { ticks: { color: '#ccc' }, grid: { color: '#333' } },
-                        y: { ticks: { color: '#ccc' }, grid: { color: '#333' } }
-                      } : undefined
-                    }
-                  });
-                  
-                  await new Promise(r => setTimeout(r, 100));
-                  const imgData = canvas.toDataURL('image/png');
-                  chart.destroy();
-                  return imgData;
-                };
-                
-                // ===== CALCULS =====
-                const caTotal = historiqueVentes.reduce((sum, v) => sum + (v.montant || 0), 0);
-                const futsConsommes = historique.filter(m => ['RETOUR_VIDE', 'RETOUR_CASSE'].includes(m.type));
-                const futsCasses = historique.filter(m => m.type === 'RETOUR_CASSE').length;
-                const futsConsommesBiere = futsConsommes.filter(m => m.typeFut === 'biere').length;
-                const futsConsommesCidre = futsConsommes.filter(m => m.typeFut === 'cidre').length;
-                const volumeSortiBiere = futsConsommesBiere * config.volumeFutBiere;
-                const volumeSortiCidre = futsConsommesCidre * config.volumeFutCidre;
-                const volumeSortiTotal = volumeSortiBiere + volumeSortiCidre;
-                const pintesTotales = historiqueVentes.reduce((sum, v) => sum + (v.pintes || 0), 0);
-                const pichetsTotaux = historiqueVentes.reduce((sum, v) => sum + (v.pichets || 0), 0);
-                const volumeVendu = (pintesTotales * config.volumePinte) + (pichetsTotaux * config.volumePichet);
-                const ecartVolume = volumeSortiTotal - volumeVendu;
-                const tauxPerte = volumeSortiTotal > 0 ? ((ecartVolume / volumeSortiTotal) * 100) : 0;
-                
-                // ===== PAGE 1: TITRE + SYNTHÈSE =====
-                pdf.setFillColor(0, 0, 0);
-                pdf.rect(0, 0, pageWidth, 45, 'F');
-                pdf.setTextColor(57, 255, 20);
-                pdf.setFontSize(24);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('RAPPORT HELLFEST 2026', pageWidth / 2, 20, { align: 'center' });
-                pdf.setFontSize(12);
-                pdf.setFont('helvetica', 'normal');
-                pdf.setTextColor(200, 200, 200);
-                pdf.text(`Session: ${session} | Généré le ${new Date().toLocaleString('fr-FR')}`, pageWidth / 2, 32, { align: 'center' });
-                y = 55;
-                
-                // Synthèse - KPIs principaux
-                pdf.setTextColor(0, 0, 0);
-                pdf.setFontSize(14);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('SYNTHÈSE GLOBALE', margin, y);
-                y += 10;
-                
-                // Tableau KPIs
-                pdf.autoTable({
-                  startY: y,
-                  head: [['Indicateur', 'Valeur', 'Détail']],
-                  body: [
-                    ['💰 CA Total', `${caTotal.toFixed(2)} €`, `${historiqueVentes.length} ventes`],
-                    ['🛢️ Fûts consommés', `${futsConsommes.length}`, `${futsConsommesBiere} bière + ${futsConsommesCidre} cidre`],
-                    ['💥 Fûts cassés', `${futsCasses}`, `${futsConsommes.length > 0 ? ((futsCasses / futsConsommes.length) * 100).toFixed(1) : 0}% du total`],
-                    ['📐 Volume sorti', `${volumeSortiTotal.toFixed(1)} L`, `${volumeSortiBiere.toFixed(1)}L bière + ${volumeSortiCidre.toFixed(1)}L cidre`],
-                    ['📊 Volume vendu', `${volumeVendu.toFixed(1)} L`, `${pintesTotales} pintes + ${pichetsTotaux} pichets`],
-                    ['⚠️ Taux de perte', `${tauxPerte.toFixed(1)}%`, tauxPerte <= config.seuilPerte ? '✓ OK' : '⚠️ Attention'],
-                  ],
-                  theme: 'striped',
-                  headStyles: { fillColor: [57, 255, 20], textColor: [0, 0, 0], fontStyle: 'bold' },
-                  styles: { fontSize: 10, cellPadding: 3 },
-                  columnStyles: { 0: { fontStyle: 'bold' }, 1: { halign: 'right' } }
-                });
-                y = pdf.lastAutoTable.finalY + 15;
-                
-                // ===== TABLEAU CA PAR JOUR =====
-                pdf.setFontSize(14);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('CA PAR JOUR', margin, y);
-                y += 8;
-                
-                const jourData = Array.from({ length: config.nombreJours }, (_, i) => {
-                  const j = i + 1;
-                  const ventesJ = historiqueVentes.filter(v => v.jour === j);
-                  const caJ = ventesJ.reduce((sum, v) => sum + (v.montant || 0), 0);
-                  const futsJ = historique.filter(m => m.type === 'SORTIE' && m.jour === j).length;
-                  const futsConsJ = historique.filter(m => ['RETOUR_VIDE', 'RETOUR_CASSE'].includes(m.type) && m.jour === j).length;
-                  return [`Jour ${j}`, `${caJ.toFixed(2)} €`, `${futsJ}`, `${futsConsJ}`, futsConsJ > 0 ? `${(caJ / futsConsJ).toFixed(0)} €` : '-'];
-                });
-                
-                pdf.autoTable({
-                  startY: y,
-                  head: [['Jour', 'CA', 'Fûts sortis', 'Fûts consommés', '€/fût']],
-                  body: jourData,
-                  foot: [['TOTAL', `${caTotal.toFixed(2)} €`, `${historique.filter(m => m.type === 'SORTIE').length}`, `${futsConsommes.length}`, futsConsommes.length > 0 ? `${(caTotal / futsConsommes.length).toFixed(0)} €` : '-']],
-                  theme: 'striped',
-                  headStyles: { fillColor: [245, 158, 11], textColor: [0, 0, 0] },
-                  footStyles: { fillColor: [30, 30, 30], textColor: [57, 255, 20], fontStyle: 'bold' },
-                  styles: { fontSize: 9, halign: 'center' }
-                });
-                y = pdf.lastAutoTable.finalY + 15;
-                
-                // ===== TABLEAU CA PAR BAR =====
-                pdf.setFontSize(14);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('CA PAR BAR', margin, y);
-                y += 8;
-                
-                const barData = barsNomades.map(bar => {
-                  const ca = historiqueVentes.filter(v => v.barId === bar.id).reduce((sum, v) => sum + (v.montant || 0), 0);
-                  const futs = historique.filter(m => m.barId === bar.id && ['RETOUR_VIDE', 'RETOUR_CASSE'].includes(m.type)).length;
-                  const casses = historique.filter(m => m.barId === bar.id && m.type === 'RETOUR_CASSE').length;
-                  return [
-                    `${bar.type === 'biere' ? '🍺' : '🍎'} ${bar.nom}`,
-                    `${ca.toFixed(2)} €`,
-                    `${futs}`,
-                    `${casses}`,
-                    futs > 0 ? `${(ca / futs).toFixed(0)} €` : '-',
-                    `${caTotal > 0 ? ((ca / caTotal) * 100).toFixed(1) : 0}%`
-                  ];
-                }).sort((a, b) => parseFloat(b[1]) - parseFloat(a[1]));
-                
-                pdf.autoTable({
-                  startY: y,
-                  head: [['Bar', 'CA', 'Fûts', 'Cassés', '€/fût', '% CA']],
-                  body: barData,
-                  theme: 'striped',
-                  headStyles: { fillColor: [34, 197, 94], textColor: [0, 0, 0] },
-                  styles: { fontSize: 9 },
-                  columnStyles: { 1: { halign: 'right' }, 5: { halign: 'right' } }
-                });
-                
-                // ===== PAGE 2: GRAPHIQUES =====
-                pdf.addPage();
-                y = 20;
-                
-                pdf.setFillColor(0, 0, 0);
-                pdf.rect(0, 0, pageWidth, 25, 'F');
-                pdf.setTextColor(57, 255, 20);
-                pdf.setFontSize(16);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('GRAPHIQUES & ANALYSE', pageWidth / 2, 15, { align: 'center' });
-                y = 35;
-                
-                // Graphique 1: CA par jour (bar chart)
-                pdf.setTextColor(0, 0, 0);
-                pdf.setFontSize(12);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('Évolution CA par jour', margin, y);
-                y += 5;
-                
-                const caParJour = Array.from({ length: config.nombreJours }, (_, i) => 
-                  historiqueVentes.filter(v => v.jour === i + 1).reduce((sum, v) => sum + (v.montant || 0), 0)
-                );
-                
-                const chartCA = await createChartImage({
-                  type: 'bar',
-                  data: {
-                    labels: Array.from({ length: config.nombreJours }, (_, i) => `J${i + 1}`),
-                    datasets: [{
-                      label: 'CA (€)',
-                      data: caParJour,
-                      backgroundColor: 'rgba(57, 255, 20, 0.7)',
-                      borderColor: 'rgb(57, 255, 20)',
-                      borderWidth: 2
-                    }]
-                  },
-                  options: { plugins: { legend: { display: false } } }
-                }, 500, 200);
-                
-                pdf.addImage(chartCA, 'PNG', margin, y, pageWidth - 2 * margin, 50);
-                y += 60;
-                
-                // Graphique 2: CA par bar (horizontal bar)
-                pdf.setFontSize(12);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('CA par bar', margin, y);
-                y += 5;
-                
-                const barCAs = barsNomades.map(bar => ({
-                  nom: bar.nom,
-                  ca: historiqueVentes.filter(v => v.barId === bar.id).reduce((sum, v) => sum + (v.montant || 0), 0)
-                })).sort((a, b) => b.ca - a.ca);
-                
-                const chartBars = await createChartImage({
-                  type: 'bar',
-                  data: {
-                    labels: barCAs.map(b => b.nom),
-                    datasets: [{
-                      label: 'CA (€)',
-                      data: barCAs.map(b => b.ca),
-                      backgroundColor: barCAs.map((_, i) => i === 0 ? 'rgba(245, 158, 11, 0.8)' : 'rgba(59, 130, 246, 0.7)'),
-                      borderColor: barCAs.map((_, i) => i === 0 ? 'rgb(245, 158, 11)' : 'rgb(59, 130, 246)'),
-                      borderWidth: 2
-                    }]
-                  },
-                  options: { indexAxis: 'y', plugins: { legend: { display: false } } }
-                }, 500, 200);
-                
-                pdf.addImage(chartBars, 'PNG', margin, y, pageWidth - 2 * margin, 50);
-                y += 60;
-                
-                // Graphique 3: Répartition Bière/Cidre (doughnut)
-                pdf.setFontSize(12);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('Répartition Bière / Cidre', margin, y);
-                y += 5;
-                
-                const chartDonut = await createChartImage({
-                  type: 'doughnut',
-                  data: {
-                    labels: ['Bière', 'Cidre'],
-                    datasets: [{
-                      data: [futsConsommesBiere, futsConsommesCidre],
-                      backgroundColor: ['rgba(245, 158, 11, 0.8)', 'rgba(34, 197, 94, 0.8)'],
-                      borderColor: ['rgb(245, 158, 11)', 'rgb(34, 197, 94)'],
-                      borderWidth: 2
-                    }]
-                  },
-                  options: { plugins: { legend: { position: 'right' } } }
-                }, 300, 200);
-                
-                pdf.addImage(chartDonut, 'PNG', margin, y, 80, 50);
-                
-                // Stats à côté du donut
-                pdf.setFontSize(10);
-                pdf.setFont('helvetica', 'normal');
-                pdf.text(`Bière: ${futsConsommesBiere} fûts (${volumeSortiBiere.toFixed(0)}L)`, margin + 90, y + 15);
-                pdf.text(`Cidre: ${futsConsommesCidre} fûts (${volumeSortiCidre.toFixed(0)}L)`, margin + 90, y + 25);
-                pdf.text(`Ratio: ${futsConsommesBiere > 0 ? (futsConsommesBiere / (futsConsommesBiere + futsConsommesCidre) * 100).toFixed(0) : 0}% / ${futsConsommesCidre > 0 ? (futsConsommesCidre / (futsConsommesBiere + futsConsommesCidre) * 100).toFixed(0) : 0}%`, margin + 90, y + 35);
-                y += 60;
-                
-                // ===== PAGE 3: ANALYSE ÉCARTS =====
-                pdf.addPage();
-                y = 20;
-                
-                pdf.setFillColor(0, 0, 0);
-                pdf.rect(0, 0, pageWidth, 25, 'F');
-                pdf.setTextColor(57, 255, 20);
-                pdf.setFontSize(16);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('CONTRÔLE DES ÉCARTS', pageWidth / 2, 15, { align: 'center' });
-                y = 35;
-                
-                // Tableau écarts par type
-                pdf.setTextColor(0, 0, 0);
-                pdf.setFontSize(12);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('Analyse des volumes', margin, y);
-                y += 8;
-                
-                pdf.autoTable({
-                  startY: y,
-                  head: [['Type', 'Volume sorti (L)', 'Volume vendu (L)', 'Écart (L)', 'Taux perte']],
-                  body: [
-                    ['Bière', volumeSortiBiere.toFixed(1), '-', '-', '-'],
-                    ['Cidre', volumeSortiCidre.toFixed(1), '-', '-', '-'],
-                    ['TOTAL', volumeSortiTotal.toFixed(1), volumeVendu.toFixed(1), ecartVolume.toFixed(1), `${tauxPerte.toFixed(1)}%`]
-                  ],
-                  theme: 'striped',
-                  headStyles: { fillColor: tauxPerte <= config.seuilPerte ? [34, 197, 94] : [239, 68, 68], textColor: [255, 255, 255] },
-                  styles: { fontSize: 10, halign: 'center' }
-                });
-                y = pdf.lastAutoTable.finalY + 15;
-                
-                // Écarts par bar
-                pdf.setFontSize(12);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('Écarts par bar', margin, y);
-                y += 8;
-                
-                const ecartsBarData = barsNomades.map(bar => {
-                  const ventesBar = historiqueVentes.filter(v => v.barId === bar.id);
-                  const futsBar = historique.filter(m => m.barId === bar.id && ['RETOUR_VIDE', 'RETOUR_CASSE'].includes(m.type));
-                  const volSorti = futsBar.length * (bar.type === 'biere' ? config.volumeFutBiere : config.volumeFutCidre);
-                  const pintes = ventesBar.reduce((sum, v) => sum + (v.pintes || 0), 0);
-                  const pichets = ventesBar.reduce((sum, v) => sum + (v.pichets || 0), 0);
-                  const volVendu = (pintes * config.volumePinte) + (pichets * config.volumePichet);
-                  const ecart = volSorti - volVendu;
-                  const taux = volSorti > 0 ? ((ecart / volSorti) * 100) : 0;
-                  return [
-                    `${bar.type === 'biere' ? '🍺' : '🍎'} ${bar.nom}`,
-                    `${volSorti.toFixed(1)}`,
-                    `${volVendu.toFixed(1)}`,
-                    `${ecart.toFixed(1)}`,
-                    `${taux.toFixed(1)}%`,
-                    taux <= config.seuilPerte ? '✓' : '⚠️'
-                  ];
-                });
-                
-                pdf.autoTable({
-                  startY: y,
-                  head: [['Bar', 'Vol. sorti', 'Vol. vendu', 'Écart', 'Taux', 'Status']],
-                  body: ecartsBarData,
-                  theme: 'striped',
-                  headStyles: { fillColor: [100, 100, 100] },
-                  styles: { fontSize: 9, halign: 'center' }
-                });
-                y = pdf.lastAutoTable.finalY + 15;
-                
-                // CA par créneau
-                pdf.setFontSize(12);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('CA par créneau (tous jours confondus)', margin, y);
-                y += 8;
-                
-                const creneauData = creneaux.map(c => {
-                  const ventesC = historiqueVentes.filter(v => v.creneauId === c.id);
-                  const ca = ventesC.reduce((sum, v) => sum + (v.montant || 0), 0);
-                  return [c.label, `${ca.toFixed(2)} €`, `${ventesC.length}`, caTotal > 0 ? `${((ca / caTotal) * 100).toFixed(1)}%` : '0%'];
-                });
-                
-                pdf.autoTable({
-                  startY: y,
-                  head: [['Créneau', 'CA', 'Nb ventes', '% CA total']],
-                  body: creneauData,
-                  theme: 'striped',
-                  headStyles: { fillColor: [59, 130, 246] },
-                  styles: { fontSize: 9 },
-                  columnStyles: { 1: { halign: 'right' }, 3: { halign: 'right' } }
-                });
-                
-                // ===== FOOTER =====
-                const totalPages = pdf.internal.getNumberOfPages();
-                for (let i = 1; i <= totalPages; i++) {
-                  pdf.setPage(i);
-                  pdf.setFontSize(8);
-                  pdf.setTextColor(150, 150, 150);
-                  pdf.text(`Hellfest 2026 - Session ${session} - Page ${i}/${totalPages}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
-                }
-                
-                pdf.save(`rapport_complet_hellfest_${session}.pdf`);
-                showNotification('📄 PDF complet généré (3 pages)');
-              }} className="w-full py-3 bg-red-600 rounded-lg">📄 Rapport PDF complet</button>
-            </div>
-            <button onClick={() => setShowModalExport(false)} className="w-full py-3 bg-neutral-700 rounded-lg mt-4">Fermer</button>
-          </div>
-        </div>
-      )}
-      
-      {/* Tutoriel */}
-      {showTutoriel && (
-        <div className="fixed inset-0 bg-black/95 flex items-center justify-center p-4 z-50">
-          <div className="bg-neutral-900 rounded-2xl w-full max-w-md p-6">
-            <h3 className="text-xl font-bold mb-4">🎓 Bienvenue !</h3>
-            {tutorielStep === 0 && (
-              <div>
-                <p className="mb-4">Cette application permet de gérer les fûts des bars nomades du Hellfest.</p>
-                <p className="text-sm text-neutral-400">Vous êtes Super Admin. Vous avez accès à toutes les fonctionnalités.</p>
-              </div>
-            )}
-            {tutorielStep === 1 && (
-              <div>
-                <p className="mb-4">📱 Partagez le code <span className="font-mono text-red-400">{session}</span> avec votre équipe.</p>
-                <p className="text-sm text-neutral-400">Sans mot de passe, ils rejoindront en tant que Visiteur. Vous pourrez les promouvoir Secrétaire.</p>
-              </div>
-            )}
-            {tutorielStep === 2 && (
-              <div>
-                <p className="mb-4">⚙️ Configurez d'abord vos bars dans les Paramètres.</p>
-                <p className="text-sm text-neutral-400">Puis placez-les sur le plan pour visualiser leur position.</p>
-              </div>
-            )}
-            <div className="flex gap-2 mt-6">
-              {tutorielStep > 0 && <button onClick={() => setTutorielStep(tutorielStep - 1)} className="flex-1 py-3 bg-neutral-700 rounded-lg">← Précédent</button>}
-              {tutorielStep < 2 ? (
-                <button onClick={() => setTutorielStep(tutorielStep + 1)} className="flex-1 py-3 bg-green-600 rounded-lg">Suivant →</button>
-              ) : (
-                <button onClick={() => { setShowTutoriel(false); localStorage.setItem('gestionFuts_tutorielVu', 'true'); }} className="flex-1 py-3 bg-green-600 rounded-lg">✓ Commencer</button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      `}
     </div>
-  );
+  `;
 };
 
-// ==================== APP RACINE ====================
+// ==================== APP ROOT ====================
 const App = () => {
   const [session, setSession] = useState(null);
   const [userName, setUserName] = useState('');
   const [isCreator, setIsCreator] = useState(false);
   const [role, setRole] = useState('visiteur');
-  
-  const handleJoinSession = (code, name, creator, userRole) => {
-    setSession(code);
-    setUserName(name);
+
+  const handleLogin = (sess, user, creator, r) => {
+    setSession(sess);
+    setUserName(user);
     setIsCreator(creator);
-    setRole(userRole);
-    hideLoadingScreen();
+    setRole(r);
   };
-  
+
   const handleLogout = () => {
     setSession(null);
     setUserName('');
     setIsCreator(false);
     setRole('visiteur');
   };
-  
-  if (!session) {
-    return <LoginScreen onJoinSession={handleJoinSession} />;
-  }
-  
-  return (
-    <MainApp
-      session={session}
-      userName={userName}
-      isCreator={isCreator}
-      initialRole={role}
-      onLogout={handleLogout}
-    />
-  );
+
+  if (!session) return html`<${LoginScreen} onLogin=${handleLogin} />`;
+  return html`<${MainApp} session=${session} userName=${userName} isCreator=${isCreator} initialRole=${role} onLogout=${handleLogout} />`;
 };
 
 // Render
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+render(html`<${App} />`, document.getElementById('root'));
   </script>
 </body>
 </html>
