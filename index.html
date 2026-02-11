@@ -121,34 +121,28 @@ if(role==="visiteur"){
 localStorage.setItem("gestionFuts_isAdmin","false");
 document.querySelectorAll("button").forEach(function(b){
 var txt=b.textContent||"";
-if(txt.indexOf("Plan")!==-1)return;
-if(txt.indexOf("Admin")!==-1||txt.indexOf("Fût")!==-1||txt.indexOf("Vente")!==-1||txt.indexOf("Bénévole")!==-1||txt.indexOf("Dashboard")!==-1||txt.indexOf("Historique")!==-1||txt.indexOf("Export")!==-1||txt.indexOf("Retour")!==-1||txt.indexOf("Affecter")!==-1||txt.indexOf("Enregistrer")!==-1){
-b.style.display="none";
-}
-});
-document.querySelectorAll("div").forEach(function(d){
-var txt=d.textContent||"";
-if((txt.indexOf("Vides")!==-1&&txt.indexOf("Cassé")!==-1)||(d.className&&d.className.indexOf("grid grid-cols-3")!==-1&&txt.match(/\d+.*Vides/))){
-d.style.display="none";
-}
+if(txt.indexOf("Admin")!==-1){b.style.display="none";}
+if(txt.indexOf("Fût")!==-1){b.style.display="none";}
+if(txt.indexOf("Vente")!==-1&&txt.indexOf("Historique")===-1){b.style.display="none";}
 });
 document.querySelectorAll('[class*="bg-green-600"]').forEach(function(el){
-var p=el.closest("div.flex.gap-2");
-if(p&&p.querySelector('[class*="bg-neutral-700"]')){
-p.style.display="none";
+if(el.tagName==="BUTTON"&&el.querySelector("svg")){el.style.display="none";}
+});
+document.querySelectorAll('[class*="bg-neutral-700"]').forEach(function(el){
+if(el.tagName==="BUTTON"&&el.querySelector("svg")){el.style.display="none";}
+});
+document.querySelectorAll("div").forEach(function(d){
+if(d.className&&d.className.indexOf("grid-cols-3")!==-1){
+var txt=d.textContent||"";
+if(txt.indexOf("Vides")!==-1||txt.indexOf("Cassé")!==-1||txt.indexOf("Réutil")!==-1){
+d.style.display="none";
+}
 }
 });
-var btns=document.querySelectorAll('button[class*="bg-green-600"],button[class*="bg-neutral-700"]');
-btns.forEach(function(b){
-var parent=b.parentElement;
-if(parent&&parent.className&&parent.className.indexOf("flex gap-2")!==-1&&parent.children.length===2){
-parent.style.display="none";
 }
 });
 }
-});
-}
-setTimeout(applyVisitorRestrictions,1500);
+setTimeout(applyVisitorRestrictions,1000);
 setInterval(applyVisitorRestrictions,2000);
 })();
 // === FIN PATCH ===
