@@ -110,31 +110,31 @@ Total actuel : ${i.totalMontant.toFixed(2)}\u20AC (${i.nbVentes} PAD)`))return;c
 
 // === PATCH VISITEUR/SECRETAIRE ===
 (function(){
-var knownUsers={};
-var userExistedOnce=false;
+var ejectionChecked=false;
 
-// Detecter si on a ete ejecte (seulement si on existait avant)
-function listenForEjection(){
+// Detecter ejection
+function checkEjection(){
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
-if(!sc||!cu)return;
-firebase.database().ref("sessions/"+sc+"/users/"+cu).on("value",function(snap){
+if(!sc||!cu||ejectionChecked)return;
+firebase.database().ref("sessions/"+sc+"/users/"+cu).once("value",function(snap){
 if(snap.exists()){
-userExistedOnce=true;
-}else if(userExistedOnce){
-alert("Vous avez ete deconnecte de la session.");
+ejectionChecked=true;
+firebase.database().ref("sessions/"+sc+"/users/"+cu).on("value",function(s){
+if(!s.exists()&&ejectionChecked){
+alert("Vous avez ete deconnecte.");
 localStorage.removeItem("gestionFuts_session");
 localStorage.removeItem("gestionFuts_userName");
 localStorage.removeItem("gestionFuts_isAdmin");
 localStorage.removeItem("gestionFuts_isCreator");
 localStorage.removeItem("gestionFuts_backups");
 location.href=location.pathname;
-}
-});
+}});
+}});
 }
 
-// Restrictions pour visiteurs
-function applyVisitorRestrictions(){
+// Appliquer restrictions visiteur
+function applyRestrictions(){
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
 if(!sc||!cu)return;
@@ -143,153 +143,109 @@ var role=snap.val()||"visiteur";
 window._currentRole=role;
 if(role==="visiteur"){
 localStorage.setItem("gestionFuts_isAdmin","false");
-document.querySelectorAll("button").forEach(function(b){
-var txt=b.textContent||"";
-if(txt.indexOf("Admin")!==-1){b.style.display="none";}
-if(txt.indexOf("Fût")!==-1){b.style.display="none";}
-if(txt.indexOf("Vente")!==-1){b.style.display="none";}
-if(txt.indexOf("Bénévole")!==-1){b.style.display="none";}
-if(txt.indexOf("bénévole")!==-1){b.style.display="none";}
-});
-var header=document.querySelector("header")||document.querySelector('[class*="flex gap-2 mb"]')||document.querySelector('[class*="flex gap-2"]');
-if(!header){
-var allDivs=document.querySelectorAll("div.flex.gap-2");
-allDivs.forEach(function(d){
-var btns=d.querySelectorAll("button");
-if(btns.length===2){
-var hasGreen=false;
-var hasGray=false;
-btns.forEach(function(b){
-if(b.className.indexOf("bg-green-600")!==-1)hasGreen=true;
-if(b.className.indexOf("bg-neutral-700")!==-1)hasGray=true;
-});
-if(hasGreen&&hasGray){
-d.style.display="none";
-}
-}
-});
+var css=document.getElementById("visitor-css");
+if(!css){
+css=document.createElement("style");
+css.id="visitor-css";
+css.textContent="button:has-text('Admin'),button:has-text('Fût'),button:has-text('Vente'),button:has-text('Bénévole'){display:none!important}";
+document.head.appendChild(css);
 }
 document.querySelectorAll("button").forEach(function(b){
-var cls=b.className||"";
-if(cls.indexOf("bg-green-600")!==-1&&b.querySelector("svg")){
-b.style.display="none";
-}
-if(cls.indexOf("bg-neutral-700")!==-1&&b.querySelector("svg")){
-b.style.display="none";
+var t=b.textContent||"";
+if(t.indexOf("Admin")>-1||t.indexOf("Fût")>-1||t.indexOf("Vente")>-1||t.indexOf("Bénévole")>-1||t.indexOf("bénévole")>-1){
+b.style.setProperty("display","none","important");
 }
 });
-document.querySelectorAll("div").forEach(function(d){
-if(d.className&&d.className.indexOf("grid-cols-3")!==-1){
-var txt=d.textContent||"";
-if(txt.indexOf("Vides")!==-1||txt.indexOf("Cassé")!==-1||txt.indexOf("Réutil")!==-1){
-d.style.display="none";
+document.querySelectorAll("button").forEach(function(b){
+if((b.className||"").indexOf("bg-green-600")>-1||(b.className||"").indexOf("bg-neutral-700")>-1){
+if(b.querySelector("svg")||b.textContent.trim()===""){
+b.style.setProperty("display","none","important");
 }}});
+document.querySelectorAll("div").forEach(function(d){
+var c=d.className||"";
+var t=d.textContent||"";
+if(c.indexOf("grid-cols-3")>-1&&(t.indexOf("Vides")>-1||t.indexOf("Cassé")>-1)){
+d.style.setProperty("display","none","important");
+}});
+}else{
+localStorage.setItem("gestionFuts_isAdmin","true");
 }});
 }
 
-// Ecouter les changements de role en temps reel
-function listenRoleChanges(){
+// Ecouter changement de role
+function listenRole(){
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
 if(!sc||!cu)return;
+var initialRole=null;
 firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").on("value",function(snap){
-if(!snap.exists())return;
 var role=snap.val()||"visiteur";
-var oldRole=window._currentRole;
-window._currentRole=role;
-if(oldRole&&oldRole!==role){
+if(initialRole===null){initialRole=role;return;}
+if(role!==initialRole){
 if(role==="secretaire"){
-alert("Vous avez ete promu Secretaire! Vous pouvez maintenant effectuer des actions.");
-localStorage.setItem("gestionFuts_isAdmin","true");
-document.querySelectorAll("button").forEach(function(b){b.style.display="";});
-document.querySelectorAll("div").forEach(function(d){d.style.display="";});
-}else if(role==="visiteur"&&oldRole==="secretaire"){
-alert("Vous etes maintenant Visiteur (lecture seule).");
-localStorage.setItem("gestionFuts_isAdmin","false");
-applyVisitorRestrictions();
-}}});
+alert("Vous avez ete promu Secretaire!");
+}else if(role==="visiteur"){
+alert("Vous etes maintenant Visiteur.");
 }
-
-// Surveiller nouveaux visiteurs (pour admin/superadmin)
-function watchNewVisitors(){
-var sc=localStorage.getItem("gestionFuts_session");
-var isAdm=localStorage.getItem("gestionFuts_isAdmin")==="true";
-var isCr=localStorage.getItem("gestionFuts_isCreator")==="true";
-if(!sc||(!isAdm&&!isCr))return;
-firebase.database().ref("sessions/"+sc+"/users").once("value",function(snap){
-snap.forEach(function(child){knownUsers[child.key]=true;});
-});
-firebase.database().ref("sessions/"+sc+"/users").on("child_added",function(snap){
-var uname=snap.key;
-var udata=snap.val()||{};
-if(knownUsers[uname])return;
-knownUsers[uname]=true;
-var role=udata.role||"visiteur";
-var cu=localStorage.getItem("gestionFuts_userName");
-if(role==="visiteur"&&uname!==cu){
-setTimeout(function(){
-if(confirm("Nouveau visiteur: "+uname+"\n\nVoulez-vous le promouvoir en Secretaire?")){
-firebase.database().ref("sessions/"+sc+"/users/"+uname).update({role:"secretaire"});
-}},500);
+location.reload();
 }});
 }
 
-// Ajouter boutons promotion/retrogradation dans panel session
-function addRoleButtons(){
+// Boutons dans panel (admin seulement)
+function addPanelButtons(){
 var sc=localStorage.getItem("gestionFuts_session");
+if(!sc)return;
 var isAdm=localStorage.getItem("gestionFuts_isAdmin")==="true";
 var isCr=localStorage.getItem("gestionFuts_isCreator")==="true";
-if(!sc||(!isAdm&&!isCr))return;
+if(!isAdm&&!isCr)return;
 document.querySelectorAll('[class*="bg-neutral-800 px-3 py-2 rounded"]').forEach(function(el){
-if(el.dataset.rolePatched)return;
-var txt=el.textContent||"";
-var match=txt.match(/^([^(]+)/);
-if(!match)return;
-var uname=match[1].trim();
-var cu=localStorage.getItem("gestionFuts_userName");
-if(uname===cu)return;
-if(txt.indexOf("Super Admin")!==-1)return;
-if(txt.indexOf("Admin")!==-1&&txt.indexOf("Super")===-1)return;
-firebase.database().ref("sessions/"+sc+"/users/"+uname).once("value",function(snap){
-var udata=snap.val()||{};
-var role=udata.role||"visiteur";
+if(el.dataset.btnAdded)return;
+el.dataset.btnAdded="1";
+var spans=el.querySelectorAll("span");
+var userName=null;
+var userRole=null;
+spans.forEach(function(sp){
+var t=sp.textContent||"";
+if(t.indexOf("Visiteur")>-1)userRole="visiteur";
+if(t.indexOf("Secr")>-1)userRole="secretaire";
+if(t.indexOf("Admin")>-1)userRole="admin";
+if(t.indexOf("Super Admin")>-1)userRole="superadmin";
+});
+var firstText=el.textContent.split("👁")[0].split("📝")[0].split("🔐")[0].split("👑")[0].trim();
+if(firstText.indexOf("(vous)")>-1)return;
+userName=firstText.replace(/[^a-zA-Z0-9àâäéèêëïîôùûüç\s\-_]/g,"").trim();
+if(!userName||userRole==="superadmin"||userRole==="admin")return;
 var ejectBtn=el.querySelector('button[class*="bg-red-600"]');
 if(!ejectBtn)return;
-if(el.querySelector(".btn-role"))return;
 var btn=document.createElement("button");
-if(role==="secretaire"){
-btn.className="btn-role px-2 py-1 bg-orange-600 hover:bg-orange-500 rounded text-xs font-medium mr-2";
-btn.textContent="→Vis";
-btn.title="Retrograder en Visiteur";
-btn.onclick=function(e){
-e.stopPropagation();
-if(confirm("Retrograder "+uname+" en Visiteur (lecture seule)?")){
-firebase.database().ref("sessions/"+sc+"/users/"+uname).update({role:"visiteur"});
-}};
-}else if(role==="visiteur"){
-btn.className="btn-role px-2 py-1 bg-green-600 hover:bg-green-500 rounded text-xs font-medium mr-2";
+btn.style.marginRight="8px";
+if(userRole==="visiteur"){
+btn.className="px-2 py-1 bg-green-600 hover:bg-green-500 rounded text-xs font-medium";
 btn.textContent="→Sec";
-btn.title="Promouvoir en Secretaire";
 btn.onclick=function(e){
 e.stopPropagation();
-if(confirm("Promouvoir "+uname+" en Secretaire?")){
-firebase.database().ref("sessions/"+sc+"/users/"+uname).update({role:"secretaire"});
+if(confirm("Promouvoir "+userName+" en Secretaire?")){
+firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"secretaire"});
+}};
+}else if(userRole==="secretaire"){
+btn.className="px-2 py-1 bg-orange-600 hover:bg-orange-500 rounded text-xs font-medium";
+btn.textContent="→Vis";
+btn.onclick=function(e){
+e.stopPropagation();
+if(confirm("Retrograder "+userName+" en Visiteur?")){
+firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"visiteur"});
 }};
 }else{return;}
 ejectBtn.parentElement.insertBefore(btn,ejectBtn);
 });
-el.dataset.rolePatched="1";
-});
 }
 
-// Initialisation
-setTimeout(listenForEjection,500);
-setTimeout(applyVisitorRestrictions,800);
-setTimeout(listenRoleChanges,1000);
-setTimeout(watchNewVisitors,1500);
-setTimeout(addRoleButtons,2000);
-setInterval(applyVisitorRestrictions,2000);
-setInterval(addRoleButtons,3000);
+setTimeout(checkEjection,500);
+setTimeout(applyRestrictions,800);
+setTimeout(listenRole,1000);
+setTimeout(addPanelButtons,1500);
+setInterval(applyRestrictions,3000);
+setInterval(addPanelButtons,2000);
 })();
 // === FIN PATCH ===
 </script>
