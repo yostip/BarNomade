@@ -110,50 +110,32 @@ Total actuel : ${i.totalMontant.toFixed(2)}\u20AC (${i.nbVentes} PAD)`))return;c
 
 // === PATCH VISITEUR/SECRETAIRE ===
 (function(){
-var ejectionChecked=false;
+console.log("[PATCH] Initialisation...");
 
-// Detecter ejection
-function checkEjection(){
-var sc=localStorage.getItem("gestionFuts_session");
-var cu=localStorage.getItem("gestionFuts_userName");
-if(!sc||!cu||ejectionChecked)return;
-firebase.database().ref("sessions/"+sc+"/users/"+cu).once("value",function(snap){
-if(snap.exists()){
-ejectionChecked=true;
-firebase.database().ref("sessions/"+sc+"/users/"+cu).on("value",function(s){
-if(!s.exists()&&ejectionChecked){
-alert("Vous avez ete deconnecte.");
-localStorage.removeItem("gestionFuts_session");
-localStorage.removeItem("gestionFuts_userName");
-localStorage.removeItem("gestionFuts_isAdmin");
-localStorage.removeItem("gestionFuts_isCreator");
-localStorage.removeItem("gestionFuts_backups");
-location.href=location.pathname;
-}});
-}});
-}
+// Variables globales
+var myRole=null;
+var ejectionActive=false;
 
-// Appliquer restrictions visiteur
-function applyRestrictions(){
+// 1. RESTRICTIONS VISITEUR
+function applyVisitorRestrictions(){
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
 if(!sc||!cu)return;
 firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").once("value",function(snap){
 var role=snap.val()||"visiteur";
-window._currentRole=role;
+console.log("[PATCH] Role actuel:",role);
 if(role==="visiteur"){
 localStorage.setItem("gestionFuts_isAdmin","false");
 document.querySelectorAll("button").forEach(function(b){
 var t=b.textContent||"";
 if(t.indexOf("Admin")>-1||t.indexOf("Fût")>-1||t.indexOf("Vente")>-1||t.indexOf("Bénévole")>-1||t.indexOf("bénévole")>-1){
 b.style.setProperty("display","none","important");
-}
-});
+}});
 document.querySelectorAll("button").forEach(function(b){
-if((b.className||"").indexOf("bg-green-600")>-1||(b.className||"").indexOf("bg-neutral-700")>-1){
-if(b.querySelector("svg")||b.textContent.trim()===""){
+var c=b.className||"";
+if((c.indexOf("bg-green-600")>-1||c.indexOf("bg-neutral-700")>-1)&&(b.querySelector("svg")||b.textContent.trim()==="")){
 b.style.setProperty("display","none","important");
-}}});
+}});
 document.querySelectorAll("div").forEach(function(d){
 var c=d.className||"";
 var t=d.textContent||"";
@@ -165,100 +147,123 @@ localStorage.setItem("gestionFuts_isAdmin","true");
 }});
 }
 
-// Ecouter changement de role EN CONTINU
-function listenRole(){
+// 2. ECOUTER CHANGEMENTS DE ROLE (pour visiteur/secretaire)
+function listenRoleChanges(){
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
 if(!sc||!cu)return;
+console.log("[PATCH] Ecoute des changements de role...");
 firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").on("value",function(snap){
-var role=snap.val()||"visiteur";
-var oldRole=window._currentRole;
-if(oldRole&&role!==oldRole){
-if(role==="secretaire"){
-alert("Vous avez ete promu Secretaire! La page va se recharger.");
+var newRole=snap.val()||"visiteur";
+console.log("[PATCH] Role recu:",newRole,"ancien:",myRole);
+if(myRole!==null&&newRole!==myRole){
+console.log("[PATCH] Changement detecte!");
+if(newRole==="secretaire"){
+alert("Felicitations! Vous avez ete promu Secretaire. La page va se recharger.");
 localStorage.setItem("gestionFuts_isAdmin","true");
-setTimeout(function(){location.reload();},100);
-}else if(role==="visiteur"){
-alert("Vous etes maintenant Visiteur. La page va se recharger.");
+}else if(newRole==="visiteur"){
+alert("Vous avez ete retrogade en Visiteur. La page va se recharger.");
 localStorage.setItem("gestionFuts_isAdmin","false");
-setTimeout(function(){location.reload();},100);
 }
+setTimeout(function(){location.reload();},200);
+return;
 }
-window._currentRole=role;
+myRole=newRole;
 });
 }
 
-// Boutons dans panel (admin seulement)
+// 3. DETECTER EJECTION
+function listenEjection(){
+var sc=localStorage.getItem("gestionFuts_session");
+var cu=localStorage.getItem("gestionFuts_userName");
+if(!sc||!cu)return;
+firebase.database().ref("sessions/"+sc+"/users/"+cu).on("value",function(snap){
+if(ejectionActive&&!snap.exists()){
+alert("Vous avez ete deconnecte de la session.");
+localStorage.removeItem("gestionFuts_session");
+localStorage.removeItem("gestionFuts_userName");
+localStorage.removeItem("gestionFuts_isAdmin");
+localStorage.removeItem("gestionFuts_isCreator");
+localStorage.removeItem("gestionFuts_backups");
+location.href=location.pathname;
+}
+if(snap.exists())ejectionActive=true;
+});
+}
+
+// 4. BOUTONS PANEL SESSION (pour admin/superadmin)
 function addPanelButtons(){
 var sc=localStorage.getItem("gestionFuts_session");
 if(!sc)return;
 var isAdm=localStorage.getItem("gestionFuts_isAdmin")==="true";
 var isCr=localStorage.getItem("gestionFuts_isCreator")==="true";
 if(!isAdm&&!isCr)return;
+
 document.querySelectorAll('[class*="bg-neutral-800 px-3 py-2 rounded"]').forEach(function(el){
-if(el.dataset.btnAdded)return;
-el.dataset.btnAdded="1";
+if(el.dataset.roleBtn)return;
+el.dataset.roleBtn="1";
+
 var txt=el.textContent||"";
 if(txt.indexOf("(vous)")>-1)return;
 if(txt.indexOf("Super Admin")>-1)return;
+
+// Determiner le role depuis le badge
 var userRole=null;
 if(txt.indexOf("Visiteur")>-1)userRole="visiteur";
-if(txt.indexOf("Secréta")>-1||txt.indexOf("Secreta")>-1||txt.indexOf("créta")>-1)userRole="secretaire";
-var match=txt.match(/^[●•]?\s*([A-Za-z0-9àâäéèêëïîôùûüç_\-\s]+)/);
-var userName=match?match[1].trim().split(" ")[0]:"";
+if(txt.indexOf("Secr")>-1)userRole="secretaire";
+if(txt.indexOf("Admin")>-1&&txt.indexOf("Super")===-1&&txt.indexOf("Visiteur")===-1)userRole="admin";
+
+console.log("[PANEL] User:",txt.substring(0,30),"Role detecte:",userRole);
+
+if(!userRole||userRole==="admin")return;
+
+// Extraire le nom
+var parts=txt.split(/[👁📝🔐👑●•]/);
+var userName=parts[0].trim();
 if(!userName)return;
-if(txt.indexOf("Admin")>-1&&txt.indexOf("Super")===-1&&txt.indexOf("Visiteur")===-1&&txt.indexOf("Secr")===-1)return;
+
 var ejectBtn=el.querySelector('button[class*="bg-red-600"]');
-if(!ejectBtn)return;
-if(el.querySelector(".role-btn"))return;
+if(!ejectBtn||!ejectBtn.parentElement)return;
+
 var btn=document.createElement("button");
-btn.className="role-btn";
-btn.style.marginRight="8px";
-btn.style.padding="4px 8px";
-btn.style.borderRadius="4px";
-btn.style.fontSize="12px";
-btn.style.fontWeight="500";
-btn.style.cursor="pointer";
+btn.style.cssText="margin-right:8px;padding:4px 8px;border-radius:4px;font-size:12px;font-weight:500;cursor:pointer;border:none;color:white;";
+
 if(userRole==="visiteur"){
 btn.style.backgroundColor="#16a34a";
 btn.textContent="→Sec";
 btn.title="Promouvoir en Secretaire";
-btn.onmouseover=function(){btn.style.backgroundColor="#22c55e";};
-btn.onmouseout=function(){btn.style.backgroundColor="#16a34a";};
 btn.onclick=function(e){
 e.stopPropagation();
 if(confirm("Promouvoir "+userName+" en Secretaire?")){
 firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"secretaire"});
-el.dataset.btnAdded="";
+alert(userName+" a ete promu Secretaire.");
 }};
-ejectBtn.parentElement.insertBefore(btn,ejectBtn);
 }else if(userRole==="secretaire"){
 btn.style.backgroundColor="#ea580c";
 btn.textContent="→Vis";
 btn.title="Retrograder en Visiteur";
-btn.onmouseover=function(){btn.style.backgroundColor="#f97316";};
-btn.onmouseout=function(){btn.style.backgroundColor="#ea580c";};
 btn.onclick=function(e){
 e.stopPropagation();
 if(confirm("Retrograder "+userName+" en Visiteur?")){
 firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"visiteur"});
-el.dataset.btnAdded="";
+alert(userName+" a ete retrograde en Visiteur.");
 }};
-ejectBtn.parentElement.insertBefore(btn,ejectBtn);
 }
+
+ejectBtn.parentElement.insertBefore(btn,ejectBtn);
 });
 }
 
-// Init
-setTimeout(checkEjection,500);
+// INIT
 setTimeout(function(){
-applyRestrictions();
-window._currentRole=window._currentRole||null;
-},600);
-setTimeout(listenRole,800);
+applyVisitorRestrictions();
+listenRoleChanges();
+listenEjection();
+},500);
 setTimeout(addPanelButtons,1500);
-setInterval(applyRestrictions,3000);
-setInterval(addPanelButtons,2000);
+setInterval(applyVisitorRestrictions,3000);
+setInterval(addPanelButtons,2500);
+
 })();
 // === FIN PATCH ===
 </script>
