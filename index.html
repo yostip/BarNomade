@@ -1,6 +1,24 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
+<style id="visitor-preload-css">
+/* Mode visiteur - éléments cachés IMMEDIATEMENT au chargement */
+html.visitor-mode-preload button[class*="bg-green-600"],
+html.visitor-mode-preload button[class*="bg-neutral-700"] { display: none !important; }
+html.visitor-mode-preload div[class*="grid-cols-3"] { display: none !important; }
+</style>
+<script>
+// Verification IMMEDIATE avant React
+(function(){
+  var isAdmin = localStorage.getItem("gestionFuts_isAdmin") === "true";
+  var isCreator = localStorage.getItem("gestionFuts_isCreator") === "true";
+  var session = localStorage.getItem("gestionFuts_session");
+  if (session && !isAdmin && !isCreator) {
+    document.documentElement.classList.add("visitor-mode-preload");
+  }
+})();
+</script>
+
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -178,7 +196,7 @@ if(!sc||!cu)return;
 firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").once("value",function(snap){
 var role=snap.val()||"visiteur";
 if(role==="visiteur"){
-localStorage.setItem("gestionFuts_isAdmin","false");
+localStorage.setItem("gestionFuts_isAdmin","false");document.documentElement.classList.add("visitor-mode-preload");
 document.querySelectorAll("button").forEach(function(b){
 var t=b.textContent||"";
 if(t.indexOf("Admin")>-1||t.indexOf("Fût")>-1||t.indexOf("Vente")>-1||t.indexOf("Bénévole")>-1||t.indexOf("bénévole")>-1){
@@ -196,7 +214,7 @@ if(c.indexOf("grid-cols-3")>-1&&(t.indexOf("Vides")>-1||t.indexOf("Cassé")>-1))
 d.style.setProperty("display","none","important");
 }});
 }else{
-localStorage.setItem("gestionFuts_isAdmin","true");
+localStorage.setItem("gestionFuts_isAdmin","true");document.documentElement.classList.remove("visitor-mode-preload");
 }});
 }
 
