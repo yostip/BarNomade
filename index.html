@@ -111,9 +111,10 @@ Total actuel : ${i.totalMontant.toFixed(2)}\u20AC (${i.nbVentes} PAD)`))return;c
 
 
 
-// === PATCH ROLES V5 ===
+
+// === PATCH ROLES V6 ===
 (function(){
-console.log("[PATCH V5] Init");
+console.log("[PATCH V6] Init");
 
 // Indicateur connexion
 function addConnIndicator(){
@@ -141,7 +142,6 @@ var isAdm=localStorage.getItem("gestionFuts_isAdmin")==="true";
 var isCr=localStorage.getItem("gestionFuts_isCreator")==="true";
 if(!sc)return;
 
-// Chercher les lignes utilisateur (div avec point vert + nom)
 var userRows=document.querySelectorAll('div.flex.items-center.justify-between.bg-neutral-800.px-3.py-2.rounded');
 if(userRows.length===0)return;
 
@@ -154,7 +154,6 @@ var txt=row.textContent||"";
 if(txt.indexOf("(vous)")>-1)return;
 if(row.dataset.patchDone==="1")return;
 
-// Trouver le nom de l'utilisateur
 var userName=null;
 for(var name in users){
 if(name!==cu&&txt.indexOf(name)>-1&&txt.indexOf(name)===txt.search(name)){
@@ -168,7 +167,6 @@ var userData=users[userName]||{};
 var userRole=userData.role||"visiteur";
 row.dataset.patchDone="1";
 
-// 1. Ajouter le badge de rôle
 var nameSpan=row.querySelector("div.flex.items-center.gap-2 > span");
 if(nameSpan&&!row.querySelector(".roleBadge")){
 var badge=document.createElement("span");
@@ -192,7 +190,6 @@ nameSpan.after(badge);
 }
 }
 
-// 2. Ajouter bouton promotion/rétrogradation (si admin ou créateur)
 if((isAdm||isCr)&&userRole!=="superadmin"&&userRole!=="admin"){
 var ejectBtn=row.querySelector("button");
 if(ejectBtn&&!row.querySelector(".promoBtn")){
@@ -207,7 +204,6 @@ ev.stopPropagation();
 if(confirm("Promouvoir "+userName+" en Secrétaire?")){
 firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"secretaire"});
 row.dataset.patchDone="";
-setTimeout(function(){location.reload();},500);
 }
 };
 }else if(userRole==="secretaire"){
@@ -218,7 +214,6 @@ ev.stopPropagation();
 if(confirm("Rétrograder "+userName+" en Visiteur?")){
 firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"visiteur"});
 row.dataset.patchDone="";
-setTimeout(function(){location.reload();},500);
 }
 };
 }
@@ -229,91 +224,128 @@ ejectBtn.before(btn);
 });
 }
 
-// Restrictions visiteur
+// Restrictions visiteur - CACHER TOUS LES BOUTONS NON AUTORISÉS
 function applyVisitorRestrictions(){
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
-var isAdm=localStorage.getItem("gestionFuts_isAdmin");
-var isCr=localStorage.getItem("gestionFuts_isCreator");
+if(!sc||!cu)return;
 
-// Si explicitement NON admin et NON créateur
-if(sc&&cu&&isAdm==="false"&&isCr!=="true"){
-// Cacher boutons Fût et Vente dans la barre du bas
+// Lire le rôle depuis Firebase (source de vérité)
+firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").once("value").then(function(snap){
+var role=snap.val()||"visiteur";
+
+if(role==="visiteur"){
+// Mettre à jour localStorage pour cohérence
+localStorage.setItem("gestionFuts_isAdmin","false");
+
+// 1. Cacher bouton "Admin" (contient le texte Admin)
 document.querySelectorAll("button").forEach(function(b){
-var t=(b.textContent||"").toLowerCase();
-if(t.indexOf("fût")>-1||t.indexOf("vente")>-1){
+var t=b.textContent||"";
+if(t.indexOf("Admin")>-1&&t.indexOf("Super")===-1){
 b.style.setProperty("display","none","important");
 }
 });
-// Cacher les boutons avec icônes (export, paramètres)
-document.querySelectorAll("button.bg-green-600, button.bg-neutral-700").forEach(function(b){
-if(b.querySelector("svg")){
+
+// 2. Cacher boutons Fût et Vente
+document.querySelectorAll("button").forEach(function(b){
+var t=b.textContent||"";
+if(t.indexOf("Fût")>-1||t.indexOf("Vente")>-1){
 b.style.setProperty("display","none","important");
 }
 });
-// Cacher le bouton Bénévoles
+
+// 3. Cacher boutons avec SVG (export vert, paramètres gris)
+document.querySelectorAll("button").forEach(function(b){
+if(b.querySelector("svg")&&!b.closest(".fixed")){
+var cls=b.className||"";
+if(cls.indexOf("bg-green-600")>-1||cls.indexOf("bg-neutral-700")>-1){
+b.style.setProperty("display","none","important");
+}
+}
+});
+
+// 4. Cacher bouton Bénévoles
 document.querySelectorAll("button").forEach(function(b){
 var t=(b.textContent||"").toLowerCase();
 if(t.indexOf("bénévole")>-1||t.indexOf("benevole")>-1){
 b.style.setProperty("display","none","important");
 }
 });
-// Cacher les compteurs
-document.querySelectorAll("div.grid.grid-cols-3").forEach(function(d){
+
+// 5. Cacher les compteurs (Vides, Cassé, Réutil)
+document.querySelectorAll("div").forEach(function(d){
+var cls=d.className||"";
 var t=d.textContent||"";
-if(t.indexOf("Vide")>-1||t.indexOf("Cassé")>-1){
+if(cls.indexOf("grid-cols-3")>-1&&(t.indexOf("Vide")>-1||t.indexOf("Cassé")>-1||t.indexOf("Réutil")>-1)){
 d.style.setProperty("display","none","important");
 }
 });
+
+}else{
+// Secrétaire ou plus : s'assurer que isAdmin est true
+localStorage.setItem("gestionFuts_isAdmin","true");
 }
+});
 }
 
-// Polling changement de rôle
-var lastRole=null;
-var roleInitialized=false;
-function pollRoleChange(){
+// Écouter les changements de rôle EN TEMPS RÉEL
+function listenRoleChanges(){
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
 if(!sc||!cu)return;
 
-firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").once("value").then(function(snap){
+var firstLoad=true;
+firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").on("value",function(snap){
 var role=snap.val();
 if(!role)return;
-if(!roleInitialized){lastRole=role;roleInitialized=true;return;}
-if(lastRole&&role!==lastRole){
-var msg="Votre rôle a changé: "+role;
-if(role==="secretaire")msg="Vous avez été promu Secrétaire!";
-if(role==="visiteur")msg="Vous êtes maintenant Visiteur.";
-alert(msg);
-// Mettre à jour localStorage selon le nouveau rôle
+
+if(firstLoad){
+firstLoad=false;
+// Au premier chargement, mettre à jour localStorage selon le rôle Firebase
 if(role==="visiteur"){
 localStorage.setItem("gestionFuts_isAdmin","false");
 }else{
 localStorage.setItem("gestionFuts_isAdmin","true");
 }
-location.reload();
+applyVisitorRestrictions();
+return;
 }
-lastRole=role;
+
+// Changement de rôle détecté !
+var msg="Votre rôle a changé.";
+if(role==="secretaire")msg="🎉 Vous avez été promu Secrétaire!";
+if(role==="visiteur")msg="Vous êtes maintenant Visiteur.";
+if(role==="admin")msg="Vous êtes maintenant Admin.";
+
+// Mettre à jour localStorage AVANT de recharger
+if(role==="visiteur"){
+localStorage.setItem("gestionFuts_isAdmin","false");
+}else{
+localStorage.setItem("gestionFuts_isAdmin","true");
+}
+
+alert(msg);
+location.reload();
 });
 }
 
-// Observer le DOM pour détecter l'ouverture du panel
-var observer=new MutationObserver(function(mutations){
+// Observer le DOM
+var observer=new MutationObserver(function(){
 processSessionPanel();
+applyVisitorRestrictions();
 });
 
 // Init
 setTimeout(function(){
 addConnIndicator();
+listenRoleChanges();
 applyVisitorRestrictions();
 processSessionPanel();
-pollRoleChange();
 observer.observe(document.body,{childList:true,subtree:true});
 },800);
 
-setInterval(applyVisitorRestrictions,2000);
 setInterval(processSessionPanel,1500);
-setInterval(pollRoleChange,2000);
+setInterval(applyVisitorRestrictions,1000);
 })();
 // === FIN PATCH ===
 </script>
