@@ -109,189 +109,197 @@ Total actuel : ${i.totalMontant.toFixed(2)}\u20AC (${i.nbVentes} PAD)`))return;c
 
 
 
-// === PATCH GESTION ROLES V3 ===
+
+// === PATCH ROLES V4 ===
 (function(){
-var patchInitialized=false;
-var lastKnownRole=null;
-var isInSession=false;
+console.log("[PATCH] Initialisation...");
 
-// Attendre que l'utilisateur soit vraiment dans une session
-function waitForSession(callback){
-var check=setInterval(function(){
-var sc=localStorage.getItem("gestionFuts_session");
-var cu=localStorage.getItem("gestionFuts_userName");
-// Vérifier qu'on a les infos ET qu'on est sur l'écran principal (pas l'écran de login)
-var mainScreen=document.querySelector('[class*="min-h-screen bg-black"]');
-var sessionPanel=document.querySelector('[class*="bg-neutral-900"]');
-if(sc&&cu&&sessionPanel){
-clearInterval(check);
-isInSession=true;
-callback();
-}
-},500);
-// Timeout après 10 secondes
-setTimeout(function(){clearInterval(check);},10000);
-}
-
-// Indicateur de connexion
-function createConnectionIndicator(){
-if(document.getElementById("conn-ind"))return;
+// Indicateur connexion
+function addConnIndicator(){
+if(document.getElementById("patchConn"))return;
 var d=document.createElement("div");
-d.id="conn-ind";
+d.id="patchConn";
 d.style.cssText="position:fixed;top:8px;left:8px;z-index:9999;padding:4px 8px;border-radius:12px;font-size:11px;font-weight:600;display:flex;align-items:center;gap:4px;background:rgba(22,163,74,0.2);border:1px solid rgba(22,163,74,0.5);";
 d.innerHTML='<span style="width:8px;height:8px;border-radius:50%;background:#22c55e;"></span><span style="color:#22c55e;">En ligne</span>';
 document.body.appendChild(d);
-firebase.database().ref(".info/connected").on("value",function(snap){
-var on=snap.val()===true;
+try{
+firebase.database().ref(".info/connected").on("value",function(s){
+var on=s.val()===true;
 d.style.background=on?"rgba(22,163,74,0.2)":"rgba(220,38,38,0.2)";
 d.style.borderColor=on?"rgba(22,163,74,0.5)":"rgba(220,38,38,0.5)";
 d.innerHTML=on?'<span style="width:8px;height:8px;border-radius:50%;background:#22c55e;"></span><span style="color:#22c55e;">En ligne</span>':'<span style="width:8px;height:8px;border-radius:50%;background:#ef4444;"></span><span style="color:#ef4444;">Hors ligne</span>';
 });
+}catch(e){}
 }
 
-// Restrictions visiteur (ne modifie PAS isAdmin du localStorage)
-function applyVisitorRestrictions(){
-if(!isInSession)return;
-var sc=localStorage.getItem("gestionFuts_session");
-var cu=localStorage.getItem("gestionFuts_userName");
-if(!sc||!cu)return;
-firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").once("value",function(snap){
-var role=snap.val()||"visiteur";
-if(role==="visiteur"){
-document.querySelectorAll("button").forEach(function(b){
-var t=b.textContent||"";
-if(t.indexOf("Fût")>-1||t.indexOf("Vente")>-1||t.indexOf("bénévole")>-1||t.indexOf("Bénévole")>-1){
-b.style.setProperty("display","none","important");
-}});
-}
-});
-}
-
-// Polling changement de rôle
-function checkRoleChange(){
-if(!isInSession)return;
-var sc=localStorage.getItem("gestionFuts_session");
-var cu=localStorage.getItem("gestionFuts_userName");
-if(!sc||!cu)return;
-firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").once("value",function(snap){
-var newRole=snap.val();
-if(!newRole)return; // Ne pas réagir si pas de rôle défini
-if(!patchInitialized){lastKnownRole=newRole;patchInitialized=true;return;}
-if(lastKnownRole&&newRole!==lastKnownRole){
-var msg=newRole==="secretaire"?"Vous avez ete promu Secretaire!":newRole==="visiteur"?"Vous avez ete retrograde en Visiteur.":newRole==="admin"?"Vous etes maintenant Admin.":"Role mis a jour.";
-alert(msg);
-location.reload();
-}
-lastKnownRole=newRole;
-});
-}
-
-// Éjection (seulement si vraiment éjecté par un admin)
-function listenEjection(){
-if(!isInSession)return;
-var sc=localStorage.getItem("gestionFuts_session");
-var cu=localStorage.getItem("gestionFuts_userName");
-if(!sc||!cu)return;
-// D'abord vérifier que l'utilisateur existe
-firebase.database().ref("sessions/"+sc+"/users/"+cu).once("value",function(snap){
-if(!snap.exists())return; // L'utilisateur n'existe pas encore, ne pas écouter
-// L'utilisateur existe, maintenant écouter les changements
-firebase.database().ref("sessions/"+sc+"/users/"+cu).on("value",function(snap2){
-if(patchInitialized&&!snap2.exists()){
-alert("Vous avez ete deconnecte de la session.");
-localStorage.removeItem("gestionFuts_session");
-localStorage.removeItem("gestionFuts_userName");
-localStorage.removeItem("gestionFuts_isAdmin");
-localStorage.removeItem("gestionFuts_isCreator");
-location.href=location.pathname;
-}
-});
-});
-}
-
-// Boutons promotion/rétrogradation
+// Ajouter les boutons de rôle
 function addRoleButtons(){
-if(!isInSession)return;
 var sc=localStorage.getItem("gestionFuts_session");
-if(!sc)return;
+var cu=localStorage.getItem("gestionFuts_userName");
 var isAdm=localStorage.getItem("gestionFuts_isAdmin")==="true";
 var isCr=localStorage.getItem("gestionFuts_isCreator")==="true";
-if(!isAdm&&!isCr)return;
-var cu=localStorage.getItem("gestionFuts_userName");
+if(!sc||!cu||(!isAdm&&!isCr))return;
 
-firebase.database().ref("sessions/"+sc+"/users").once("value",function(usersSnap){
+// Récupérer les utilisateurs depuis Firebase
+firebase.database().ref("sessions/"+sc+"/users").once("value").then(function(snap){
 var users={};
-usersSnap.forEach(function(child){users[child.key]=child.val();});
+snap.forEach(function(c){users[c.key]=c.val();});
 
-document.querySelectorAll('[class*="bg-neutral-800"][class*="px-3"][class*="py-2"][class*="rounded"]').forEach(function(el){
-if(el.dataset.roleBtnDone)return;
+// Trouver tous les éléments utilisateur dans le panel
+document.querySelectorAll(".bg-neutral-800.px-3.py-2.rounded").forEach(function(el){
 var txt=el.textContent||"";
 if(txt.indexOf("(vous)")>-1)return;
+if(el.querySelector(".patchBtn"))return;
 
-// Trouver le nom utilisateur
-var userName=null;
+// Trouver quel utilisateur c'est
+var foundUser=null;
+var foundRole=null;
 for(var name in users){
-if(txt.indexOf(name)>-1&&name!==cu){
-userName=name;
+if(name!==cu&&txt.indexOf(name)>-1){
+foundUser=name;
+foundRole=users[name].role||"visiteur";
 break;
-}}
-if(!userName)return;
+}
+}
+if(!foundUser)return;
+if(foundRole==="superadmin"||foundRole==="admin")return;
 
-var userData=users[userName];
-if(!userData)return;
-var userRole=userData.role||"visiteur";
-// Ne pas ajouter de bouton pour les admins et super admins
-if(userRole==="superadmin"||userRole==="admin")return;
-
-el.dataset.roleBtnDone="1";
-
+// Créer le bouton
 var btn=document.createElement("button");
-btn.style.cssText="margin-left:8px;padding:4px 8px;border-radius:4px;font-size:12px;font-weight:500;cursor:pointer;border:none;color:white;";
+btn.className="patchBtn";
+btn.style.cssText="margin-left:auto;margin-right:4px;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:none;color:white;";
 
-if(userRole==="visiteur"){
-btn.style.backgroundColor="#16a34a";
+if(foundRole==="visiteur"){
+btn.style.background="#16a34a";
 btn.textContent="→Sec";
-btn.onclick=function(e){
-e.stopPropagation();
-if(confirm("Promouvoir "+userName+" en Secretaire?")){
-firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"secretaire"});
-el.dataset.roleBtnDone="";
-}};
-}else if(userRole==="secretaire"){
-btn.style.backgroundColor="#ea580c";
+btn.onclick=function(ev){
+ev.stopPropagation();
+if(confirm("Promouvoir "+foundUser+" en Secrétaire?")){
+firebase.database().ref("sessions/"+sc+"/users/"+foundUser).update({role:"secretaire"}).then(function(){
+alert(foundUser+" est maintenant Secrétaire.");
+location.reload();
+});
+}
+};
+}else{
+btn.style.background="#ea580c";
 btn.textContent="→Vis";
-btn.onclick=function(e){
-e.stopPropagation();
-if(confirm("Retrograder "+userName+" en Visiteur?")){
-firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"visiteur"});
-el.dataset.roleBtnDone="";
-}};
+btn.onclick=function(ev){
+ev.stopPropagation();
+if(confirm("Rétrograder "+foundUser+" en Visiteur?")){
+firebase.database().ref("sessions/"+sc+"/users/"+foundUser).update({role:"visiteur"}).then(function(){
+alert(foundUser+" est maintenant Visiteur.");
+location.reload();
+});
+}
+};
 }
 
-var ejectBtn=el.querySelector('button[class*="bg-red"]');
+// Insérer avant le bouton éjecter s'il existe
+var ejectBtn=el.querySelector("button");
 if(ejectBtn){
-ejectBtn.parentElement.insertBefore(btn,ejectBtn);
+ejectBtn.before(btn);
 }else{
+el.style.display="flex";
+el.style.alignItems="center";
 el.appendChild(btn);
 }
 });
 });
 }
 
-// Init
-function init(){
-createConnectionIndicator();
-waitForSession(function(){
-applyVisitorRestrictions();
-checkRoleChange();
-listenEjection();
-addRoleButtons();
-setInterval(applyVisitorRestrictions,3000);
-setInterval(checkRoleChange,2000);
-setInterval(addRoleButtons,2000);
+// Ajouter les badges de rôle
+function addRoleBadges(){
+var sc=localStorage.getItem("gestionFuts_session");
+if(!sc)return;
+
+firebase.database().ref("sessions/"+sc+"/users").once("value").then(function(snap){
+var users={};
+snap.forEach(function(c){users[c.key]=c.val();});
+
+document.querySelectorAll(".bg-neutral-800.px-3.py-2.rounded").forEach(function(el){
+if(el.querySelector(".patchBadge"))return;
+var txt=el.textContent||"";
+
+for(var name in users){
+if(txt.indexOf(name)>-1){
+var role=users[name].role||"visiteur";
+var badge="";
+var color="";
+if(role==="visiteur"){badge="👁 Visiteur";color="#6b7280";}
+else if(role==="secretaire"){badge="📝 Secrétaire";color="#3b82f6";}
+else if(role==="admin"){badge="🔐 Admin";color="#22c55e";}
+else if(role==="superadmin"){badge="👑 Super Admin";color="#ef4444";}
+
+if(badge&&txt.indexOf(badge)===-1){
+var span=document.createElement("span");
+span.className="patchBadge";
+span.style.cssText="margin-left:6px;font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(0,0,0,0.3);color:"+color+";";
+span.textContent=badge;
+var firstChild=el.firstChild;
+if(firstChild&&firstChild.nodeType===1){
+firstChild.after(span);
+}else{
+el.insertBefore(span,el.firstChild.nextSibling);
+}
+}
+break;
+}
+}
+});
 });
 }
-setTimeout(init,500);
+
+// Restrictions visiteur
+function hideForVisitor(){
+var sc=localStorage.getItem("gestionFuts_session");
+var cu=localStorage.getItem("gestionFuts_userName");
+if(!sc||!cu)return;
+
+firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").once("value").then(function(snap){
+var role=snap.val();
+if(role==="visiteur"){
+document.querySelectorAll("button").forEach(function(b){
+var t=b.textContent||"";
+if(t.indexOf("Fût")>-1||t.indexOf("Vente")>-1){
+b.style.display="none";
+}
+});
+}
+});
+}
+
+// Polling pour détecter les changements de rôle
+var lastRole=null;
+function pollRoleChange(){
+var sc=localStorage.getItem("gestionFuts_session");
+var cu=localStorage.getItem("gestionFuts_userName");
+if(!sc||!cu)return;
+
+firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").once("value").then(function(snap){
+var role=snap.val();
+if(lastRole===null){lastRole=role;return;}
+if(role&&lastRole&&role!==lastRole){
+alert(role==="secretaire"?"Vous êtes maintenant Secrétaire!":"Votre rôle a changé.");
+location.reload();
+}
+lastRole=role;
+});
+}
+
+// Lancer tout
+setTimeout(function(){
+addConnIndicator();
+addRoleBadges();
+addRoleButtons();
+hideForVisitor();
+pollRoleChange();
+},1000);
+
+setInterval(addRoleBadges,2000);
+setInterval(addRoleButtons,2000);
+setInterval(hideForVisitor,3000);
+setInterval(pollRoleChange,2000);
 })();
 // === FIN PATCH ===
 </script>
