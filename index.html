@@ -113,9 +113,14 @@ Total actuel : ${i.totalMontant.toFixed(2)}\u20AC (${i.nbVentes} PAD)`))return;c
 
 
 
-// === PATCH ROLES V7 ===
+
+// === PATCH ROLES V8 ===
 (function(){
-console.log("[PATCH V7] Init");
+console.log("[PATCH V8] Démarrage...");
+
+var currentRole=null;
+var ejectionListenerSet=false;
+var roleListenerSet=false;
 
 // Indicateur connexion
 function addConnIndicator(){
@@ -132,18 +137,83 @@ d.style.background=on?"rgba(22,163,74,0.2)":"rgba(220,38,38,0.2)";
 d.style.borderColor=on?"rgba(22,163,74,0.5)":"rgba(220,38,38,0.5)";
 d.innerHTML=on?'<span style="width:8px;height:8px;border-radius:50%;background:#22c55e;"></span><span style="color:#22c55e;">En ligne</span>':'<span style="width:8px;height:8px;border-radius:50%;background:#ef4444;"></span><span style="color:#ef4444;">Hors ligne</span>';
 });
-}catch(e){}
+}catch(e){console.log("[PATCH] Erreur indicateur:",e);}
 }
 
-// Panel session - badges et boutons
+// RESTRICTIONS VISITEUR
+function applyVisitorRestrictions(){
+var sc=localStorage.getItem("gestionFuts_session");
+var cu=localStorage.getItem("gestionFuts_userName");
+if(!sc||!cu)return;
+
+// Vérifier le rôle dans Firebase
+firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").once("value").then(function(snap){
+var role=snap.val()||"visiteur";
+console.log("[PATCH] Rôle actuel:",role);
+
+if(role==="visiteur"){
+localStorage.setItem("gestionFuts_isAdmin","false");
+
+// MÉTHODE SIMPLE: Cacher par le texte du bouton ou la présence de SVG
+var allButtons=document.querySelectorAll("button");
+allButtons.forEach(function(btn){
+var text=(btn.textContent||"").trim();
+var hasSvg=btn.querySelector("svg")!==null;
+var classes=btn.getAttribute("class")||"";
+
+// 1. Bouton "Admin" (pas Super Admin)
+if(text.indexOf("Admin")>-1&&text.indexOf("Super")===-1){
+btn.style.display="none";
+return;
+}
+
+// 2. Bouton "Bénévoles"
+if(text.toLowerCase().indexOf("bénévole")>-1||text.toLowerCase().indexOf("benevole")>-1){
+btn.style.display="none";
+return;
+}
+
+// 3. Boutons avec SVG uniquement (pas de texte = Export ou Paramètres)
+if(hasSvg&&text.length<3){
+// C'est probablement Export (vert) ou Paramètres (gris)
+btn.style.display="none";
+return;
+}
+
+// 4. Boutons Fût et Vente (dans la barre du bas)
+if(text.indexOf("Fût")>-1||text.indexOf("Vente")>-1){
+btn.style.display="none";
+return;
+}
+});
+
+// Cacher les compteurs (Vides, Cassé, Réutil)
+document.querySelectorAll("div").forEach(function(div){
+var classes=div.getAttribute("class")||"";
+var text=div.textContent||"";
+if(classes.indexOf("grid-cols-3")>-1){
+if(text.indexOf("Vide")>-1&&text.indexOf("Cassé")>-1){
+div.style.display="none";
+}
+}
+});
+
+}else{
+localStorage.setItem("gestionFuts_isAdmin","true");
+}
+}).catch(function(e){console.log("[PATCH] Erreur rôle:",e);});
+}
+
+// PANEL SESSION - Badges et boutons
 function processSessionPanel(){
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
 var isAdm=localStorage.getItem("gestionFuts_isAdmin")==="true";
 var isCr=localStorage.getItem("gestionFuts_isCreator")==="true";
-if(!sc)return;
+if(!sc||(!isAdm&&!isCr))return;
 
-var userRows=document.querySelectorAll('div.flex.items-center.justify-between.bg-neutral-800.px-3.py-2.rounded');
+// Chercher les lignes utilisateur
+var userRows=document.querySelectorAll('div[class*="bg-neutral-800"][class*="px-3"][class*="py-2"][class*="rounded"]');
 if(userRows.length===0)return;
 
 firebase.database().ref("sessions/"+sc+"/users").once("value").then(function(snap){
@@ -153,11 +223,12 @@ snap.forEach(function(c){users[c.key]=c.val();});
 userRows.forEach(function(row){
 var txt=row.textContent||"";
 if(txt.indexOf("(vous)")>-1)return;
-if(row.dataset.patchDone==="1")return;
+if(row.dataset.v8done==="1")return;
 
+// Trouver le nom
 var userName=null;
 for(var name in users){
-if(name!==cu&&txt.indexOf(name)>-1&&txt.indexOf(name)===txt.search(name)){
+if(name!==cu&&txt.indexOf(name)>-1){
 userName=name;
 break;
 }
@@ -166,13 +237,16 @@ if(!userName)return;
 
 var userData=users[userName]||{};
 var userRole=userData.role||"visiteur";
-row.dataset.patchDone="1";
 
-var nameSpan=row.querySelector("div.flex.items-center.gap-2 > span");
-if(nameSpan&&!row.querySelector(".roleBadge")){
+// Marquer comme traité
+row.dataset.v8done="1";
+
+// 1. Badge de rôle
+if(!row.querySelector(".v8badge")){
 var badge=document.createElement("span");
-badge.className="roleBadge";
+badge.className="v8badge";
 badge.style.cssText="margin-left:6px;font-size:10px;padding:2px 6px;border-radius:4px;";
+
 if(userRole==="visiteur"){
 badge.style.background="rgba(107,114,128,0.3)";
 badge.style.color="#9ca3af";
@@ -186,196 +260,152 @@ badge.style.background="rgba(34,197,94,0.3)";
 badge.style.color="#4ade80";
 badge.textContent="🔐 Admin";
 }
+
 if(userRole!=="superadmin"){
-nameSpan.after(badge);
+var nameDiv=row.querySelector("div");
+if(nameDiv){
+var span=nameDiv.querySelector("span");
+if(span)span.after(badge);
+}
 }
 }
 
-// Admin OU Super Admin peuvent promouvoir/rétrograder
-if((isAdm||isCr)&&userRole!=="superadmin"&&userRole!=="admin"){
-var ejectBtn=row.querySelector("button");
-if(ejectBtn&&!row.querySelector(".promoBtn")){
+// 2. Bouton promotion/rétrogradation
+if(!row.querySelector(".v8promo")&&userRole!=="superadmin"&&userRole!=="admin"){
+var existingBtn=row.querySelector("button");
+if(existingBtn){
 var btn=document.createElement("button");
-btn.className="promoBtn";
+btn.className="v8promo";
 btn.style.cssText="margin-right:6px;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:none;color:white;";
+
 if(userRole==="visiteur"){
 btn.style.background="#16a34a";
 btn.textContent="→Sec";
 btn.onclick=function(ev){
 ev.stopPropagation();
 if(confirm("Promouvoir "+userName+" en Secrétaire?")){
-firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"secretaire"});
-row.dataset.patchDone="";
+firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"secretaire"}).then(function(){
+row.dataset.v8done="";
+row.querySelector(".v8badge").remove();
+row.querySelector(".v8promo").remove();
+});
 }
 };
+existingBtn.before(btn);
 }else if(userRole==="secretaire"){
 btn.style.background="#ea580c";
 btn.textContent="→Vis";
 btn.onclick=function(ev){
 ev.stopPropagation();
 if(confirm("Rétrograder "+userName+" en Visiteur?")){
-firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"visiteur"});
-row.dataset.patchDone="";
+firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"visiteur"}).then(function(){
+row.dataset.v8done="";
+row.querySelector(".v8badge").remove();
+row.querySelector(".v8promo").remove();
+});
 }
 };
+existingBtn.before(btn);
 }
-ejectBtn.before(btn);
 }
 }
 });
-});
+}).catch(function(e){console.log("[PATCH] Erreur panel:",e);});
 }
 
-// RESTRICTIONS VISITEUR - Version améliorée
-function applyVisitorRestrictions(){
+// ÉCOUTER ÉJECTION
+function setupEjectionListener(){
+if(ejectionListenerSet)return;
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
 if(!sc||!cu)return;
 
-firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").once("value").then(function(snap){
-var role=snap.val()||"visiteur";
-
-if(role==="visiteur"){
-localStorage.setItem("gestionFuts_isAdmin","false");
-
-// Parcourir TOUS les boutons et cacher ceux non autorisés
-document.querySelectorAll("button").forEach(function(b){
-var t=(b.textContent||"").trim();
-var cls=b.className||"";
-
-// Cacher bouton Admin (mais pas Super Admin)
-if(t.indexOf("Admin")>-1&&t.indexOf("Super")===-1){
-b.style.setProperty("display","none","important");
-return;
-}
-
-// Cacher Fût, Vente, Bénévoles
-if(t.indexOf("Fût")>-1||t.indexOf("Vente")>-1||t.toLowerCase().indexOf("bénévole")>-1||t.toLowerCase().indexOf("benevole")>-1){
-b.style.setProperty("display","none","important");
-return;
-}
-
-// Cacher boutons avec SVG (Export vert, Paramètres gris)
-if(b.querySelector("svg")){
-// Export = bg-green-600, Paramètres = bg-neutral-700
-if(cls.indexOf("bg-green-600")>-1||cls.indexOf("bg-neutral-700")>-1){
-// Ne pas cacher si c'est dans un modal (fixed)
-if(!b.closest(".fixed")){
-b.style.setProperty("display","none","important");
-return;
-}
-}
-}
-});
-
-// Cacher les compteurs
-document.querySelectorAll("div").forEach(function(d){
-var cls=d.className||"";
-var t=d.textContent||"";
-if(cls.indexOf("grid")>-1&&cls.indexOf("grid-cols-3")>-1){
-if(t.indexOf("Vide")>-1||t.indexOf("Cassé")>-1||t.indexOf("Réutil")>-1){
-d.style.setProperty("display","none","important");
-}
-}
-});
-
-}else{
-localStorage.setItem("gestionFuts_isAdmin","true");
-}
-});
-}
-
-// ÉCOUTER ÉJECTION - Nettoyer localStorage quand éjecté
-function listenForEjection(){
-var sc=localStorage.getItem("gestionFuts_session");
-var cu=localStorage.getItem("gestionFuts_userName");
-if(!sc||!cu)return;
-
-var wasConnected=false;
+ejectionListenerSet=true;
+var existed=false;
 
 firebase.database().ref("sessions/"+sc+"/users/"+cu).on("value",function(snap){
 if(snap.exists()){
-wasConnected=true;
-}else if(wasConnected){
-// L'utilisateur existait mais n'existe plus = ÉJECTÉ
+existed=true;
+}else if(existed){
 console.log("[PATCH] Éjection détectée!");
 alert("Vous avez été déconnecté de la session.");
-
-// Nettoyer TOUT le localStorage lié à la session
 localStorage.removeItem("gestionFuts_session");
 localStorage.removeItem("gestionFuts_userName");
 localStorage.removeItem("gestionFuts_isAdmin");
 localStorage.removeItem("gestionFuts_isCreator");
 localStorage.removeItem("gestionFuts_backups");
-
-// Rediriger vers l'accueil
 window.location.href=window.location.pathname;
 }
 });
 }
 
-// Écouter les changements de rôle
-function listenRoleChanges(){
+// ÉCOUTER CHANGEMENT DE RÔLE
+function setupRoleListener(){
+if(roleListenerSet)return;
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
 if(!sc||!cu)return;
 
-var firstLoad=true;
-var currentRole=null;
+roleListenerSet=true;
+var firstCall=true;
 
 firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").on("value",function(snap){
-var role=snap.val();
-if(!role)return;
+var newRole=snap.val();
+console.log("[PATCH] Role listener - newRole:",newRole,"currentRole:",currentRole,"firstCall:",firstCall);
 
-if(firstLoad){
-firstLoad=false;
-currentRole=role;
-if(role==="visiteur"){
+if(!newRole)return;
+
+if(firstCall){
+firstCall=false;
+currentRole=newRole;
+// Mettre à jour localStorage
+if(newRole==="visiteur"){
 localStorage.setItem("gestionFuts_isAdmin","false");
 }else{
 localStorage.setItem("gestionFuts_isAdmin","true");
 }
-applyVisitorRestrictions();
 return;
 }
 
-if(currentRole&&role!==currentRole){
-var msg="Votre rôle a changé.";
-if(role==="secretaire")msg="🎉 Vous avez été promu Secrétaire!";
-if(role==="visiteur")msg="Vous êtes maintenant Visiteur.";
-if(role==="admin")msg="Vous êtes maintenant Admin.";
+if(newRole!==currentRole){
+console.log("[PATCH] Changement de rôle détecté:",currentRole,"->",newRole);
 
-if(role==="visiteur"){
+// Mettre à jour localStorage AVANT l'alert
+if(newRole==="visiteur"){
 localStorage.setItem("gestionFuts_isAdmin","false");
 }else{
 localStorage.setItem("gestionFuts_isAdmin","true");
 }
 
-currentRole=role;
+var msg="Votre rôle a changé.";
+if(newRole==="secretaire")msg="🎉 Vous avez été promu Secrétaire!";
+if(newRole==="visiteur")msg="Vous êtes maintenant Visiteur.";
+if(newRole==="admin")msg="Vous êtes maintenant Admin.";
+
+currentRole=newRole;
 alert(msg);
 location.reload();
 }
 });
 }
 
-// Observer le DOM
-var observer=new MutationObserver(function(){
-processSessionPanel();
-applyVisitorRestrictions();
-});
-
-// Init
-setTimeout(function(){
+// INIT
+function init(){
+console.log("[PATCH V8] Init appelé");
 addConnIndicator();
-listenForEjection();
-listenRoleChanges();
+setupEjectionListener();
+setupRoleListener();
 applyVisitorRestrictions();
 processSessionPanel();
-observer.observe(document.body,{childList:true,subtree:true});
-},800);
+}
 
-setInterval(processSessionPanel,1500);
+// Lancer après un délai pour laisser React se charger
+setTimeout(init,1000);
+
+// Intervalles pour maintenir les restrictions
 setInterval(applyVisitorRestrictions,500);
+setInterval(processSessionPanel,1000);
+
 })();
 // === FIN PATCH ===
 </script>
