@@ -112,9 +112,10 @@ Total actuel : ${i.totalMontant.toFixed(2)}\u20AC (${i.nbVentes} PAD)`))return;c
 
 
 
-// === PATCH ROLES V6 ===
+
+// === PATCH ROLES V7 ===
 (function(){
-console.log("[PATCH V6] Init");
+console.log("[PATCH V7] Init");
 
 // Indicateur connexion
 function addConnIndicator(){
@@ -134,7 +135,7 @@ d.innerHTML=on?'<span style="width:8px;height:8px;border-radius:50%;background:#
 }catch(e){}
 }
 
-// Ajouter badges et boutons dans le panel session
+// Panel session - badges et boutons
 function processSessionPanel(){
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
@@ -190,6 +191,7 @@ nameSpan.after(badge);
 }
 }
 
+// Admin OU Super Admin peuvent promouvoir/rétrograder
 if((isAdm||isCr)&&userRole!=="superadmin"&&userRole!=="admin"){
 var ejectBtn=row.querySelector("button");
 if(ejectBtn&&!row.querySelector(".promoBtn")){
@@ -224,84 +226,110 @@ ejectBtn.before(btn);
 });
 }
 
-// Restrictions visiteur - CACHER TOUS LES BOUTONS NON AUTORISÉS
+// RESTRICTIONS VISITEUR - Version améliorée
 function applyVisitorRestrictions(){
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
 if(!sc||!cu)return;
 
-// Lire le rôle depuis Firebase (source de vérité)
 firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").once("value").then(function(snap){
 var role=snap.val()||"visiteur";
 
 if(role==="visiteur"){
-// Mettre à jour localStorage pour cohérence
 localStorage.setItem("gestionFuts_isAdmin","false");
 
-// 1. Cacher bouton "Admin" (contient le texte Admin)
+// Parcourir TOUS les boutons et cacher ceux non autorisés
 document.querySelectorAll("button").forEach(function(b){
-var t=b.textContent||"";
+var t=(b.textContent||"").trim();
+var cls=b.className||"";
+
+// Cacher bouton Admin (mais pas Super Admin)
 if(t.indexOf("Admin")>-1&&t.indexOf("Super")===-1){
 b.style.setProperty("display","none","important");
+return;
 }
-});
 
-// 2. Cacher boutons Fût et Vente
-document.querySelectorAll("button").forEach(function(b){
-var t=b.textContent||"";
-if(t.indexOf("Fût")>-1||t.indexOf("Vente")>-1){
+// Cacher Fût, Vente, Bénévoles
+if(t.indexOf("Fût")>-1||t.indexOf("Vente")>-1||t.toLowerCase().indexOf("bénévole")>-1||t.toLowerCase().indexOf("benevole")>-1){
 b.style.setProperty("display","none","important");
+return;
 }
-});
 
-// 3. Cacher boutons avec SVG (export vert, paramètres gris)
-document.querySelectorAll("button").forEach(function(b){
-if(b.querySelector("svg")&&!b.closest(".fixed")){
-var cls=b.className||"";
+// Cacher boutons avec SVG (Export vert, Paramètres gris)
+if(b.querySelector("svg")){
+// Export = bg-green-600, Paramètres = bg-neutral-700
 if(cls.indexOf("bg-green-600")>-1||cls.indexOf("bg-neutral-700")>-1){
+// Ne pas cacher si c'est dans un modal (fixed)
+if(!b.closest(".fixed")){
 b.style.setProperty("display","none","important");
+return;
+}
 }
 }
 });
 
-// 4. Cacher bouton Bénévoles
-document.querySelectorAll("button").forEach(function(b){
-var t=(b.textContent||"").toLowerCase();
-if(t.indexOf("bénévole")>-1||t.indexOf("benevole")>-1){
-b.style.setProperty("display","none","important");
-}
-});
-
-// 5. Cacher les compteurs (Vides, Cassé, Réutil)
+// Cacher les compteurs
 document.querySelectorAll("div").forEach(function(d){
 var cls=d.className||"";
 var t=d.textContent||"";
-if(cls.indexOf("grid-cols-3")>-1&&(t.indexOf("Vide")>-1||t.indexOf("Cassé")>-1||t.indexOf("Réutil")>-1)){
+if(cls.indexOf("grid")>-1&&cls.indexOf("grid-cols-3")>-1){
+if(t.indexOf("Vide")>-1||t.indexOf("Cassé")>-1||t.indexOf("Réutil")>-1){
 d.style.setProperty("display","none","important");
+}
 }
 });
 
 }else{
-// Secrétaire ou plus : s'assurer que isAdmin est true
 localStorage.setItem("gestionFuts_isAdmin","true");
 }
 });
 }
 
-// Écouter les changements de rôle EN TEMPS RÉEL
+// ÉCOUTER ÉJECTION - Nettoyer localStorage quand éjecté
+function listenForEjection(){
+var sc=localStorage.getItem("gestionFuts_session");
+var cu=localStorage.getItem("gestionFuts_userName");
+if(!sc||!cu)return;
+
+var wasConnected=false;
+
+firebase.database().ref("sessions/"+sc+"/users/"+cu).on("value",function(snap){
+if(snap.exists()){
+wasConnected=true;
+}else if(wasConnected){
+// L'utilisateur existait mais n'existe plus = ÉJECTÉ
+console.log("[PATCH] Éjection détectée!");
+alert("Vous avez été déconnecté de la session.");
+
+// Nettoyer TOUT le localStorage lié à la session
+localStorage.removeItem("gestionFuts_session");
+localStorage.removeItem("gestionFuts_userName");
+localStorage.removeItem("gestionFuts_isAdmin");
+localStorage.removeItem("gestionFuts_isCreator");
+localStorage.removeItem("gestionFuts_backups");
+
+// Rediriger vers l'accueil
+window.location.href=window.location.pathname;
+}
+});
+}
+
+// Écouter les changements de rôle
 function listenRoleChanges(){
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
 if(!sc||!cu)return;
 
 var firstLoad=true;
+var currentRole=null;
+
 firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").on("value",function(snap){
 var role=snap.val();
 if(!role)return;
 
 if(firstLoad){
 firstLoad=false;
-// Au premier chargement, mettre à jour localStorage selon le rôle Firebase
+currentRole=role;
 if(role==="visiteur"){
 localStorage.setItem("gestionFuts_isAdmin","false");
 }else{
@@ -311,21 +339,22 @@ applyVisitorRestrictions();
 return;
 }
 
-// Changement de rôle détecté !
+if(currentRole&&role!==currentRole){
 var msg="Votre rôle a changé.";
 if(role==="secretaire")msg="🎉 Vous avez été promu Secrétaire!";
 if(role==="visiteur")msg="Vous êtes maintenant Visiteur.";
 if(role==="admin")msg="Vous êtes maintenant Admin.";
 
-// Mettre à jour localStorage AVANT de recharger
 if(role==="visiteur"){
 localStorage.setItem("gestionFuts_isAdmin","false");
 }else{
 localStorage.setItem("gestionFuts_isAdmin","true");
 }
 
+currentRole=role;
 alert(msg);
 location.reload();
+}
 });
 }
 
@@ -338,6 +367,7 @@ applyVisitorRestrictions();
 // Init
 setTimeout(function(){
 addConnIndicator();
+listenForEjection();
 listenRoleChanges();
 applyVisitorRestrictions();
 processSessionPanel();
@@ -345,7 +375,7 @@ observer.observe(document.body,{childList:true,subtree:true});
 },800);
 
 setInterval(processSessionPanel,1500);
-setInterval(applyVisitorRestrictions,1000);
+setInterval(applyVisitorRestrictions,500);
 })();
 // === FIN PATCH ===
 </script>
