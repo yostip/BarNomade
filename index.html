@@ -120,13 +120,15 @@ Total actuel : ${i.totalMontant.toFixed(2)}\u20AC (${i.nbVentes} PAD)`))return;c
 
 
 
-// === PATCH ROLES V14 ===
+
+
+// === PATCH ROLES V16 ===
 (function(){
-console.log("[PATCH V14] Démarrage");
+console.log("[PATCH V16] Démarrage");
 
 var myRole=null;
 var initialized=false;
-var appReady=false; // Attendre que l'app soit prête
+var canCheckEjection=false; // Délai pour l'éjection seulement
 
 // Indicateur connexion
 function addConnIndicator(){
@@ -146,27 +148,16 @@ d.innerHTML=on?'<span style="width:8px;height:8px;border-radius:50%;background:#
 }catch(e){}
 }
 
-// Vérifier si l'app est dans l'écran principal (pas l'écran de login)
-function isInMainScreen(){
-// L'écran principal a le header avec le code session visible
-var header=document.querySelector('div[class*="bg-lime-400"]');
-return header!==null;
-}
-
-// VÉRIFIER LE RÔLE - Seulement si dans l'écran principal
+// VÉRIFIER LE RÔLE ET ÉJECTION
 function checkMyRole(){
-if(!appReady)return;
-if(!isInMainScreen())return;
-
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
 if(!sc||!cu)return;
 
 firebase.database().ref("sessions/"+sc+"/users/"+cu).once("value").then(function(snap){
 if(!snap.exists()){
-// Utilisateur n'existe pas dans Firebase
-if(initialized){
-// On était connecté, maintenant éjecté
+// L'utilisateur n'existe pas - mais attendre avant d'éjecter
+if(canCheckEjection&&initialized){
 alert("Vous avez été déconnecté de la session.");
 localStorage.removeItem("gestionFuts_session");
 localStorage.removeItem("gestionFuts_userName");
@@ -206,10 +197,8 @@ location.reload();
 }).catch(function(e){});
 }
 
-// RESTRICTIONS UI
+// RESTRICTIONS UI - S'EXÉCUTE IMMÉDIATEMENT
 function applyRestrictions(){
-if(!isInMainScreen())return;
-
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
 if(!sc||!cu)return;
@@ -221,7 +210,7 @@ document.querySelectorAll("button").forEach(function(btn){
 var text=(btn.textContent||"").trim();
 var classes=btn.getAttribute("class")||"";
 
-// === VISITEUR ===
+// === VISITEUR : LECTURE SEULE ===
 if(role==="visiteur"){
 if(text.indexOf("Admin")>-1&&text.indexOf("Super")===-1){btn.style.display="none";return;}
 if(text.toLowerCase().indexOf("bénévole")>-1||text.toLowerCase().indexOf("benevole")>-1){btn.style.display="none";return;}
@@ -283,7 +272,7 @@ snap.forEach(function(c){users[c.key]=c.val();});
 userRows.forEach(function(row){
 var txt=row.textContent||"";
 if(txt.indexOf("(vous)")>-1)return;
-if(row.dataset.v14done==="1")return;
+if(row.dataset.v16done==="1")return;
 
 var userName=null;
 for(var name in users){
@@ -297,12 +286,12 @@ if(!userName)return;
 var userData=users[userName]||{};
 var userRole=userData.role||"visiteur";
 
-row.dataset.v14done="1";
+row.dataset.v16done="1";
 
 // Badge
-if(!row.querySelector(".v14badge")&&userRole!=="superadmin"){
+if(!row.querySelector(".v16badge")&&userRole!=="superadmin"){
 var badge=document.createElement("span");
-badge.className="v14badge";
+badge.className="v16badge";
 badge.style.cssText="margin-left:6px;font-size:10px;padding:2px 6px;border-radius:4px;";
 if(userRole==="visiteur"){badge.style.background="rgba(107,114,128,0.3)";badge.style.color="#9ca3af";badge.textContent="👁 Visiteur";}
 else if(userRole==="secretaire"){badge.style.background="rgba(59,130,246,0.3)";badge.style.color="#60a5fa";badge.textContent="📝 Secrétaire";}
@@ -312,11 +301,11 @@ if(nameDiv){var spans=nameDiv.querySelectorAll("span");if(spans.length>0)spans[0
 }
 
 // Bouton promo
-if(!row.querySelector(".v14promo")&&(userRole==="visiteur"||userRole==="secretaire")){
+if(!row.querySelector(".v16promo")&&(userRole==="visiteur"||userRole==="secretaire")){
 var existingBtn=row.querySelector("button");
 if(existingBtn){
 var btn=document.createElement("button");
-btn.className="v14promo";
+btn.className="v16promo";
 btn.style.cssText="margin-right:6px;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:none;color:white;";
 if(userRole==="visiteur"){
 btn.style.background="#16a34a";
@@ -325,9 +314,9 @@ btn.onclick=function(ev){
 ev.stopPropagation();
 if(confirm("Promouvoir "+userName+" en Secrétaire?")){
 firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"secretaire"}).then(function(){
-var b=row.querySelector(".v14badge");var p=row.querySelector(".v14promo");
+var b=row.querySelector(".v16badge");var p=row.querySelector(".v16promo");
 if(b)b.remove();if(p)p.remove();
-row.dataset.v14done="";
+row.dataset.v16done="";
 });
 }
 };
@@ -339,9 +328,9 @@ btn.onclick=function(ev){
 ev.stopPropagation();
 if(confirm("Rétrograder "+userName+" en Visiteur?")){
 firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"visiteur"}).then(function(){
-var b=row.querySelector(".v14badge");var p=row.querySelector(".v14promo");
+var b=row.querySelector(".v16badge");var p=row.querySelector(".v16promo");
 if(b)b.remove();if(p)p.remove();
-row.dataset.v14done="";
+row.dataset.v16done="";
 });
 }
 };
@@ -354,30 +343,27 @@ existingBtn.before(btn);
 }
 
 // INIT
-function init(){
-addConnIndicator();
-}
+setTimeout(addConnIndicator,300);
 
-// Démarrer l'indicateur immédiatement
-setTimeout(init,500);
-
-// Attendre 3 secondes avant de commencer les vérifications
-// pour laisser React gérer la reconnexion
+// Restrictions IMMÉDIATES (dès 800ms)
 setTimeout(function(){
-appReady=true;
-checkMyRole();
 applyRestrictions();
 processSessionPanel();
-
-// Puis polling régulier
-setInterval(checkMyRole,500);
 setInterval(applyRestrictions,500);
 setInterval(processSessionPanel,1000);
+},800);
+
+// checkMyRole avec délai de 3s (pour ne pas effacer localStorage trop tôt)
+setTimeout(function(){
+canCheckEjection=true;
+checkMyRole();
+setInterval(checkMyRole,500);
 },3000);
 
 document.addEventListener("visibilitychange",function(){
-if(document.visibilityState==="visible"&&appReady){
-setTimeout(checkMyRole,500);
+if(document.visibilityState==="visible"){
+setTimeout(applyRestrictions,300);
+if(canCheckEjection)setTimeout(checkMyRole,500);
 }
 });
 
