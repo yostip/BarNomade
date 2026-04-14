@@ -118,9 +118,10 @@ Total actuel : ${i.totalMontant.toFixed(2)}\u20AC (${i.nbVentes} PAD)`))return;c
 
 
 
-// === PATCH ROLES V12 ===
+
+// === PATCH ROLES V13 ===
 (function(){
-console.log("[PATCH V12] Démarrage");
+console.log("[PATCH V13] Démarrage");
 
 var myRole=null;
 var initialized=false;
@@ -143,14 +144,19 @@ d.innerHTML=on?'<span style="width:8px;height:8px;border-radius:50%;background:#
 }catch(e){}
 }
 
-// VÉRIFIER LE RÔLE
+// VÉRIFIER LE RÔLE - NE PAS EFFACER LE LOCALSTORAGE SI PAS CONNECTÉ
 function checkMyRole(){
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
-if(!sc||!cu)return;
+if(!sc||!cu){
+// Pas en session, ne rien faire
+return;
+}
 
 firebase.database().ref("sessions/"+sc+"/users/"+cu).once("value").then(function(snap){
 if(!snap.exists()){
+// Utilisateur éjecté - mais seulement si on était vraiment connecté
+if(initialized){
 alert("Vous avez été déconnecté de la session.");
 localStorage.removeItem("gestionFuts_session");
 localStorage.removeItem("gestionFuts_userName");
@@ -158,6 +164,7 @@ localStorage.removeItem("gestionFuts_isAdmin");
 localStorage.removeItem("gestionFuts_isCreator");
 localStorage.removeItem("gestionFuts_backups");
 window.location.href=window.location.pathname;
+}
 return;
 }
 
@@ -212,7 +219,18 @@ if(classes.indexOf("bg-green-700")>-1&&text.length<5){btn.style.display="none";r
 if(classes.indexOf("bg-neutral-700")>-1&&classes.indexOf("rounded-lg")>-1&&text.length<5){btn.style.display="none";return;}
 if(text.indexOf("Stats")>-1){btn.style.display="none";return;}
 
-// BOUTONS RETOUR FÛT - Cacher tous les boutons d'action sur les fûts
+// BOUTON RETOUR SUR LES FÛTS DES BARS (↩️ Retour)
+if(text.indexOf("Retour")>-1&&classes.indexOf("bg-black")>-1){
+btn.style.display="none";
+return;
+}
+// Aussi cacher par l'emoji ↩️
+if(text.indexOf("↩")>-1||text.indexOf("\u21A9")>-1){
+btn.style.display="none";
+return;
+}
+
+// Boutons dans le modal de retour fût
 if(text.indexOf("Vide")>-1||text.indexOf("Plein")>-1||text.indexOf("Cassé")>-1||text.indexOf("Non terminé")>-1||text.indexOf("terminé")>-1){
 btn.style.display="none";
 return;
@@ -221,23 +239,6 @@ return;
 if(text.indexOf("📦")>-1||text.indexOf("💥")>-1||text.indexOf("♻")>-1||text.indexOf("🔄")>-1){
 btn.style.display="none";
 return;
-}
-// Bouton Annuler
-if(text.indexOf("Annuler")>-1||text.indexOf("✕")>-1||text.indexOf("×")>-1){
-// Ne pas cacher les boutons de fermeture de modal
-if(classes.indexOf("bg-red")>-1||classes.indexOf("bg-neutral")>-1){
-btn.style.display="none";
-return;
-}
-}
-// Boutons de confirmation/action dans les modals de fûts
-if(classes.indexOf("bg-green-600")>-1&&classes.indexOf("rounded-lg")>-1){
-// C'est probablement un bouton d'action
-var parent=btn.closest("div[class*='fixed']");
-if(parent){
-btn.style.display="none";
-return;
-}
 }
 }
 
@@ -285,7 +286,7 @@ snap.forEach(function(c){users[c.key]=c.val();});
 userRows.forEach(function(row){
 var txt=row.textContent||"";
 if(txt.indexOf("(vous)")>-1)return;
-if(row.dataset.v12done==="1")return;
+if(row.dataset.v13done==="1")return;
 
 var userName=null;
 for(var name in users){
@@ -299,12 +300,12 @@ if(!userName)return;
 var userData=users[userName]||{};
 var userRole=userData.role||"visiteur";
 
-row.dataset.v12done="1";
+row.dataset.v13done="1";
 
 // Badge
-if(!row.querySelector(".v12badge")&&userRole!=="superadmin"){
+if(!row.querySelector(".v13badge")&&userRole!=="superadmin"){
 var badge=document.createElement("span");
-badge.className="v12badge";
+badge.className="v13badge";
 badge.style.cssText="margin-left:6px;font-size:10px;padding:2px 6px;border-radius:4px;";
 if(userRole==="visiteur"){badge.style.background="rgba(107,114,128,0.3)";badge.style.color="#9ca3af";badge.textContent="👁 Visiteur";}
 else if(userRole==="secretaire"){badge.style.background="rgba(59,130,246,0.3)";badge.style.color="#60a5fa";badge.textContent="📝 Secrétaire";}
@@ -314,11 +315,11 @@ if(nameDiv){var spans=nameDiv.querySelectorAll("span");if(spans.length>0)spans[0
 }
 
 // Bouton promo
-if(!row.querySelector(".v12promo")&&(userRole==="visiteur"||userRole==="secretaire")){
+if(!row.querySelector(".v13promo")&&(userRole==="visiteur"||userRole==="secretaire")){
 var existingBtn=row.querySelector("button");
 if(existingBtn){
 var btn=document.createElement("button");
-btn.className="v12promo";
+btn.className="v13promo";
 btn.style.cssText="margin-right:6px;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:none;color:white;";
 if(userRole==="visiteur"){
 btn.style.background="#16a34a";
@@ -327,9 +328,9 @@ btn.onclick=function(ev){
 ev.stopPropagation();
 if(confirm("Promouvoir "+userName+" en Secrétaire?")){
 firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"secretaire"}).then(function(){
-var b=row.querySelector(".v12badge");var p=row.querySelector(".v12promo");
+var b=row.querySelector(".v13badge");var p=row.querySelector(".v13promo");
 if(b)b.remove();if(p)p.remove();
-row.dataset.v12done="";
+row.dataset.v13done="";
 });
 }
 };
@@ -341,9 +342,9 @@ btn.onclick=function(ev){
 ev.stopPropagation();
 if(confirm("Rétrograder "+userName+" en Visiteur?")){
 firebase.database().ref("sessions/"+sc+"/users/"+userName).update({role:"visiteur"}).then(function(){
-var b=row.querySelector(".v12badge");var p=row.querySelector(".v12promo");
+var b=row.querySelector(".v13badge");var p=row.querySelector(".v13promo");
 if(b)b.remove();if(p)p.remove();
-row.dataset.v12done="";
+row.dataset.v13done="";
 });
 }
 };
@@ -370,7 +371,7 @@ setInterval(processSessionPanel,1000);
 
 document.addEventListener("visibilitychange",function(){
 if(document.visibilityState==="visible"){
-setTimeout(checkMyRole,500);
+setTimeout(checkMyRole,300);
 }
 });
 
