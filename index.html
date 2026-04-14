@@ -225,7 +225,7 @@ if(text.indexOf("↩")>-1||text.indexOf("\u21A9")>-1){btn.style.display="none";r
 
 // Boutons modal retour fût
 if(text.indexOf("Vide")>-1||text.indexOf("Plein")>-1||text.indexOf("Cassé")>-1||text.indexOf("Non terminé")>-1||text.indexOf("terminé")>-1){btn.style.display="none";return;}
-if(text.indexOf("📦")>-1||text.indexOf("💥")>-1||text.indexOf("♻")>-1||text.indexOf("🔄")>-1){btn.style.display="none";return;}
+if(text.indexOf("📦")>-1||text.indexOf("💥")>-1||text.indexOf("♻")>-1||(text.indexOf("🔄")>-1&&text.indexOf("Plein")>-1)){btn.style.display="none";return;}
 }
 
 // === SECRÉTAIRE ===
