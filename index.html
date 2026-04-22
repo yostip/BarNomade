@@ -524,6 +524,249 @@ window.v18Eject={c:{},check:function(u,s){var k=s+u;this.c[k]=(this.c[k]||0)+1;r
 setTimeout(v18Init,2500);
 })();
 // === FIN PATCH V18 ===
+
+// === PATCH V19 - DESIGN COMPACT ACCORDÉON ===
+(function(){
+console.log("[PATCH V19] Design compact accordéon");
+
+var expandedBarId=null;
+var v19Applied=false;
+
+function applyCompactDesign(){
+if(v19Applied)return;
+
+// Trouver le conteneur des bars
+var barsContainer=document.querySelector('.p-2.space-y-2.pb-24');
+if(!barsContainer||barsContainer.children.length===0)return;
+
+// Observer les changements pour réappliquer le design
+var observer=new MutationObserver(function(){
+setTimeout(transformBars,100);
+});
+observer.observe(barsContainer,{childList:true,subtree:true,attributes:true});
+
+transformBars();
+v19Applied=true;
+}
+
+function transformBars(){
+var barsContainer=document.querySelector('.p-2.space-y-2.pb-24');
+if(!barsContainer)return;
+
+var barCards=barsContainer.querySelectorAll(':scope > div.rounded-xl');
+if(barCards.length===0)return;
+
+barCards.forEach(function(card){
+// Éviter de re-transformer
+if(card.dataset.v19)return;
+card.dataset.v19="1";
+
+var barId=card.getAttribute('data-bar-id')||Math.random().toString(36).substr(2,9);
+card.setAttribute('data-bar-id',barId);
+
+// Récupérer les infos du bar
+var header=card.querySelector('div:first-child');
+var content=card.querySelector('div:nth-child(2)');
+var futsSection=card.querySelector('div:last-child');
+
+if(!header||!content)return;
+
+// Extraire les infos
+var emoji=header.querySelector('span.text-xl');
+var nom=header.querySelector('span.font-bold');
+var completBadge=header.querySelector('span.bg-red-600');
+
+// Extraire compteur et fûts
+var countSpan=content.querySelector('span.text-4xl');
+var maxSpan=content.querySelector('span.text-2xl');
+var futsIcons=content.querySelectorAll('span.text-2xl');
+var progressBar=content.querySelector('div.h-3');
+
+var count=countSpan?parseInt(countSpan.textContent)||0:0;
+var max=maxSpan?parseInt(maxSpan.textContent.replace('/',''))||3:3;
+
+// === CRÉER LE NOUVEAU DESIGN COMPACT ===
+
+// Header compact (toujours visible)
+var newHeader=document.createElement('div');
+newHeader.className='flex items-center justify-between p-2 cursor-pointer';
+newHeader.style.cssText='min-height:44px;';
+
+// Partie gauche: emoji + nom + fûts visuels
+var leftPart=document.createElement('div');
+leftPart.className='flex items-center gap-2 flex-1';
+leftPart.innerHTML=`
+<span class="text-lg">${emoji?emoji.textContent:'🍺'}</span>
+<span class="font-semibold text-sm truncate" style="max-width:100px">${nom?nom.textContent:'Bar'}</span>
+<div class="flex items-center gap-0.5 ml-1" id="futs-visual-${barId}"></div>
+`;
+
+// Recréer les fûts visuels avec couleurs
+var futsVisual=leftPart.querySelector('#futs-visual-'+barId);
+for(var i=0;i<max;i++){
+var futIcon=document.createElement('span');
+futIcon.className='text-base';
+if(i<count){
+// Fût présent - récupérer la couleur de l'original si possible
+var originalFut=futsSection?futsSection.querySelectorAll('div.rounded-lg')[i]:null;
+if(originalFut){
+var bgClass=originalFut.className.match(/bg-(red|orange|yellow|neutral)-[0-9]+/);
+if(bgClass&&bgClass[0].includes('red')){
+futIcon.style.filter='hue-rotate(-10deg) saturate(1.5)';
+futIcon.title='Fût en circulation depuis longtemps';
+}else if(bgClass&&bgClass[0].includes('orange')){
+futIcon.style.filter='hue-rotate(30deg) saturate(1.2)';
+futIcon.title='Fût en circulation';
+}else if(bgClass&&bgClass[0].includes('yellow')){
+futIcon.style.filter='hue-rotate(50deg) saturate(1.2)';
+futIcon.title='Fût récent';
+}
+}
+futIcon.textContent='🛢️';
+}else{
+futIcon.textContent='⚪';
+futIcon.style.opacity='0.3';
+futIcon.style.fontSize='10px';
+}
+futsVisual.appendChild(futIcon);
+}
+
+// Partie droite: compteur + boutons + chevron
+var rightPart=document.createElement('div');
+rightPart.className='flex items-center gap-2';
+
+var countBadge=document.createElement('span');
+countBadge.className='text-xs font-bold px-2 py-0.5 rounded '+(count>=max?'bg-red-600':count>0?'bg-yellow-600':'bg-green-600');
+countBadge.textContent=count+'/'+max;
+rightPart.appendChild(countBadge);
+
+// Bouton + (si pas complet)
+if(count<max){
+var addBtn=card.querySelector('button');
+if(addBtn){
+var newAddBtn=document.createElement('button');
+newAddBtn.className='w-7 h-7 bg-neutral-700 hover:bg-neutral-600 rounded text-sm flex items-center justify-center';
+newAddBtn.textContent='+';
+newAddBtn.onclick=function(e){
+e.stopPropagation();
+addBtn.click();
+};
+rightPart.appendChild(newAddBtn);
+}
+}
+
+// Bouton retour global (si fûts présents)
+if(count>0){
+var retBtn=document.createElement('button');
+retBtn.className='w-7 h-7 bg-neutral-700 hover:bg-neutral-600 rounded text-sm flex items-center justify-center';
+retBtn.textContent='↩️';
+retBtn.onclick=function(e){
+e.stopPropagation();
+toggleExpand(barId);
+};
+rightPart.appendChild(retBtn);
+}
+
+// Chevron
+var chevron=document.createElement('span');
+chevron.className='text-neutral-500 text-sm transition-transform';
+chevron.id='chevron-'+barId;
+chevron.textContent='▶';
+chevron.style.display=count>0?'inline':'none';
+rightPart.appendChild(chevron);
+
+newHeader.appendChild(leftPart);
+newHeader.appendChild(rightPart);
+
+// Barre de progression compacte
+var newProgress=document.createElement('div');
+newProgress.className='h-1 bg-neutral-800 mx-2 mb-1 rounded-full overflow-hidden';
+newProgress.innerHTML='<div class="h-full transition-all '+(count>=max?'bg-red-500':count>=max-1?'bg-yellow-500':'bg-green-500')+'" style="width:'+(count/max*100)+'%"></div>';
+
+// Section détails (cachée par défaut)
+var detailsSection=document.createElement('div');
+detailsSection.id='details-'+barId;
+detailsSection.className='overflow-hidden transition-all';
+detailsSection.style.maxHeight='0px';
+detailsSection.style.opacity='0';
+
+if(futsSection&&count>0){
+var futsContent=document.createElement('div');
+futsContent.className='px-2 pb-2 space-y-1';
+
+var futRows=futsSection.querySelectorAll('div.rounded-lg');
+futRows.forEach(function(row,idx){
+var clone=row.cloneNode(true);
+clone.className=row.className+' text-xs py-1.5 px-2';
+futsContent.appendChild(clone);
+});
+
+detailsSection.appendChild(futsContent);
+}
+
+// Click sur header pour expand
+newHeader.onclick=function(){
+if(count>0)toggleExpand(barId);
+};
+
+// Remplacer le contenu
+card.innerHTML='';
+card.style.cssText='padding:0;overflow:hidden;';
+card.appendChild(newHeader);
+card.appendChild(newProgress);
+card.appendChild(detailsSection);
+});
+}
+
+function toggleExpand(barId){
+var details=document.getElementById('details-'+barId);
+var chevron=document.getElementById('chevron-'+barId);
+if(!details)return;
+
+if(expandedBarId===barId){
+// Fermer
+details.style.maxHeight='0px';
+details.style.opacity='0';
+if(chevron)chevron.textContent='▶';
+expandedBarId=null;
+}else{
+// Fermer l'ancien
+if(expandedBarId){
+var oldDetails=document.getElementById('details-'+expandedBarId);
+var oldChevron=document.getElementById('chevron-'+expandedBarId);
+if(oldDetails){
+oldDetails.style.maxHeight='0px';
+oldDetails.style.opacity='0';
+}
+if(oldChevron)oldChevron.textContent='▶';
+}
+// Ouvrir le nouveau
+details.style.maxHeight='200px';
+details.style.opacity='1';
+if(chevron)chevron.textContent='▼';
+expandedBarId=barId;
+}
+}
+
+// Appliquer après chargement
+function initV19(){
+setTimeout(applyCompactDesign,1500);
+setInterval(function(){
+var container=document.querySelector('.p-2.space-y-2.pb-24');
+if(container){
+var cards=container.querySelectorAll(':scope > div.rounded-xl:not([data-v19])');
+if(cards.length>0)transformBars();
+}
+},2000);
+}
+
+if(document.readyState==='complete'){
+initV19();
+}else{
+window.addEventListener('load',initV19);
+}
+})();
+// === FIN PATCH V19 ===
 </script>
 </body>
 </html>
