@@ -489,220 +489,64 @@ observer.observe(document.body,{childList:true,subtree:true});
 })();
 // === FIN PATCH V17 ===
 
-// === PATCH V18 - ÉVOLUTIONS MAJEURES ===
+// === PATCH V18 - VERSION ALLÉGÉE ===
 (function(){
-console.log("[PATCH V18] Évolutions majeures appliquées");
+console.log("[PATCH V18] Chargement...");
 
-// ---- #2 & #5: Supprimer flash boutons + Encart explicatif visiteur ----
-function hideButtonsForVisitorImmediately(){
-var isAdmin=localStorage.getItem("gestionFuts_isAdmin")==="true";
-var isCreator=localStorage.getItem("gestionFuts_isCreator")==="true";
-
-// Si pas admin, cacher immédiatement les boutons sensibles
-if(!isAdmin&&!isCreator){
-var style=document.createElement("style");
-style.id="v18VisitorStyle";
-style.textContent=`
-/* Cache immédiat pour visiteurs - évite le flash */
-button:has(span:contains("Bénévoles")),
-button:has(span:contains("Ventes")),
-[class*="bg-amber-600"]:not([class*="bg-amber-900"]),
-[class*="bg-teal-"]:not([class*="border-teal"]),
-[class*="bg-purple-700"]:not([class*="border-purple"]),
-[class*="bg-green-700"],
-[class*="bg-neutral-700"][class*="rounded-lg"][class*="px-3"] {
-opacity:0.01 !important;
-pointer-events:none !important;
-transition:none !important;
-}
-`;
-document.head.appendChild(style);
-}
-}
-
-// Exécuter immédiatement
-hideButtonsForVisitorImmediately();
-
-// Encart explicatif visiteur
-function addVisitorExplanation(){
-var sc=localStorage.getItem("gestionFuts_session");
-if(!sc)return;
-var isAdmin=localStorage.getItem("gestionFuts_isAdmin")==="true";
-if(isAdmin)return;
-
-// Ne pas dupliquer
-if(document.getElementById("v18VisitorInfo"))return;
-
-// Chercher l'emplacement après les compteurs
-var countersGrid=document.querySelector('div[class*="grid"][class*="grid-cols-3"][class*="gap-1"]');
-if(!countersGrid)return;
-
-var infoDiv=document.createElement("div");
-infoDiv.id="v18VisitorInfo";
-infoDiv.style.cssText="margin:8px;padding:12px 16px;background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.4);border-radius:12px;";
-infoDiv.innerHTML=`
-<div style="display:flex;align-items:center;gap:10px;">
-<span style="font-size:24px;">👁</span>
-<div>
-<p style="color:#60a5fa;font-weight:600;font-size:14px;margin:0;">Mode Visiteur</p>
-<p style="color:#9ca3af;font-size:12px;margin:4px 0 0 0;">Vous pouvez consulter le plan et les stocks. Pour saisir des données, demandez à un administrateur de vous promouvoir.</p>
-</div>
-</div>
-`;
-countersGrid.parentNode.insertBefore(infoDiv,countersGrid.nextSibling);
-}
-
-setTimeout(addVisitorExplanation,1500);
-
-// ---- #12: Sécuriser éjection (retry Firebase) ----
-// Intercepter la logique d'éjection pour ajouter des retries
-var ejectionCheckCount={};
-var ejectionConfirmed={};
-
-function secureEjectionCheck(userId,sessionId){
-var key=sessionId+"_"+userId;
-if(ejectionConfirmed[key])return true; // Déjà confirmé comme éjecté
-
-if(!ejectionCheckCount[key])ejectionCheckCount[key]=0;
-ejectionCheckCount[key]++;
-
-// Nécessite 3 vérifications consécutives avant éjection
-if(ejectionCheckCount[key]>=3){
-ejectionConfirmed[key]=true;
-return true;
-}
-return false;
-}
-
-function resetEjectionCheck(userId,sessionId){
-var key=sessionId+"_"+userId;
-ejectionCheckCount[key]=0;
-delete ejectionConfirmed[key];
-}
-
-// Exposer pour le patch
+// Fonction sécurisée d'éjection
 window.v18SecureEjection={
-check:secureEjectionCheck,
-reset:resetEjectionCheck
+_count:{},
+_confirmed:{},
+check:function(u,s){
+var k=s+"_"+u;
+if(this._confirmed[k])return true;
+this._count[k]=(this._count[k]||0)+1;
+if(this._count[k]>=3){this._confirmed[k]=true;return true;}
+return false;
+},
+reset:function(u,s){var k=s+"_"+u;this._count[k]=0;delete this._confirmed[k];}
 };
 
-// ---- #11: Rafraîchir badge après promotion ----
-// Observer les changements de rôle et forcer le refresh du badge
-var lastKnownRole=null;
-function watchRoleChanges(){
+// #5 & #11: Encart visiteur + watch rôle (après chargement complet)
+function initV18(){
 var sc=localStorage.getItem("gestionFuts_session");
 var cu=localStorage.getItem("gestionFuts_userName");
-if(!sc||!cu)return;
+var isAdmin=localStorage.getItem("gestionFuts_isAdmin")==="true";
 
-firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").on("value",function(snap){
-var newRole=snap.val()||"visiteur";
-if(lastKnownRole&&lastKnownRole!==newRole){
-console.log("[V18] Rôle changé:",lastKnownRole,"→",newRole);
-// Supprimer l'ancien badge
-var oldBadge=document.getElementById("v17RoleBadge");
-if(oldBadge)oldBadge.remove();
-// Supprimer l'encart visiteur si promu
-if(newRole!=="visiteur"){
-var visitorInfo=document.getElementById("v18VisitorInfo");
-if(visitorInfo)visitorInfo.remove();
-var visitorStyle=document.getElementById("v18VisitorStyle");
-if(visitorStyle)visitorStyle.remove();
+// Encart visiteur
+if(sc&&!isAdmin&&!document.getElementById("v18VisitorInfo")){
+var grid=document.querySelector('[class*="grid-cols-3"][class*="gap-1"]');
+if(grid&&grid.parentNode){
+var info=document.createElement("div");
+info.id="v18VisitorInfo";
+info.className="mx-2 mt-2 p-3 rounded-xl";
+info.style.cssText="background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.4);";
+info.innerHTML='<div style="display:flex;align-items:center;gap:10px"><span style="font-size:24px">👁</span><div><p style="color:#60a5fa;font-weight:600;font-size:14px;margin:0">Mode Visiteur</p><p style="color:#9ca3af;font-size:12px;margin:4px 0 0">Consultez le plan et les stocks. Pour saisir, demandez une promotion à un admin.</p></div></div>';
+grid.parentNode.insertBefore(info,grid.nextSibling);
 }
-// Mettre à jour localStorage
-if(newRole==="admin"||newRole==="secretaire"||newRole==="superadmin"){
+}
+
+// Watch rôle pour refresh badge
+if(sc&&cu&&typeof firebase!=="undefined"){
+firebase.database().ref("sessions/"+sc+"/users/"+cu+"/role").on("value",function(snap){
+var role=snap.val();
+if(role==="secretaire"||role==="admin"||role==="superadmin"){
+var info=document.getElementById("v18VisitorInfo");
+if(info)info.remove();
 localStorage.setItem("gestionFuts_isAdmin","true");
 }
-if(newRole==="superadmin"){
-localStorage.setItem("gestionFuts_isCreator","true");
-}
-// Toast notification
-var toast=document.createElement("div");
-toast.style.cssText="position:fixed;top:80px;left:50%;transform:translateX(-50%);z-index:9999;padding:12px 24px;border-radius:12px;font-weight:600;animation:pulse 0.5s ease-in-out;";
-if(newRole==="secretaire"){
-toast.style.background="#2563eb";
-toast.style.color="white";
-toast.innerHTML="📝 Vous êtes maintenant Secrétaire !";
-}else if(newRole==="admin"){
-toast.style.background="#16a34a";
-toast.style.color="white";
-toast.innerHTML="🔓 Vous êtes maintenant Admin !";
-}else if(newRole==="visiteur"){
-toast.style.background="#dc2626";
-toast.style.color="white";
-toast.innerHTML="👁 Vous avez été rétrogradé en Visiteur";
-}
-if(toast.innerHTML){
-document.body.appendChild(toast);
-setTimeout(function(){toast.remove();},4000);
-}
-}
-lastKnownRole=newRole;
 });
 }
-setTimeout(watchRoleChanges,2000);
+}
 
-// ---- #3: Backup auto avant réinitialisation ----
-function interceptResetButton(){
-// Observer le DOM pour le bouton de réinitialisation
-var observer=new MutationObserver(function(mutations){
-var resetBtns=document.querySelectorAll('button');
-resetBtns.forEach(function(btn){
-if(btn.textContent&&btn.textContent.indexOf("Réinitialiser")>-1&&!btn.dataset.v18patched){
-btn.dataset.v18patched="1";
-var originalClick=btn.onclick;
-btn.onclick=function(e){
-// Proposer le backup avant
-if(confirm("⚠️ ATTENTION - Réinitialisation\n\nVoulez-vous d'abord exporter une sauvegarde ?\n\n• [OK] = Exporter puis réinitialiser\n• [Annuler] = Réinitialiser directement")){
-// Déclencher l'export Excel si disponible
-var exportBtn=document.querySelector('button[class*="bg-green-700"]');
-if(exportBtn){
-alert("📥 L'export va se lancer.\nAprès le téléchargement, confirmez la réinitialisation.");
-exportBtn.click();
+// Attendre que l'app soit chargée
+if(document.readyState==="complete"){
+setTimeout(initV18,2000);
+}else{
+window.addEventListener("load",function(){setTimeout(initV18,2000);});
 }
-}
-// Puis exécuter le click original après un délai
-setTimeout(function(){
-if(confirm("🗑️ Confirmer la réinitialisation ?\n\nCette action est IRRÉVERSIBLE.")){
-if(originalClick)originalClick.call(btn,e);
-}
-},500);
-return false;
-};
-}
-});
-});
-observer.observe(document.body,{childList:true,subtree:true});
-}
-setTimeout(interceptResetButton,1000);
 
-// ---- #1: Récapitulatif avant validation vente ----
-function interceptVenteSubmit(){
-var observer=new MutationObserver(function(mutations){
-// Chercher le bouton "Enregistrer la vente" ou similaire
-var venteBtns=document.querySelectorAll('button');
-venteBtns.forEach(function(btn){
-var txt=btn.textContent||"";
-if((txt.indexOf("Enregistrer")>-1||txt.indexOf("Valider")>-1)&&txt.indexOf("vente")>-1&&!btn.dataset.v18VentePatched){
-btn.dataset.v18VentePatched="1";
-// On ne peut pas facilement intercepter React, mais on peut ajouter un double-click protection
-btn.addEventListener("click",function(e){
-// Afficher une animation de confirmation
-btn.style.transition="all 0.2s";
-btn.style.transform="scale(0.95)";
-setTimeout(function(){btn.style.transform="scale(1)";},200);
-},true);
-}
-});
-});
-observer.observe(document.body,{childList:true,subtree:true});
-}
-setTimeout(interceptVenteSubmit,1000);
-
-// ---- #4: Note sur fiabilisation annulation mouvement ----
-// Cette correction nécessite une modification plus profonde du code React
-// Elle sera gérée via le patch Python ci-dessous
-console.log("[V18] Patch annulation mouvement: voir code React");
-
+console.log("[PATCH V18] Prêt");
 })();
 // === FIN PATCH V18 ===
 </script>
