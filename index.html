@@ -74,19 +74,19 @@
   <div id="root"></div>
   
   <script>
-(()=>{const{useState:m,useEffect:te,useCallback:cn,useRef:is}=React,Ya=()=>{const p=document.getElementById("loading-screen");p&&p.classList.add("hidden")},Za={apiKey:"AIzaSyCgl30syyCEJif9q96E2jzv-aTXxXgvgv0",authDomain:"gestion-futs-hellfest.firebaseapp.com",databaseURL:"https://gestion-futs-hellfest-default-rtdb.europe-west1.firebasedatabase.app",projectId:"gestion-futs-hellfest",storageBucket:"gestion-futs-hellfest.firebasestorage.app",messagingSenderId:"107509834680",appId:"1:107509834680:web:3a58295d3268b5d19f654d"},mn=firebase.initializeApp(Za),v=firebase.database(),Ve=(p,J)=>J==="super_admin"?p==="HF2026Admin":p==="Hellfest26",en=({onJoinSession:p})=>{const[J,A]=m("choice"),[Ne,re]=m(""),[X,Ke]=m(""),[Be,se]=m(""),[me,he]=m(!1),[u,Qe]=m(null),[w,Le]=m(!0),[ye,Oe]=m(!1),[$,_e]=m(""),[S,qe]=m(!1),[$e,Se]=m([]),[c,We]=m(!1),[O,Ye]=m(""),[K,Ze]=m("");React.useEffect(()=>{const R=new URLSearchParams(window.location.search).get("session");R&&(re(R.toUpperCase()),A("join"),window.history.replaceState({},document.title,window.location.pathname))},[]),React.useEffect(()=>{const F=localStorage.getItem("gestionFuts_session"),R=localStorage.getItem("gestionFuts_userName"),V=localStorage.getItem("gestionFuts_isAdmin"),q=localStorage.getItem("gestionFuts_isCreator");F&&R?v.ref(`sessions/${F}`).once("value",I=>{I.exists()?Qe({code:F,userName:R,isAdmin:V==="true",isCreator:q==="true"}):(localStorage.removeItem("gestionFuts_session"),localStorage.removeItem("gestionFuts_userName"),localStorage.removeItem("gestionFuts_isAdmin"),localStorage.removeItem("gestionFuts_isCreator")),Le(!1)}):Le(!1)},[]);const D=async()=>{u&&(he(!0),await v.ref(`sessions/${u.code}/users/${u.userName}`).update({lastActive:Date.now()}),p(u.code,u.userName,u.isCreator))},pe=()=>{localStorage.removeItem("gestionFuts_session"),localStorage.removeItem("gestionFuts_userName"),localStorage.removeItem("gestionFuts_isAdmin"),localStorage.removeItem("gestionFuts_isCreator"),Qe(null)},T=async()=>{We(!0);const R=(await v.ref("sessions").once("value")).val()||{},V=Object.entries(R).map(([q,I])=>{var M;return{code:q,createdAt:((M=I.config)==null?void 0:M.createdAt)||0,nombreBars:I.bars?Object.keys(I.bars).length:0,nombreUsers:I.users?Object.keys(I.users).length:0,historiqueCount:I.historique?Object.keys(I.historique).length:0,ventesCount:I.historiqueVentes?Object.keys(I.historiqueVentes).length:0}});V.sort((q,I)=>I.createdAt-q.createdAt),Se(V),We(!1)},we=()=>{localStorage.removeItem("gestionFuts_session"),localStorage.removeItem("gestionFuts_userName"),localStorage.removeItem("gestionFuts_isAdmin"),localStorage.removeItem("gestionFuts_isCreator"),localStorage.removeItem("gestionFuts_backups"),localStorage.removeItem("gestionFuts_tutorielVu")},Ft=async F=>{confirm(`Supprimer d\xE9finitivement la session ${F} ?
+(()=>{const{useState:m,useEffect:te,useCallback:cn,useRef:is}=React,Ya=()=>{const p=document.getElementById("loading-screen");p&&p.classList.add("hidden")},Za={apiKey:"AIzaSyCgl30syyCEJif9q96E2jzv-aTXxXgvgv0",authDomain:"gestion-futs-hellfest.firebaseapp.com",databaseURL:"https://gestion-futs-hellfest-default-rtdb.europe-west1.firebasedatabase.app",projectId:"gestion-futs-hellfest",storageBucket:"gestion-futs-hellfest.firebasestorage.app",messagingSenderId:"107509834680",appId:"1:107509834680:web:3a58295d3268b5d19f654d"},mn=firebase.initializeApp(Za),v=firebase.database(),Ve=(p,J)=>J==="super_admin"?p==="HF2026Admin":p==="Hellfest26",en=({onJoinSession:p})=>{const[J,A]=m("choice"),[Ne,re]=m(""),[X,Ke]=m(""),[Be,se]=m(""),[me,he]=m(!1),[u,Qe]=m(null),[w,Le]=m(!0),[ye,Oe]=m(!1),[$,_e]=m(""),[S,qe]=m(!1),[$e,Se]=m([]),[c,We]=m(!1),[O,Ye]=m(""),[K,Ze]=m("");React.useEffect(()=>{const R=new URLSearchParams(window.location.search).get("session");R&&(re(R.toUpperCase()),A("join"),window.history.replaceState({},document.title,window.location.pathname))},[]),React.useEffect(()=>{const F=localStorage.getItem("gestionFuts_session"),R=localStorage.getItem("gestionFuts_userName"),V=localStorage.getItem("gestionFuts_isAdmin"),q=localStorage.getItem("gestionFuts_isCreator");F&&R?v.ref(`sessions/${F}`).once("value",I=>{I.exists()?Qe({code:F,userName:R,isAdmin:V==="true",isCreator:q==="true"}):(localStorage.removeItem("gestionFuts_session"),localStorage.removeItem("gestionFuts_userName"),localStorage.removeItem("gestionFuts_isAdmin"),localStorage.removeItem("gestionFuts_isCreator")),Le(!1)}):Le(!1)},[]);const D=async()=>{u&&(he(!0),await v.ref(`sessions/${u.code}/users/${u.userName}`).update({lastActive:Date.now()}),p(u.code,u.userName,u.isAdmin,u.isCreator))},pe=()=>{localStorage.removeItem("gestionFuts_session"),localStorage.removeItem("gestionFuts_userName"),localStorage.removeItem("gestionFuts_isAdmin"),localStorage.removeItem("gestionFuts_isCreator"),Qe(null)},T=async()=>{We(!0);const R=(await v.ref("sessions").once("value")).val()||{},V=Object.entries(R).map(([q,I])=>{var M;return{code:q,createdAt:((M=I.config)==null?void 0:M.createdAt)||0,nombreBars:I.bars?Object.keys(I.bars).length:0,nombreUsers:I.users?Object.keys(I.users).length:0,historiqueCount:I.historique?Object.keys(I.historique).length:0,ventesCount:I.historiqueVentes?Object.keys(I.historiqueVentes).length:0}});V.sort((q,I)=>I.createdAt-q.createdAt),Se(V),We(!1)},we=()=>{localStorage.removeItem("gestionFuts_session"),localStorage.removeItem("gestionFuts_userName"),localStorage.removeItem("gestionFuts_isAdmin"),localStorage.removeItem("gestionFuts_isCreator"),localStorage.removeItem("gestionFuts_backups"),localStorage.removeItem("gestionFuts_tutorielVu")},Ft=async F=>{confirm(`Supprimer d\xE9finitivement la session ${F} ?
 
 Toutes les donn\xE9es seront perdues (RGPD).`)&&(await v.ref(`sessions/${F}`).remove(),Se(V=>V.filter(q=>q.code!==F)),localStorage.getItem("gestionFuts_session")===F&&we())},Pe=async()=>{confirm(`\u26A0\uFE0F ATTENTION \u26A0\uFE0F
 
 Supprimer TOUTES les ${$e.length} sessions ?
 
 Cette action est IRR\xC9VERSIBLE !`)&&confirm(`Derni\xE8re confirmation :
-Voulez-vous vraiment supprimer toutes les donn\xE9es ?`)&&(await v.ref("sessions").remove(),Se([]),we())},Ae=()=>{Ve($,"super_admin")?(qe(!0),T()):alert("Mot de passe incorrect")},et=()=>{const F="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";let R="HF26-";for(let V=0;V<4;V++)R+=F.charAt(Math.floor(Math.random()*F.length));return R},ke=async()=>{if(!X.trim()){se("Entre ton pr\xE9nom");return}if(!Ve(O,"super_admin")){se("Mot de passe incorrect. Seul un administrateur peut cr\xE9er une session.");return}he(!0),se("");const R=et(),V=v.ref(`sessions/${R}`),q={config:{stockInitialBiere:50,stockInitialCidre:20,maxFutsParBar:3,nombreJours:4,createdAt:Date.now(),createdBy:X.trim()},creneaux:[{id:"c1",label:"11h30-13h"},{id:"c2",label:"13h-15h"},{id:"c3",label:"15h-18h"},{id:"c4",label:"18h-22h30"},{id:"c5",label:"22h30-00h30"}],jourActuel:1,users:{[X.trim()]:{joinedAt:Date.now(),lastActive:Date.now(),isSuperAdmin:!0,role:"superadmin"}}};await V.set(q),p(R,X.trim(),!0,!0)},Je=async()=>{if(!X.trim()){se("Entre ton pr\xE9nom");return}if(!Ne.trim()){se("Entre le code de session");return}he(!0),se("");const F=Ne.trim().toUpperCase(),R=v.ref(`sessions/${F}`);if(!(await R.once("value")).exists()){se("Session introuvable"),he(!1);return}const I=(await R.child("users").once("value")).val()||{};let M=X.trim();if(I[M]){const z=I[M];if(!(Date.now()-(z.lastActive||0)>3e5)){let be=2;for(;I[`${X.trim()} ${be}`];)be++;const at=`${X.trim()} ${be}`;if(!confirm(`Le nom "${M}" est d\xE9j\xE0 utilis\xE9 dans cette session.
+Voulez-vous vraiment supprimer toutes les donn\xE9es ?`)&&(await v.ref("sessions").remove(),Se([]),we())},Ae=()=>{Ve($,"super_admin")?(qe(!0),T()):alert("Mot de passe incorrect")},et=()=>{const F="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";let R="HF26-";for(let V=0;V<4;V++)R+=F.charAt(Math.floor(Math.random()*F.length));return R},ke=async()=>{if(!X.trim()){se("Entre ton pr\xE9nom");return}if(!Ve(O,"super_admin")){se("Mot de passe incorrect. Seul un administrateur peut cr\xE9er une session.");return}he(!0),se("");const R=et(),V=v.ref(`sessions/${R}`),q={config:{maxFutsParBar:3,nombreJours:4,volumeFutBiere:30,volumeFutCidre:20,volumePinte:0.5,volumePichet:1.5,prixPinte:6,prixPichet:15,prixGobelet:2,seuilToleranceVolume:10,seuilToleranceFinancier:5,minBenevolesParBar:2,createdAt:Date.now(),createdBy:X.trim()},creneaux:[{id:"c1",label:"11h30-13h"},{id:"c2",label:"13h-15h"},{id:"c3",label:"15h-18h"},{id:"c4",label:"18h-22h30"},{id:"c5",label:"22h30-00h30"}],jourActuel:1,users:{[X.trim()]:{joinedAt:Date.now(),lastActive:Date.now(),isSuperAdmin:!0,role:"superadmin"}}};await V.set(q),p(R,X.trim(),!0,!0)},Je=async()=>{if(!X.trim()){se("Entre ton pr\xE9nom");return}if(!Ne.trim()){se("Entre le code de session");return}he(!0),se("");const F=Ne.trim().toUpperCase(),R=v.ref(`sessions/${F}`);if(!(await R.once("value")).exists()){se("Session introuvable"),he(!1);return}const I=(await R.child("users").once("value")).val()||{};let M=X.trim();if(I[M]){const z=I[M];if(!(Date.now()-(z.lastActive||0)>3e5)){let be=2;for(;I[`${X.trim()} ${be}`];)be++;const at=`${X.trim()} ${be}`;if(!confirm(`Le nom "${M}" est d\xE9j\xE0 utilis\xE9 dans cette session.
 
 Voulez-vous vous connecter sous "${at}" ?`)){he(!1);return}M=at}}const tt=K&&Ve(K,"super_admin"),isAdm=K&&Ve(K,"admin"),xe={joinedAt:Date.now(),lastActive:Date.now(),role:tt?"superadmin":isAdm?"admin":"visiteur"};tt&&(xe.isSuperAdmin=!0),await R.child(`users/${M}`).set(xe),p(F,M,tt||isAdm,tt)};return J==="choice"?React.createElement("div",{className:"min-h-screen bg-black flex items-center justify-center p-4"},React.createElement("div",{className:"w-full max-w-sm"},React.createElement("div",{className:"text-center mb-8"},React.createElement("img",{src:"logo-hellfest.png",alt:"Hellfest",className:"w-24 h-24 mx-auto mb-4"}),React.createElement("h1",{className:"text-2xl font-bold text-white mb-2"},"Gestion F\xFBts"),React.createElement("p",{className:"text-green-400 font-bold"},"HELLFEST 2026")),w?React.createElement("div",{className:"mb-6 p-4 bg-neutral-800 rounded-xl text-center"},React.createElement("p",{className:"text-neutral-400"},"Chargement...")):u&&React.createElement("div",{className:"mb-6 p-4 bg-green-900/30 border border-green-700 rounded-xl"},React.createElement("div",{className:"flex items-center justify-between mb-3"},React.createElement("span",{className:"text-green-400 font-bold"},"\u{1F4C2} Session r\xE9cente"),React.createElement("button",{onClick:pe,className:"text-xs text-neutral-500 hover:text-red-400",title:"Oublier cette session"},"\u2715")),React.createElement("div",{className:"mb-3"},React.createElement("p",{className:"text-white font-mono text-lg"},u.code),React.createElement("p",{className:"text-sm text-neutral-400"},"Connect\xE9 en tant que ",React.createElement("span",{className:"text-green-300"},u.userName),u.isCreator&&React.createElement("span",{className:"ml-2 text-xs bg-red-800 px-2 py-0.5 rounded"},"Cr\xE9ateur"),u.isAdmin&&!u.isCreator&&React.createElement("span",{className:"ml-2 text-xs bg-green-800 px-2 py-0.5 rounded"},"Admin"))),React.createElement("button",{onClick:D,disabled:me,className:"w-full py-3 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold transition-colors disabled:opacity-50"},me?"\u23F3 Connexion...":"\u{1F504} Reprendre cette session")),React.createElement("div",{className:"space-y-4"},React.createElement("button",{onClick:()=>A("create"),className:"w-full py-4 bg-red-600 text-white rounded-xl font-bold text-lg hover:bg-red-700 transition-colors"},"\u{1F195} Cr\xE9er une session"),React.createElement("button",{onClick:()=>A("join"),className:"w-full py-4 bg-neutral-800 text-white rounded-xl font-bold text-lg hover:bg-neutral-700 transition-colors border border-neutral-700"},"\u{1F517} Rejoindre une session")),React.createElement("button",{onClick:()=>Oe(!0),className:"mt-8 text-neutral-600 text-xs hover:text-neutral-400 transition-colors"},"\u{1F510} Administration")),ye&&React.createElement("div",{className:"fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50"},React.createElement("div",{className:"bg-neutral-900 rounded-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto border border-neutral-700"},React.createElement("div",{className:"flex items-center justify-between mb-4"},React.createElement("h3",{className:"text-xl font-bold text-red-400"},"\u{1F510} Super Admin"),React.createElement("button",{onClick:()=>{Oe(!1),qe(!1),_e("")},className:"text-neutral-400 hover:text-white"},"\u2715")),S?React.createElement("div",{className:"space-y-4"},React.createElement("div",{className:"flex items-center justify-between"},React.createElement("p",{className:"text-green-400 text-sm"},"\u2713 Authentifi\xE9"),React.createElement("button",{onClick:T,className:"text-xs text-neutral-400 hover:text-white"},"\u{1F504} Actualiser")),React.createElement("div",{className:"bg-yellow-900/30 border border-yellow-700 rounded-lg p-3"},React.createElement("p",{className:"text-yellow-400 text-sm"},"\u26A0\uFE0F RGPD : La suppression est d\xE9finitive et irr\xE9versible.")),c?React.createElement("p",{className:"text-center text-neutral-400 py-4"},"Chargement..."):$e.length===0?React.createElement("p",{className:"text-center text-neutral-500 py-4"},"Aucune session trouv\xE9e"):React.createElement("div",{className:"space-y-2 max-h-64 overflow-y-auto"},$e.map(F=>React.createElement("div",{key:F.code,className:"bg-neutral-800 rounded-lg p-3 flex items-center justify-between"},React.createElement("div",null,React.createElement("p",{className:"font-mono font-bold text-white"},F.code),React.createElement("p",{className:"text-xs text-neutral-400"},F.createdAt?new Date(F.createdAt).toLocaleDateString("fr-FR"):"Date inconnue"," \u2022 ",F.nombreUsers," user(s) \u2022 ",F.historiqueCount+F.ventesCount," enregistrements")),React.createElement("button",{onClick:()=>Ft(F.code),className:"px-3 py-1 bg-red-600 hover:bg-red-500 rounded text-sm"},"\u{1F5D1}\uFE0F")))),$e.length>0&&React.createElement("button",{onClick:Pe,className:"w-full py-3 bg-red-900 hover:bg-red-800 rounded-lg font-medium border border-red-600 mt-4"},"\u{1F5D1}\uFE0F Supprimer TOUTES les sessions (",$e.length,")"),React.createElement("button",{onClick:()=>{confirm(`Purger toutes les donn\xE9es locales de cet appareil ?
 
 (Backups, session m\xE9moris\xE9e, pr\xE9f\xE9rences)
-Les donn\xE9es sur Firebase ne sont pas affect\xE9es.`)&&(we(),alert("\u2705 Donn\xE9es locales purg\xE9es."))},className:"w-full py-3 bg-neutral-800 hover:bg-neutral-700 rounded-lg font-medium border border-neutral-600 mt-2 text-neutral-300"},"\u{1F9F9} Purger les donn\xE9es locales de cet appareil")):React.createElement("div",{className:"space-y-4"},React.createElement("p",{className:"text-neutral-400 text-sm"},"Acc\xE8s r\xE9serv\xE9 \xE0 l'administrateur principal."),React.createElement("div",null,React.createElement("label",{className:"block text-sm text-neutral-400 mb-1"},"Mot de passe Super Admin"),React.createElement("input",{type:"password",value:$,onChange:F=>_e(F.target.value),className:"w-full px-4 py-3 bg-neutral-800 rounded-lg",placeholder:"Mot de passe...",onKeyPress:F=>F.key==="Enter"&&Ae()})),React.createElement("button",{onClick:Ae,className:"w-full py-3 bg-red-600 rounded-lg font-medium"},"Acc\xE9der"))))):React.createElement("div",{className:"min-h-screen bg-black flex items-center justify-center p-4"},React.createElement("div",{className:"w-full max-w-sm"},React.createElement("button",{onClick:()=>{A("choice"),se(""),Ye("")},className:"text-neutral-400 mb-6 flex items-center gap-2"},"\u2190 Retour"),React.createElement("h2",{className:"text-xl font-bold text-white mb-6"},J==="create"?"\u{1F195} Nouvelle session":"\u{1F517} Rejoindre"),React.createElement("div",{className:"space-y-4"},React.createElement("div",null,React.createElement("label",{className:"block text-neutral-400 text-sm mb-2"},"Ton pr\xE9nom"),React.createElement("input",{type:"text",value:X,onChange:F=>Ke(F.target.value),className:"w-full px-4 py-3 bg-neutral-900 border border-neutral-700 rounded-xl text-white text-lg",placeholder:"Ex: Kevin"})),J==="create"&&React.createElement("div",null,React.createElement("label",{className:"block text-neutral-400 text-sm mb-2"},"\u{1F510} Mot de passe administrateur"),React.createElement("input",{type:"password",value:O,onChange:F=>Ye(F.target.value),className:"w-full px-4 py-3 bg-neutral-900 border border-neutral-700 rounded-xl text-white text-lg",placeholder:"Mot de passe..."}),React.createElement("p",{className:"text-neutral-500 text-xs mt-1"},"Requis pour cr\xE9er une nouvelle session")),J==="join"&&React.createElement("div",null,React.createElement("label",{className:"block text-neutral-400 text-sm mb-2"},"Code de session"),React.createElement("input",{type:"text",value:Ne,onChange:F=>re(F.target.value.toUpperCase()),className:"w-full px-4 py-3 bg-neutral-900 border border-neutral-700 rounded-xl text-white text-lg text-center tracking-widest",placeholder:"HF26-XXXX",maxLength:9})),J==="join"&&React.createElement("div",null,React.createElement("label",{className:"block text-neutral-400 text-sm mb-2"},"\u{1F511} Mot de passe Super Admin ",React.createElement("span",{className:"text-neutral-600"},"(optionnel)")),React.createElement("input",{type:"password",value:K,onChange:F=>Ze(F.target.value),className:"w-full px-4 py-3 bg-neutral-900 border border-neutral-700 rounded-xl text-white text-lg",placeholder:"Laisser vide si b\xE9n\xE9vole"}),React.createElement("p",{className:"text-neutral-600 text-xs mt-1"},"Remplir uniquement pour se connecter en Super Admin")),Be&&React.createElement("div",{className:"p-3 bg-red-900/50 border border-red-700 rounded-xl text-red-300 text-sm"},Be),React.createElement("button",{onClick:J==="create"?ke:Je,disabled:me,className:"w-full py-4 bg-red-600 text-white rounded-xl font-bold text-lg hover:bg-red-700 transition-colors disabled:opacity-50"},me?"\u23F3 Connexion...":J==="create"?"\u2728 Cr\xE9er":"\u{1F680} Rejoindre"))))},tn=()=>{var Us,zs,Hs,Gs,Xs;const[p,J]=m(null),[A,Ne]=m(""),[re,X]=m(!0),Ke=is(!1),[Be,se]=m([]),[me,he]=m({});te(()=>{Ya()},[]);const[u,Qe]=m({stockInitialBiere:50,stockInitialCidre:20,maxFutsParBar:3,nombreJours:4,prixPinte:6,prixPichet:15,prixGobelet:2,volumePinte:.5,volumePichet:1.5,volumeFutBiere:30,volumeFutCidre:20,seuilPerte:10}),[w,Le]=m([]),[ye,Oe]=m([]),[$,_e]=m([]),[S,qe]=m([]),[$e,Se]=m([]),[c,We]=m(1),[O,Ye]=m([{id:"c1",label:"11h30-13h"},{id:"c2",label:"13h-15h"},{id:"c3",label:"15h-18h"},{id:"c4",label:"18h-22h30"},{id:"c5",label:"22h30-00h30"}]),[K,Ze]=m({}),[D,pe]=m(!1),[T,we]=m(!1),[Ft,Pe]=m(!1),[Ae,et]=m(""),[ke,Je]=m(null),[F,R]=m(!1),[V,q]=m(!1),[I,M]=m(!1),[tt,xe]=m(!1),[z,st]=m(null),[$t,be]=m("choix"),[at,St]=m(""),[Pt,nt]=m(""),[Ws,rt]=m(!1),[Ys,ds]=m(!1),[Zs,At]=m(!1),[ea,lt]=m(!1),[Ee,Re]=m("planning"),[U,Me]=m(null),[Q,le]=m(null),[fe,ot]=m([]),[it,kt]=m(""),[W,Ue]=m(""),[oe,ze]=m(""),[us,Et]=m(""),[Rt,It]=m(""),[Tt,jt]=m(""),[Dt,Vt]=m(""),[cs,Bt]=m(""),[Ie,Lt]=m(!1),[ms,Ot]=m(""),[ps,_t]=m(!1),[xs,bs]=m({}),[ta,qt]=m(!1),[fs,Jt]=m(""),[sa,He]=m(null),[Mt,gs]=m(""),[Ut,vs]=m(null),k=(e,t="success")=>{vs({message:e,type:t}),setTimeout(()=>vs(null),3e3)},[Y,ge]=m(!1),[zt,aa]=m("tous"),[Ht,na]=m("tous"),[Gt,ra]=m(""),[Xt,la]=m(""),[oa,Ns]=m(!1),[ve,dt]=m("synthese"),[ia,hs]=m(!1),[sn,ys]=m([]),[Ce,ws]=m([]),[da,Cs]=m(!1),[Fs,$s]=m([]),[Kt,Ss]=m(!1),[ut,Ps]=m(""),[ua,Qt]=m(!1),[_,ct]=m(null),[ca,mt]=m(!1),[ae,pt]=m(0),[Ge,As]=m(""),[an,nn]=m(!1),[ma,ks]=m(!1),[H,Wt]=m(!1),[xt,Es]=m({}),[Te,bt]=m(null),[xb,Eb]=m(null),[pa,ft]=m(null),[,xa]=m(0),ba=e=>{const s=Date.now()-e,n=Math.floor(s/(1e3*60*60)),r=Math.floor(s%(1e3*60*60)/(1e3*60));return n>0?`${n}h${r.toString().padStart(2,"0")}`:`${r}min`},Rs=e=>{const t=(Date.now()-e)/36e5;return t>=4?"bg-red-600 text-white":t>=3?"bg-orange-500 text-white":t>=1.5?"bg-yellow-500 text-black":"bg-neutral-700"},Is=["bg-red-600","bg-blue-600","bg-green-600","bg-yellow-600","bg-purple-600","bg-pink-600","bg-indigo-600","bg-teal-600","bg-orange-600","bg-cyan-600"],Ts=e=>{const t=w.findIndex(s=>s.id===e);return Is[t%Is.length]};te(()=>{if(!p)return;const e=v.ref(`sessions/${p}`);e.child("config").on("value",a=>{a.val()&&Qe(a.val())}),e.child("config/adminEmail").on("value",a=>{a.val()&&As(a.val())}),e.child("barsNomades").on("value",a=>{if(a.val()){const o=Object.entries(a.val()).map(([d,b])=>({id:d,...b}));Le(o),o.length>0&&!U&&Me(o[0].id)}else Le([])}),e.child("barPositions").on("value",a=>{a.val()?Es(a.val()):Es({})}),e.child("historique").on("value",a=>{if(a.val()){const o=Object.entries(a.val()).map(([d,b])=>({id:d,...b}));o.sort((d,b)=>b.timestamp-d.timestamp),_e(o)}else _e([])}),e.child("historiqueVentes").on("value",a=>{if(a.val()){const o=Object.entries(a.val()).map(([d,b])=>({id:d,...b}));o.sort((d,b)=>b.timestamp-d.timestamp),qe(o)}else qe([])}),e.child("creneauxUtilises").on("value",a=>{a.val()?bs(a.val()):bs({})}),e.child("benevoles").on("value",a=>{if(a.val()){const o=Object.entries(a.val()).map(([d,b])=>({id:d,...b}));Se(o)}else Se([])}),e.child("users").on("value",a=>{if(a.val()){const o=Object.keys(a.val());se(o),he(a.val())}}),e.child("jourActuel").on("value",a=>{a.val()&&We(a.val())}),e.child("creneaux").on("value",a=>{if(a.val()){const o=Array.isArray(a.val())?a.val():Object.values(a.val());Ye(o)}}),e.child("futsEnAttente").on("value",a=>{if(a.val()){const o=Object.entries(a.val()).map(([d,b])=>({id:d,...b}));Oe(o)}else Oe([])});const t=v.ref(".info/connected");t.on("value",a=>{X(a.val()===!0)});const s=setInterval(()=>{e.child(`users/${A}/lastActive`).set(Date.now())},3e4),n=e.child(`users/${A}`);n.on("value",a=>{!a.exists()&&p&&!Ke.current&&(alert("Vous avez \xE9t\xE9 d\xE9connect\xE9 par un administrateur."),J(null),Ne(""),pe(!1))});const r=[e.child("config"),e.child("config/adminEmail"),e.child("barsNomades"),e.child("barPositions"),e.child("historique"),e.child("historiqueVentes"),e.child("creneauxUtilises"),e.child("benevoles"),e.child("users"),e.child("jourActuel"),e.child("creneaux"),e.child("futsEnAttente")];return()=>{r.forEach(a=>a.off()),n.off(),t.off(),clearInterval(s)}},[p,A]),te(()=>{const e=setInterval(()=>{xa(t=>t+1)},6e4);return()=>clearInterval(e)},[]),te(()=>{if(!p||!T||!Ge)return;let e=!1;const t=setInterval(()=>{const s=new Date,n=s.getHours(),r=s.getMinutes();n===0&&r===30&&!e&&(e=!0,fa(),setTimeout(()=>{e=!1},12e4))},3e4);return()=>clearInterval(t)},[p,T,Ge,c]);const fa=()=>{Ms().save(`Bilan_J${c}_${new Date().toISOString().split("T")[0]}.pdf`);const t=ns(),s=yt();let n=`[Hellfest 2026] Bilan J${c} - ${t.totalVentesJour.toFixed(2)}\u20AC`,r=`Bilan automatique J${c} - ${new Date().toLocaleDateString("fr-FR")}%0D%0A%0D%0A`;r+="R\xC9SUM\xC9:%0D%0A",r+=`- Ventes du jour: ${t.totalVentesJour.toFixed(2)}\u20AC%0D%0A`,r+=`- F\xFBts en circulation: ${t.futsEnCirculation}%0D%0A`,s&&(r+=`%0D%0ACOMPARAISON J${s.jour} vs J${s.jourMoins1}:%0D%0A`,r+=`- \xC9cart ventes: ${s.ecartVentes>=0?"+":""}${s.ecartVentes.toFixed(2)}\u20AC (${s.ecartPourcent}%)%0D%0A`),r+="%0D%0ALe PDF d\xE9taill\xE9 a \xE9t\xE9 t\xE9l\xE9charg\xE9 automatiquement.%0D%0A",r+=`Session: ${p}`,window.open(`mailto:${Ge}?subject=${encodeURIComponent(n)}&body=${r}`,"_blank"),k("\u{1F4E7} Bilan g\xE9n\xE9r\xE9 - V\xE9rifiez votre client mail")};te(()=>{if(!p)return;const e=v.ref(`sessions/${p}/annonces`);return e.orderByChild("timestamp").limitToLast(5).on("value",t=>{if(t.val()){const s=Object.entries(t.val()).map(([n,r])=>({id:n,...r}));s.sort((n,r)=>r.timestamp-n.timestamp),$s(s)}else $s([])}),()=>e.off()},[p]),te(()=>{re&&Ce.length>0&&!da&&ga()},[re,Ce]);const ga=async()=>{if(Ce.length!==0){Cs(!0);for(const e of Ce)try{e.type==="SORTIE"?(await v.ref(`sessions/${p}/barsNomades/${e.barId}/futs`).set(e.futs),await v.ref(`sessions/${p}/historique`).push(e.historique)):e.type==="VENTE"&&await v.ref(`sessions/${p}/historiqueVentes`).push(e.data)}catch(t){console.error("Erreur sync:",t)}ws([]),Cs(!1),k(`\u2705 ${Ce.length} action(s) synchronis\xE9e(s)`)}},rn=e=>{ws(t=>[...t,e]),k("\u23F3 Action en attente (hors-ligne)","warning")};te(()=>{if(!p)return;const e=setInterval(()=>{const t={session:p,timestamp:Date.now(),config:u,barsNomades:w,historique:$,historiqueVentes:S,affectations:K,jourActuel:c},s=JSON.parse(localStorage.getItem("gestionFuts_backups")||"[]");s.unshift(t);const n=s.slice(0,8);localStorage.setItem("gestionFuts_backups",JSON.stringify(n)),console.log("Backup automatique effectu\xE9:",new Date().toLocaleString())},36e5);return setTimeout(()=>{const t={session:p,timestamp:Date.now(),config:u,barsNomades:w,historique:$,historiqueVentes:S,affectations:K,jourActuel:c},s=JSON.parse(localStorage.getItem("gestionFuts_backups")||"[]");s.unshift(t),localStorage.setItem("gestionFuts_backups",JSON.stringify(s.slice(0,8)))},5e3),()=>clearInterval(e)},[p,u,w,$,S,K,c]),te(()=>{if(!p||!c)return;const e=v.ref(`sessions/${p}/affectations/jour${c}`);return e.on("value",t=>{t.val()?Ze(t.val()):Ze({})}),()=>{e.off()}},[p,c]),te(()=>{if(!p)return;const e=v.ref(`sessions/${p}/auditLogs`);return e.orderByChild("timestamp").limitToLast(100).on("value",t=>{if(t.val()){const s=Object.entries(t.val()).map(([n,r])=>({id:n,...r}));s.sort((n,r)=>r.timestamp-n.timestamp),ys(s)}else ys([])}),()=>{e.off()}},[p]);const va=async e=>{var t;if(!(!(T||D)||e===A)){if(e===u.createdBy){alert("Impossible d'\xE9jecter le cr\xE9ateur de la session.");return}if((t=me[e])!=null&&t.isSuperAdmin){alert("Impossible d'\xE9jecter un Super Admin.");return}confirm(`\xCAtes-vous s\xFBr de vouloir \xE9jecter ${e} ?`)&&await v.ref(`sessions/${p}/users/${e}`).remove()}},ie=u.stockInitialBiere-$.filter(e=>!e.annule&&e.type==="SORTIE"&&e.typeFut==="biere").length+$.filter(e=>!e.annule&&e.type==="RETOUR_PLEIN"&&e.typeFut==="biere").length,de=u.stockInitialCidre-$.filter(e=>!e.annule&&e.type==="SORTIE"&&e.typeFut==="cidre").length+$.filter(e=>!e.annule&&e.type==="RETOUR_PLEIN"&&e.typeFut==="cidre").length,Na=$.filter(e=>!e.annule&&e.type==="RETOUR_VIDE").length,ha=$.filter(e=>!e.annule&&e.type==="RETOUR_CASSE").length,ya=$.filter(e=>!e.annule&&e.type==="RETOUR_REUTILISABLE").length,ln=$.filter(e=>!e.annule&&e.type==="RETOUR_PLEIN").length,js=S.filter(e=>!e.annule).reduce((e,t)=>e+(t.montant||0),0),ue=(()=>{let e=0;return Object.values(K).forEach(t=>{Object.values(t||{}).forEach(s=>{var n,r,a;s&&((n=s.vendeur)!=null&&n.nom||(r=s.serveur)!=null&&r.nom||(a=s.runner)!=null&&a.nom)&&e++})}),e})(),wa=(e,t,s=!1,c=!1)=>{J(e),Ne(t),s&&pe(!0),c&&we(!0),localStorage.setItem("gestionFuts_session",e),localStorage.setItem("gestionFuts_userName",t),localStorage.setItem("gestionFuts_isAdmin",s?"true":"false"),localStorage.setItem("gestionFuts_isCreator",c?"true":"false"),localStorage.getItem("gestionFuts_tutorielVu")||setTimeout(()=>{mt(!0),pt(0)},500)},Ca=()=>{confirm("Voulez-vous vous d\xE9connecter de cette session ?")&&(Ke.current=!0,p&&A&&v.ref(`sessions/${p}/users/${A}`).remove(),localStorage.removeItem("gestionFuts_session"),localStorage.removeItem("gestionFuts_userName"),localStorage.removeItem("gestionFuts_isAdmin"),localStorage.removeItem("gestionFuts_isCreator"),J(null),Ne(""),pe(!1),we(!1))},dn=()=>{localStorage.removeItem("gestionFuts_session"),localStorage.removeItem("gestionFuts_userName"),localStorage.removeItem("gestionFuts_isAdmin"),localStorage.removeItem("gestionFuts_isCreator")},Xe=e=>{D?Yt(e):(Je(e),et(""),Pe(!0))},Ds=()=>{if(Ve(Ae,"super_admin")){pe(!0),we(!0),v.ref(`sessions/${p}/users/${A}`).update({isSuperAdmin:!0,role:"superadmin"}),localStorage.setItem("gestionFuts_isAdmin","true"),localStorage.setItem("gestionFuts_isCreator","true"),Pe(!1),ke&&(Yt(ke),Je(null));return}Ve(Ae,"admin")?(pe(!0),Pe(!1),ke&&(Yt(ke),Je(null))):alert("Mot de passe incorrect")},Yt=e=>{switch(e){case"parametres":R(!0);break;case"export":xe(!0);break;case"historique":q(!V);break;case"ventes":M(!I);break;case"jour_prev":c>1&&v.ref(`sessions/${p}/jourActuel`).set(c-1);break;case"jour_next":c<u.nombreJours&&v.ref(`sessions/${p}/jourActuel`).set(c+1);break}},Fa=async(e,t)=>{await v.ref(`sessions/${p}/barsNomades`).push().set({nom:e,type:t,futs:[]})},$a=async e=>{var s;const t=w.find(n=>n.id===e);if(((s=t==null?void 0:t.futs)==null?void 0:s.length)>0){alert("Impossible de supprimer un bar avec des f\xFBts en cours");return}await v.ref(`sessions/${p}/barsNomades/${e}`).remove();for(let n=1;n<=u.nombreJours;n++)await v.ref(`sessions/${p}/affectations/jour${n}/${e}`).remove()},Vs=async(e,t)=>{if(!t||!t.trim()){k("\u274C Le nom du bar ne peut pas \xEAtre vide","error");return}if(t.trim().length>30){k("\u274C Nom trop long (max 30 car.)","error");return}await v.ref(`sessions/${p}/barsNomades/${e}/nom`).set(t.trim());k(`\u2705 Bar renomm\xE9 en "${t.trim()}"`);},gt=async(e,t)=>{const s={action:e,details:t,user:A,timestamp:Date.now(),jour:c};await v.ref(`sessions/${p}/auditLogs`).push(s)},Sa=async e=>{if(Y)return;const t=w.find(r=>r.id===e);if(!t)return;const s=t.futs||[];if(s.length>=u.maxFutsParBar)return;const n=t.type;if(!(n==="biere"&&ie<=0)&&!(n==="cidre"&&de<=0)){ge(!0);try{const r={id:Date.now().toString(),type:n,dateAttribution:Date.now()},a=[...s,r];await v.ref(`sessions/${p}/barsNomades/${e}/futs`).set(a),await v.ref(`sessions/${p}/historique`).push({type:"SORTIE",typeFut:n,barId:e,barNom:t.nom,jour:c,timestamp:Date.now(),user:A}),await gt("SORTIE_FUT",`${n==="biere"?"\u{1F37A} Bi\xE8re":"\u{1F34E} Cidre"} \u2192 ${t.nom}`),k(`\u2705 F\xFBt ${n==="biere"?"\u{1F37A}":"\u{1F34E}"} attribu\xE9 \xE0 ${t.nom}`)}catch(r){k("\u274C Erreur lors de l'attribution","error")}finally{setTimeout(()=>ge(!1),1e3)}}},vt=async(e,t,s,n="")=>{if(Y)return;const r=w.find(d=>d.id===e);if(!r)return;const a=r.futs||[],o=a[t];if(o){ge(!0);try{const d=a.filter((g,i)=>i!==t);await v.ref(`sessions/${p}/barsNomades/${e}/futs`).set(d.length>0?d:null);const b={type:s,typeFut:o.type,barId:e,barNom:r.nom,jour:c,timestamp:Date.now(),user:A};n.trim()&&(b.commentaire=n.trim()),await v.ref(`sessions/${p}/historique`).push(b),s==="RETOUR_REUTILISABLE"&&await v.ref(`sessions/${p}/futsEnAttente`).push({typeFut:o.type,barId:e,barNom:r.nom,jourOrigine:c,timestamp:Date.now(),user:A});const l={RETOUR_VIDE:"\u{1F4E6} Vide",RETOUR_CASSE:"\u{1F4A5} Cass\xE9",RETOUR_REUTILISABLE:"\u267B\uFE0F Non termin\xE9",RETOUR_PLEIN:"\u{1F504} Plein (r\xE9int\xE9gr\xE9 au stock)"};await gt("RETOUR_FUT",`${l[s]} de ${r.nom}`),k(`\u2705 F\xFBt retourn\xE9 (${l[s]})`)}catch(d){k("\u274C Erreur lors du retour","error")}finally{setTimeout(()=>ge(!1),1e3)}st(null),be("choix"),St(""),nt("")}},Pa=async(e,t)=>{const s=w.find(b=>b.id===t);if(!s)return;const r=(await v.ref(`sessions/${p}/futsEnAttente/${e}`).once("value")).val();if(!r)return;const a=s.futs||[],o={type:r.typeFut,addedAt:Date.now(),reprisDe:r.jourOrigine},d=[...a,o];await v.ref(`sessions/${p}/barsNomades/${t}/futs`).set(d),await v.ref(`sessions/${p}/historique`).push({type:"REPRISE",typeFut:r.typeFut,barId:t,barNom:s.nom,jour:c,timestamp:Date.now(),user:A,commentaire:`Reprise du J${r.jourOrigine}`}),await v.ref(`sessions/${p}/futsEnAttente/${e}`).remove()},Aa=async()=>{if(!W||Y)return;if(!oe){k("\u274C S\xE9lectionnez un cr\xE9neau horaire","error");return}const e=parseFloat(us)||0;const _pintes=parseInt(Rt)||0;const _pichets=parseInt(Tt)||0;const _gobelets=parseInt(Dt)||0;const _barInfo=w.find(b=>b.id===W);const _creneauInfo=O.find(cr=>cr.id===oe);if(!Ie&&e<=0){k("\u274C Le montant doit \xEAtre sup\xE9rieur \xE0 0","error");return}if(!Ie&&_pintes===0&&_pichets===0&&_gobelets===0){k("\u274C Renseignez au moins une quantit\xE9 (pintes, pichets ou gobelets)","error");return}if(_pintes<0||_pichets<0||_gobelets<0){k("\u274C Les quantit\xE9s ne peuvent pas \xEAtre n\xE9gatives","error");return}if(!confirm("\u{1F4CB} R\xC9CAPITULATIF VENTE\n\n"+(_barInfo?"\u{1F37A} Bar: "+_barInfo.nom+"\n":"")+"\u23F0 Cr\xE9neau: "+(_creneauInfo?_creneauInfo.label:"?")+"\n"+"\u{1F4B0} Montant: "+e.toFixed(2)+" \u20AC\n\n"+"Pintes: "+_pintes+" | Pichets: "+_pichets+" | Gobelets: "+_gobelets+"\n\nConfirmer ?")){return}const t=w.find(s=>s.id===W);ge(!0);try{if(await v.ref(`sessions/${p}/historiqueVentes`).push({barId:W,barNom:(t==null?void 0:t.nom)||"Bar inconnu",creneau:oe,montant:e,nbPintes:parseInt(Rt)||0,nbPichets:parseInt(Tt)||0,nbGobelets:parseInt(Dt)||0,equipementDefaillant:Ie,numEquipement:Ie?ms.trim():"",donneesPartielles:Ie?ps:!1,commentaire:cs,jour:c,timestamp:Date.now(),user:A}),!Ie){const s=`J${c}_${W}_${oe}`;await v.ref(`sessions/${p}/creneauxUtilises/${s}`).set({barId:W,creneau:oe,jour:c,timestamp:Date.now(),user:A}),await v.ref(`sessions/${p}/creneauxEnAttente/${s}`).remove()}await gt("VENTE",`${e.toFixed(2)}\u20AC - ${(t==null?void 0:t.nom)||"Bar inconnu"} (${oe})`),k(`\u2705 Vente enregistr\xE9e (${e.toFixed(2)}\u20AC)`),rt(!1),Ue(""),ze(""),Et(""),It(""),jt(""),Vt(""),Lt(!1),Ot(""),_t(!1),Bt("")}catch(s){k("\u274C Erreur lors de l'enregistrement","error")}finally{setTimeout(()=>ge(!1),1e3)}},ka=async e=>{await v.ref(`sessions/${p}/config`).update(e),R(!1)},Ea=async(e,t,s)=>{await v.ref(`sessions/${p}/barPositions/${e}`).set({x:t,y:s})},Ra=e=>{if(!H||!Te)return;const t=e.currentTarget.getBoundingClientRect(),s=(e.clientX-t.left)/t.width*100,n=(e.clientY-t.top)/t.height*100;Ea(Te,s,n);const r=w.filter(o=>!xt[o.id]),a=r.findIndex(o=>o.id===Te);a<r.length-1?bt(r[a+1].id):(bt(null),Wt(!1),k("\u2705 Tous les bars sont positionn\xE9s !"))},Ia=async e=>{await v.ref(`sessions/${p}/barPositions/${e}`).remove()},Ta=async()=>{confirm("R\xE9initialiser toutes les positions des bars sur le plan ?")&&(await v.ref(`sessions/${p}/barPositions`).remove(),k("Positions r\xE9initialis\xE9es"))},Bs=async e=>{if(!Ve(fs,"admin")){alert("Mot de passe incorrect");return}e&&(Os(),_s(),ts()),await v.ref(`sessions/${p}/historique`).remove(),await v.ref(`sessions/${p}/historiqueVentes`).remove(),await v.ref(`sessions/${p}/affectations`).remove(),await v.ref(`sessions/${p}/futsEnAttente`).remove(),await v.ref(`sessions/${p}/creneauxUtilises`).remove(),await v.ref(`sessions/${p}/creneauxEnAttente`).remove();for(const s of w)await v.ref(`sessions/${p}/barsNomades/${s.id}/futs`).set(null);qt(!1),Jt(""),alert("R\xE9initialisation effectu\xE9e !")},ja=async e=>{const t=S.find(n=>n.id===e);if(!t||!confirm(`Annuler cette vente ?
+Les donn\xE9es sur Firebase ne sont pas affect\xE9es.`)&&(we(),alert("\u2705 Donn\xE9es locales purg\xE9es."))},className:"w-full py-3 bg-neutral-800 hover:bg-neutral-700 rounded-lg font-medium border border-neutral-600 mt-2 text-neutral-300"},"\u{1F9F9} Purger les donn\xE9es locales de cet appareil")):React.createElement("div",{className:"space-y-4"},React.createElement("p",{className:"text-neutral-400 text-sm"},"Acc\xE8s r\xE9serv\xE9 \xE0 l'administrateur principal."),React.createElement("div",null,React.createElement("label",{className:"block text-sm text-neutral-400 mb-1"},"Mot de passe Super Admin"),React.createElement("input",{type:"password",value:$,onChange:F=>_e(F.target.value),className:"w-full px-4 py-3 bg-neutral-800 rounded-lg",placeholder:"Mot de passe...",onKeyPress:F=>F.key==="Enter"&&Ae()})),React.createElement("button",{onClick:Ae,className:"w-full py-3 bg-red-600 rounded-lg font-medium"},"Acc\xE9der"))))):React.createElement("div",{className:"min-h-screen bg-black flex items-center justify-center p-4"},React.createElement("div",{className:"w-full max-w-sm"},React.createElement("button",{onClick:()=>{A("choice"),se(""),Ye("")},className:"text-neutral-400 mb-6 flex items-center gap-2"},"\u2190 Retour"),React.createElement("h2",{className:"text-xl font-bold text-white mb-6"},J==="create"?"\u{1F195} Nouvelle session":"\u{1F517} Rejoindre"),React.createElement("div",{className:"space-y-4"},React.createElement("div",null,React.createElement("label",{className:"block text-neutral-400 text-sm mb-2"},"Ton pr\xE9nom"),React.createElement("input",{type:"text",value:X,onChange:F=>Ke(F.target.value),className:"w-full px-4 py-3 bg-neutral-900 border border-neutral-700 rounded-xl text-white text-lg",placeholder:"Ex: Kevin"})),J==="create"&&React.createElement("div",null,React.createElement("label",{className:"block text-neutral-400 text-sm mb-2"},"\u{1F510} Mot de passe administrateur"),React.createElement("input",{type:"password",value:O,onChange:F=>Ye(F.target.value),className:"w-full px-4 py-3 bg-neutral-900 border border-neutral-700 rounded-xl text-white text-lg",placeholder:"Mot de passe..."}),React.createElement("p",{className:"text-neutral-500 text-xs mt-1"},"Requis pour cr\xE9er une nouvelle session")),J==="join"&&React.createElement("div",null,React.createElement("label",{className:"block text-neutral-400 text-sm mb-2"},"Code de session"),React.createElement("input",{type:"text",value:Ne,onChange:F=>re(F.target.value.toUpperCase()),className:"w-full px-4 py-3 bg-neutral-900 border border-neutral-700 rounded-xl text-white text-lg text-center tracking-widest",placeholder:"HF26-XXXX",maxLength:9})),J==="join"&&React.createElement("div",null,React.createElement("label",{className:"block text-neutral-400 text-sm mb-2"},"\u{1F511} Mot de passe Super Admin ",React.createElement("span",{className:"text-neutral-600"},"(optionnel)")),React.createElement("input",{type:"password",value:K,onChange:F=>Ze(F.target.value),className:"w-full px-4 py-3 bg-neutral-900 border border-neutral-700 rounded-xl text-white text-lg",placeholder:"Laisser vide si b\xE9n\xE9vole"}),React.createElement("p",{className:"text-neutral-600 text-xs mt-1"},"Remplir uniquement pour se connecter en Super Admin")),Be&&React.createElement("div",{className:"p-3 bg-red-900/50 border border-red-700 rounded-xl text-red-300 text-sm"},Be),React.createElement("button",{onClick:J==="create"?ke:Je,disabled:me,className:"w-full py-4 bg-red-600 text-white rounded-xl font-bold text-lg hover:bg-red-700 transition-colors disabled:opacity-50"},me?"\u23F3 Connexion...":J==="create"?"\u2728 Cr\xE9er":"\u{1F680} Rejoindre"))))},tn=()=>{var Us,zs,Hs,Gs,Xs;const[p,J]=m(null),[A,Ne]=m(""),[re,X]=m(!0),Ke=is(!1),[Be,se]=m([]),[me,he]=m({});te(()=>{Ya()},[]);const[u,Qe]=m({maxFutsParBar:3,nombreJours:4,prixPinte:6,prixPichet:15,prixGobelet:2,volumePinte:.5,volumePichet:1.5,volumeFutBiere:30,volumeFutCidre:20,seuilToleranceVolume:10,seuilToleranceFinancier:5,minBenevolesParBar:2}),[w,Le]=m([]),[ye,Oe]=m([]),[$,_e]=m([]),[S,qe]=m([]),[$e,Se]=m([]),[c,We]=m(1),[O,Ye]=m([{id:"c1",label:"11h30-13h"},{id:"c2",label:"13h-15h"},{id:"c3",label:"15h-18h"},{id:"c4",label:"18h-22h30"},{id:"c5",label:"22h30-00h30"}]),[K,Ze]=m({}),[D,pe]=m(!1),[T,we]=m(!1),[Ft,Pe]=m(!1),[Ae,et]=m(""),[ke,Je]=m(null),[F,R]=m(!1),[V,q]=m(!1),[I,M]=m(!1),[tt,xe]=m(!1),[z,st]=m(null),[$t,be]=m("choix"),[at,St]=m(""),[Pt,nt]=m(""),[Ws,rt]=m(!1),[Ys,ds]=m(!1),[Zs,At]=m(!1),[ea,lt]=m(!1),[Ee,Re]=m("planning"),[U,Me]=m(null),[Q,le]=m(null),[fe,ot]=m([]),[it,kt]=m(""),[W,Ue]=m(""),[oe,ze]=m(""),[us,Et]=m(""),[Rt,It]=m(""),[Tt,jt]=m(""),[Dt,Vt]=m(""),[cs,Bt]=m(""),[Ie,Lt]=m(!1),[ms,Ot]=m(""),[ps,_t]=m(!1),[xs,bs]=m({}),[ta,qt]=m(!1),[fs,Jt]=m(""),[sa,He]=m(null),[Mt,gs]=m(""),[Ut,vs]=m(null),k=(e,t="success")=>{vs({message:e,type:t}),setTimeout(()=>vs(null),3e3)},[Y,ge]=m(!1),[zt,aa]=m("tous"),[Ht,na]=m("tous"),[Gt,ra]=m(""),[Xt,la]=m(""),[oa,Ns]=m(!1),[ve,dt]=m("synthese"),[ia,hs]=m(!1),[sn,ys]=m([]),[Ce,ws]=m([]),[da,Cs]=m(!1),[Fs,$s]=m([]),[Kt,Ss]=m(!1),[ut,Ps]=m(""),[ua,Qt]=m(!1),[_,ct]=m(null),[ca,mt]=m(!1),[ae,pt]=m(0),[Ge,As]=m(""),[an,nn]=m(!1),[ma,ks]=m(!1),[H,Wt]=m(!1),[xt,Es]=m({}),[Te,bt]=m(null),[xb,Eb]=m(null),[pa,ft]=m(null),[,xa]=m(0),ba=e=>{const s=Date.now()-e,n=Math.floor(s/(1e3*60*60)),r=Math.floor(s%(1e3*60*60)/(1e3*60));return n>0?`${n}h${r.toString().padStart(2,"0")}`:`${r}min`},Rs=e=>{const t=(Date.now()-e)/36e5;return t>=4?"bg-red-600 text-white":t>=3?"bg-orange-500 text-white":t>=1.5?"bg-yellow-500 text-black":"bg-neutral-700"},Is=["bg-red-600","bg-blue-600","bg-green-600","bg-yellow-600","bg-purple-600","bg-pink-600","bg-indigo-600","bg-teal-600","bg-orange-600","bg-cyan-600"],Ts=e=>{const t=w.findIndex(s=>s.id===e);return Is[t%Is.length]};te(()=>{if(!p)return;const e=v.ref(`sessions/${p}`);e.child("config").on("value",a=>{a.val()&&Qe(a.val())}),e.child("config/adminEmail").on("value",a=>{a.val()&&As(a.val())}),e.child("barsNomades").on("value",a=>{if(a.val()){const o=Object.entries(a.val()).map(([d,b])=>({id:d,...b}));Le(o),o.length>0&&!U&&Me(o[0].id)}else Le([])}),e.child("barPositions").on("value",a=>{a.val()?Es(a.val()):Es({})}),e.child("historique").on("value",a=>{if(a.val()){const o=Object.entries(a.val()).map(([d,b])=>({id:d,...b}));o.sort((d,b)=>b.timestamp-d.timestamp),_e(o)}else _e([])}),e.child("historiqueVentes").on("value",a=>{if(a.val()){const o=Object.entries(a.val()).map(([d,b])=>({id:d,...b}));o.sort((d,b)=>b.timestamp-d.timestamp),qe(o)}else qe([])}),e.child("creneauxUtilises").on("value",a=>{a.val()?bs(a.val()):bs({})}),e.child("benevoles").on("value",a=>{if(a.val()){const o=Object.entries(a.val()).map(([d,b])=>({id:d,...b}));Se(o)}else Se([])}),e.child("users").on("value",a=>{if(a.val()){const o=Object.keys(a.val());se(o),he(a.val())}}),e.child("jourActuel").on("value",a=>{a.val()&&We(a.val())}),e.child("creneaux").on("value",a=>{if(a.val()){const o=Array.isArray(a.val())?a.val():Object.values(a.val());Ye(o)}}),e.child("futsEnAttente").on("value",a=>{if(a.val()){const o=Object.entries(a.val()).map(([d,b])=>({id:d,...b}));Oe(o)}else Oe([])});const t=v.ref(".info/connected");t.on("value",a=>{X(a.val()===!0)});const s=setInterval(()=>{e.child(`users/${A}/lastActive`).set(Date.now())},3e4),n=e.child(`users/${A}`);n.on("value",a=>{!a.exists()&&p&&!Ke.current&&(alert("Vous avez \xE9t\xE9 d\xE9connect\xE9 par un administrateur."),J(null),Ne(""),pe(!1))});const r=[e.child("config"),e.child("config/adminEmail"),e.child("barsNomades"),e.child("barPositions"),e.child("historique"),e.child("historiqueVentes"),e.child("creneauxUtilises"),e.child("benevoles"),e.child("users"),e.child("jourActuel"),e.child("creneaux"),e.child("futsEnAttente")];return()=>{r.forEach(a=>a.off()),n.off(),t.off(),clearInterval(s)}},[p,A]),te(()=>{const e=setInterval(()=>{xa(t=>t+1)},6e4);return()=>clearInterval(e)},[]),te(()=>{if(!p||!T||!Ge)return;let e=!1;const t=setInterval(()=>{const s=new Date,n=s.getHours(),r=s.getMinutes();n===0&&r===30&&!e&&(e=!0,fa(),setTimeout(()=>{e=!1},12e4))},3e4);return()=>clearInterval(t)},[p,T,Ge,c]);const fa=()=>{Ms().save(`Bilan_J${c}_${new Date().toISOString().split("T")[0]}.pdf`);const t=ns(),s=yt();let n=`[Hellfest 2026] Bilan J${c} - ${t.totalVentesJour.toFixed(2)}\u20AC`,r=`Bilan automatique J${c} - ${new Date().toLocaleDateString("fr-FR")}%0D%0A%0D%0A`;r+="R\xC9SUM\xC9:%0D%0A",r+=`- Ventes du jour: ${t.totalVentesJour.toFixed(2)}\u20AC%0D%0A`,r+=`- F\xFBts en circulation: ${t.futsEnCirculation}%0D%0A`,s&&(r+=`%0D%0ACOMPARAISON J${s.jour} vs J${s.jourMoins1}:%0D%0A`,r+=`- \xC9cart ventes: ${s.ecartVentes>=0?"+":""}${s.ecartVentes.toFixed(2)}\u20AC (${s.ecartPourcent}%)%0D%0A`),r+="%0D%0ALe PDF d\xE9taill\xE9 a \xE9t\xE9 t\xE9l\xE9charg\xE9 automatiquement.%0D%0A",r+=`Session: ${p}`,window.open(`mailto:${Ge}?subject=${encodeURIComponent(n)}&body=${r}`,"_blank"),k("\u{1F4E7} Bilan g\xE9n\xE9r\xE9 - V\xE9rifiez votre client mail")};te(()=>{if(!p)return;const e=v.ref(`sessions/${p}/annonces`);return e.orderByChild("timestamp").limitToLast(5).on("value",t=>{if(t.val()){const s=Object.entries(t.val()).map(([n,r])=>({id:n,...r}));s.sort((n,r)=>r.timestamp-n.timestamp),$s(s)}else $s([])}),()=>e.off()},[p]),te(()=>{re&&Ce.length>0&&!da&&ga()},[re,Ce]);const ga=async()=>{if(Ce.length!==0){Cs(!0);for(const e of Ce)try{e.type==="SORTIE"?(await v.ref(`sessions/${p}/barsNomades/${e.barId}/futs`).set(e.futs),await v.ref(`sessions/${p}/historique`).push(e.historique)):e.type==="VENTE"&&await v.ref(`sessions/${p}/historiqueVentes`).push(e.data)}catch(t){console.error("Erreur sync:",t)}ws([]),Cs(!1),k(`\u2705 ${Ce.length} action(s) synchronis\xE9e(s)`)}},rn=e=>{ws(t=>[...t,e]),k("\u23F3 Action en attente (hors-ligne)","warning")};te(()=>{if(!p)return;const e=setInterval(()=>{const t={session:p,timestamp:Date.now(),config:u,barsNomades:w,historique:$,historiqueVentes:S,affectations:K,jourActuel:c},s=JSON.parse(localStorage.getItem("gestionFuts_backups")||"[]");s.unshift(t);const n=s.slice(0,8);localStorage.setItem("gestionFuts_backups",JSON.stringify(n)),console.log("Backup automatique effectu\xE9:",new Date().toLocaleString())},36e5);return setTimeout(()=>{const t={session:p,timestamp:Date.now(),config:u,barsNomades:w,historique:$,historiqueVentes:S,affectations:K,jourActuel:c},s=JSON.parse(localStorage.getItem("gestionFuts_backups")||"[]");s.unshift(t),localStorage.setItem("gestionFuts_backups",JSON.stringify(s.slice(0,8)))},5e3),()=>clearInterval(e)},[p,u,w,$,S,K,c]),te(()=>{if(!p||!c)return;const e=v.ref(`sessions/${p}/affectations/jour${c}`);return e.on("value",t=>{t.val()?Ze(t.val()):Ze({})}),()=>{e.off()}},[p,c]),te(()=>{if(!p)return;const e=v.ref(`sessions/${p}/auditLogs`);return e.orderByChild("timestamp").limitToLast(100).on("value",t=>{if(t.val()){const s=Object.entries(t.val()).map(([n,r])=>({id:n,...r}));s.sort((n,r)=>r.timestamp-n.timestamp),ys(s)}else ys([])}),()=>{e.off()}},[p]);const va=async e=>{var t;if(!(!(T||D)||e===A)){if(e===u.createdBy){alert("Impossible d'\xE9jecter le cr\xE9ateur de la session.");return}if((t=me[e])!=null&&t.isSuperAdmin){alert("Impossible d'\xE9jecter un Super Admin.");return}confirm(`\xCAtes-vous s\xFBr de vouloir \xE9jecter ${e} ?`)&&await v.ref(`sessions/${p}/users/${e}`).remove()}},ie=u.stockInitialBiere-$.filter(e=>!e.annule&&e.type==="SORTIE"&&e.typeFut==="biere").length+$.filter(e=>!e.annule&&e.type==="RETOUR_PLEIN"&&e.typeFut==="biere").length,de=u.stockInitialCidre-$.filter(e=>!e.annule&&e.type==="SORTIE"&&e.typeFut==="cidre").length+$.filter(e=>!e.annule&&e.type==="RETOUR_PLEIN"&&e.typeFut==="cidre").length,Na=$.filter(e=>!e.annule&&e.type==="RETOUR_VIDE").length,ha=$.filter(e=>!e.annule&&e.type==="RETOUR_CASSE").length,ya=$.filter(e=>!e.annule&&e.type==="RETOUR_REUTILISABLE").length,ln=$.filter(e=>!e.annule&&e.type==="RETOUR_PLEIN").length,js=S.filter(e=>!e.annule).reduce((e,t)=>e+(t.montant||0),0),ue=(()=>{let e=0;return Object.values(K).forEach(t=>{Object.values(t||{}).forEach(s=>{var n,r,a;s&&((n=s.vendeur)!=null&&n.nom||(r=s.serveur)!=null&&r.nom||(a=s.runner)!=null&&a.nom)&&e++})}),e})(),wa=(e,t,s=!1,c=!1)=>{J(e),Ne(t),s&&pe(!0),c&&we(!0),localStorage.setItem("gestionFuts_session",e),localStorage.setItem("gestionFuts_userName",t),localStorage.setItem("gestionFuts_isAdmin",s?"true":"false"),localStorage.setItem("gestionFuts_isCreator",c?"true":"false"),localStorage.getItem("gestionFuts_tutorielVu")||setTimeout(()=>{mt(!0),pt(0)},500)},Ca=()=>{confirm("Voulez-vous vous d\xE9connecter de cette session ?")&&(Ke.current=!0,p&&A&&v.ref(`sessions/${p}/users/${A}`).remove(),localStorage.removeItem("gestionFuts_session"),localStorage.removeItem("gestionFuts_userName"),localStorage.removeItem("gestionFuts_isAdmin"),localStorage.removeItem("gestionFuts_isCreator"),J(null),Ne(""),pe(!1),we(!1))},dn=()=>{localStorage.removeItem("gestionFuts_session"),localStorage.removeItem("gestionFuts_userName"),localStorage.removeItem("gestionFuts_isAdmin"),localStorage.removeItem("gestionFuts_isCreator")},Xe=e=>{D?Yt(e):(Je(e),et(""),Pe(!0))},Ds=()=>{if(Ve(Ae,"super_admin")){pe(!0),we(!0),v.ref(`sessions/${p}/users/${A}`).update({isSuperAdmin:!0,role:"superadmin"}),localStorage.setItem("gestionFuts_isAdmin","true"),localStorage.setItem("gestionFuts_isCreator","true"),Pe(!1),ke&&(Yt(ke),Je(null));return}Ve(Ae,"admin")?(pe(!0),Pe(!1),ke&&(Yt(ke),Je(null))):alert("Mot de passe incorrect")},Yt=e=>{switch(e){case"parametres":R(!0);break;case"export":xe(!0);break;case"historique":q(!V);break;case"ventes":M(!I);break;case"jour_prev":c>1&&v.ref(`sessions/${p}/jourActuel`).set(c-1);break;case"jour_next":c<u.nombreJours&&v.ref(`sessions/${p}/jourActuel`).set(c+1);break}},Fa=async(e,t)=>{await v.ref(`sessions/${p}/barsNomades`).push().set({nom:e,type:t,futs:[]})},$a=async e=>{var s;const t=w.find(n=>n.id===e);if(((s=t==null?void 0:t.futs)==null?void 0:s.length)>0){alert("Impossible de supprimer un bar avec des f\xFBts en cours");return}await v.ref(`sessions/${p}/barsNomades/${e}`).remove();for(let n=1;n<=u.nombreJours;n++)await v.ref(`sessions/${p}/affectations/jour${n}/${e}`).remove()},Vs=async(e,t)=>{if(!t||!t.trim()){k("\u274C Le nom du bar ne peut pas \xEAtre vide","error");return}if(t.trim().length>30){k("\u274C Nom trop long (max 30 car.)","error");return}await v.ref(`sessions/${p}/barsNomades/${e}/nom`).set(t.trim());k(`\u2705 Bar renomm\xE9 en "${t.trim()}"`);},gt=async(e,t)=>{const s={action:e,details:t,user:A,timestamp:Date.now(),jour:c};await v.ref(`sessions/${p}/auditLogs`).push(s)},Sa=async e=>{if(Y)return;const t=w.find(r=>r.id===e);if(!t)return;const s=t.futs||[];if(s.length>=u.maxFutsParBar)return;const n=t.type;if(!(n==="biere"&&ie<=0)&&!(n==="cidre"&&de<=0)){const _confirmMsg="🛢️ ATTRIBUTION FÛT\n\nType: "+(n==="biere"?"BIÈRE":"CIDRE")+"\nBar: "+t.nom+"\nFûts actuels: "+s.length+"/"+u.maxFutsParBar+"\n\nConfirmer l'attribution ?";if(!confirm(_confirmMsg))return;ge(!0);try{const r={id:Date.now().toString(),type:n,dateAttribution:Date.now()},a=[...s,r];await v.ref(`sessions/${p}/barsNomades/${e}/futs`).set(a),await v.ref(`sessions/${p}/historique`).push({type:"SORTIE",typeFut:n,barId:e,barNom:t.nom,jour:c,timestamp:Date.now(),user:A}),await gt("SORTIE_FUT",`${n==="biere"?"\u{1F37A} Bi\xE8re":"\u{1F34E} Cidre"} \u2192 ${t.nom}`),k(`\u2705 F\xFBt ${n==="biere"?"\u{1F37A}":"\u{1F34E}"} attribu\xE9 \xE0 ${t.nom}`)}catch(r){k("\u274C Erreur lors de l'attribution","error")}finally{setTimeout(()=>ge(!1),1e3)}}},vt=async(e,t,s,n="")=>{if(Y)return;const r=w.find(d=>d.id===e);if(!r)return;const a=r.futs||[],o=a[t];if(o){ge(!0);try{const d=a.filter((g,i)=>i!==t);await v.ref(`sessions/${p}/barsNomades/${e}/futs`).set(d.length>0?d:null);const b={type:s,typeFut:o.type,barId:e,barNom:r.nom,jour:c,timestamp:Date.now(),user:A};n.trim()&&(b.commentaire=n.trim()),await v.ref(`sessions/${p}/historique`).push(b),s==="RETOUR_REUTILISABLE"&&await v.ref(`sessions/${p}/futsEnAttente`).push({typeFut:o.type,barId:e,barNom:r.nom,jourOrigine:c,timestamp:Date.now(),user:A});const l={RETOUR_VIDE:"\u{1F4E6} Vide",RETOUR_CASSE:"\u{1F4A5} Cass\xE9",RETOUR_REUTILISABLE:"\u267B\uFE0F Non termin\xE9",RETOUR_PLEIN:"\u{1F504} Plein (r\xE9int\xE9gr\xE9 au stock)"};await gt("RETOUR_FUT",`${l[s]} de ${r.nom}`),k(`\u2705 F\xFBt retourn\xE9 (${l[s]})`)}catch(d){k("\u274C Erreur lors du retour","error")}finally{setTimeout(()=>ge(!1),1e3)}st(null),be("choix"),St(""),nt("")}},Pa=async(e,t)=>{const s=w.find(b=>b.id===t);if(!s)return;const r=(await v.ref(`sessions/${p}/futsEnAttente/${e}`).once("value")).val();if(!r)return;const a=s.futs||[],o={type:r.typeFut,addedAt:Date.now(),reprisDe:r.jourOrigine},d=[...a,o];await v.ref(`sessions/${p}/barsNomades/${t}/futs`).set(d),await v.ref(`sessions/${p}/historique`).push({type:"REPRISE",typeFut:r.typeFut,barId:t,barNom:s.nom,jour:c,timestamp:Date.now(),user:A,commentaire:`Reprise du J${r.jourOrigine}`}),await v.ref(`sessions/${p}/futsEnAttente/${e}`).remove()},Aa=async()=>{if(!W||Y)return;if(!oe){k("\u274C S\xE9lectionnez un cr\xE9neau horaire","error");return}const e=parseFloat(us)||0;const _pintes=parseInt(Rt)||0;const _pichets=parseInt(Tt)||0;const _gobelets=parseInt(Dt)||0;const _barInfo=w.find(b=>b.id===W);const _creneauInfo=O.find(cr=>cr.id===oe);if(!Ie&&e<=0){k("\u274C Le montant doit \xEAtre sup\xE9rieur \xE0 0","error");return}if(!Ie&&_pintes===0&&_pichets===0&&_gobelets===0){k("\u274C Renseignez au moins une quantit\xE9 (pintes, pichets ou gobelets)","error");return}if(_pintes<0||_pichets<0||_gobelets<0){k("\u274C Les quantit\xE9s ne peuvent pas \xEAtre n\xE9gatives","error");return}if(!confirm("\u{1F4CB} R\xC9CAPITULATIF VENTE\n\n"+(_barInfo?"\u{1F37A} Bar: "+_barInfo.nom+"\n":"")+"\u23F0 Cr\xE9neau: "+(_creneauInfo?_creneauInfo.label:"?")+"\n"+"\u{1F4B0} Montant: "+e.toFixed(2)+" \u20AC\n\n"+"Pintes: "+_pintes+" | Pichets: "+_pichets+" | Gobelets: "+_gobelets+"\n\nConfirmer ?")){return}const t=w.find(s=>s.id===W);ge(!0);try{if(await v.ref(`sessions/${p}/historiqueVentes`).push({barId:W,barNom:(t==null?void 0:t.nom)||"Bar inconnu",creneau:oe,montant:e,nbPintes:parseInt(Rt)||0,nbPichets:parseInt(Tt)||0,nbGobelets:parseInt(Dt)||0,equipementDefaillant:Ie,numEquipement:Ie?ms.trim():"",donneesPartielles:Ie?ps:!1,commentaire:cs,jour:c,timestamp:Date.now(),user:A}),!Ie){const s=`J${c}_${W}_${oe}`;await v.ref(`sessions/${p}/creneauxUtilises/${s}`).set({barId:W,creneau:oe,jour:c,timestamp:Date.now(),user:A}),await v.ref(`sessions/${p}/creneauxEnAttente/${s}`).remove()}await gt("VENTE",`${e.toFixed(2)}\u20AC - ${(t==null?void 0:t.nom)||"Bar inconnu"} (${oe})`),k(`\u2705 Vente enregistr\xE9e (${e.toFixed(2)}\u20AC)`),rt(!1),Ue(""),ze(""),Et(""),It(""),jt(""),Vt(""),Lt(!1),Ot(""),_t(!1),Bt("")}catch(s){k("\u274C Erreur lors de l'enregistrement","error")}finally{setTimeout(()=>ge(!1),1e3)}},ka=async e=>{await v.ref(`sessions/${p}/config`).update(e),R(!1)},Ea=async(e,t,s)=>{await v.ref(`sessions/${p}/barPositions/${e}`).set({x:t,y:s})},Ra=e=>{if(!H||!Te)return;const t=e.currentTarget.getBoundingClientRect(),s=(e.clientX-t.left)/t.width*100,n=(e.clientY-t.top)/t.height*100;Ea(Te,s,n);const r=w.filter(o=>!xt[o.id]),a=r.findIndex(o=>o.id===Te);a<r.length-1?bt(r[a+1].id):(bt(null),Wt(!1),k("\u2705 Tous les bars sont positionn\xE9s !"))},Ia=async e=>{await v.ref(`sessions/${p}/barPositions/${e}`).remove()},Ta=async()=>{confirm("R\xE9initialiser toutes les positions des bars sur le plan ?")&&(await v.ref(`sessions/${p}/barPositions`).remove(),k("Positions r\xE9initialis\xE9es"))},Bs=async e=>{if(!Ve(fs,"admin")){alert("Mot de passe incorrect");return}e&&(Os(),_s(),ts()),await v.ref(`sessions/${p}/historique`).remove(),await v.ref(`sessions/${p}/historiqueVentes`).remove(),await v.ref(`sessions/${p}/affectations`).remove(),await v.ref(`sessions/${p}/futsEnAttente`).remove(),await v.ref(`sessions/${p}/creneauxUtilises`).remove(),await v.ref(`sessions/${p}/creneauxEnAttente`).remove();for(const s of w)await v.ref(`sessions/${p}/barsNomades/${s.id}/futs`).set(null);qt(!1),Jt(""),alert("R\xE9initialisation effectu\xE9e !")},ja=async e=>{const t=S.find(n=>n.id===e);if(!t||!confirm(`Annuler cette vente ?
 
 Le cr\xE9neau sera de nouveau disponible pour une nouvelle saisie.`))return;await v.ref(`sessions/${p}/historiqueVentes/${e}`).update({annule:!0,annulePar:A,annuleLe:Date.now()});const s=`J${t.jour}_${t.barId}_${t.creneau}`;await v.ref(`sessions/${p}/creneauxUtilises/${s}`).remove(),k("\u2705 Vente annul\xE9e, cr\xE9neau lib\xE9r\xE9")},Da=async e=>{const t=$.find(o=>o.id===e);if(!t)return;let s=`Annuler ce mouvement de f\xFBt ?
 
@@ -524,6 +524,448 @@ window.v18Eject={c:{},check:function(u,s){var k=s+u;this.c[k]=(this.c[k]||0)+1;r
 setTimeout(v18Init,2500);
 })();
 // === FIN PATCH V18 ===
+
+// === PATCH V20 - Dashboard Écarts et Alertes ===
+(function(){
+console.log("[PATCH V20] Dashboard Écarts et Alertes");
+
+// Configuration par défaut (sera écrasée par Firebase)
+var v20Config = {
+  volumeFutBiere: 30,
+  volumeFutCidre: 20,
+  volumePinte: 0.5,
+  volumePichet: 1.5,
+  prixPinte: 6,
+  prixPichet: 15,
+  prixGobelet: 2,
+  seuilToleranceVolume: 10,
+  seuilToleranceFinancier: 5,
+  minBenevolesParBar: 2
+};
+
+// Charger config depuis Firebase
+function loadV20Config() {
+  var sc = localStorage.getItem("gestionFuts_session");
+  if (!sc) return;
+  
+  firebase.database().ref("sessions/" + sc + "/config").on("value", function(snap) {
+    var cfg = snap.val();
+    if (cfg) {
+      if (cfg.volumeFutBiere) v20Config.volumeFutBiere = cfg.volumeFutBiere;
+      if (cfg.volumeFutCidre) v20Config.volumeFutCidre = cfg.volumeFutCidre;
+      if (cfg.volumePinte) v20Config.volumePinte = cfg.volumePinte;
+      if (cfg.volumePichet) v20Config.volumePichet = cfg.volumePichet;
+      if (cfg.prixPinte) v20Config.prixPinte = cfg.prixPinte;
+      if (cfg.prixPichet) v20Config.prixPichet = cfg.prixPichet;
+      if (cfg.prixGobelet) v20Config.prixGobelet = cfg.prixGobelet;
+      if (cfg.seuilToleranceVolume) v20Config.seuilToleranceVolume = cfg.seuilToleranceVolume;
+      if (cfg.seuilToleranceFinancier) v20Config.seuilToleranceFinancier = cfg.seuilToleranceFinancier;
+      if (cfg.minBenevolesParBar) v20Config.minBenevolesParBar = cfg.minBenevolesParBar;
+    }
+  });
+}
+
+// #10 - Alerte fûts oubliés (>4h en circulation)
+function checkFutsOublies() {
+  var alertContainer = document.getElementById("v20-alert-futs");
+  if (!alertContainer) {
+    // Créer le conteneur d'alerte
+    var header = document.querySelector(".sticky.top-0");
+    if (header) {
+      alertContainer = document.createElement("div");
+      alertContainer.id = "v20-alert-futs";
+      alertContainer.style.cssText = "display:none;";
+      header.parentNode.insertBefore(alertContainer, header.nextSibling);
+    }
+  }
+  if (!alertContainer) return;
+  
+  var sc = localStorage.getItem("gestionFuts_session");
+  var isAdmin = localStorage.getItem("gestionFuts_isAdmin") === "true";
+  if (!sc || !isAdmin) {
+    alertContainer.style.display = "none";
+    return;
+  }
+  
+  firebase.database().ref("sessions/" + sc + "/barsNomades").once("value", function(snap) {
+    var bars = snap.val();
+    if (!bars) {
+      alertContainer.style.display = "none";
+      return;
+    }
+    
+    var futsOublies = [];
+    var now = Date.now();
+    var seuil = 4 * 60 * 60 * 1000; // 4 heures
+    
+    Object.keys(bars).forEach(function(barId) {
+      var bar = bars[barId];
+      if (bar.futs && Array.isArray(bar.futs)) {
+        bar.futs.forEach(function(fut, idx) {
+          if (fut && fut.dateAttribution) {
+            var duree = now - fut.dateAttribution;
+            if (duree > seuil) {
+              var heures = Math.floor(duree / (1000 * 60 * 60));
+              var minutes = Math.floor((duree % (1000 * 60 * 60)) / (1000 * 60));
+              futsOublies.push({
+                bar: bar.nom,
+                type: bar.type,
+                idx: idx + 1,
+                duree: heures + "h" + (minutes < 10 ? "0" : "") + minutes
+              });
+            }
+          }
+        });
+      }
+    });
+    
+    if (futsOublies.length > 0) {
+      var html = '<div style="background:linear-gradient(135deg,#991b1b,#7f1d1d);border:2px solid #fca5a5;border-radius:12px;padding:12px;margin:8px;">';
+      html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
+      html += '<span style="font-size:20px;animation:pulse 1s infinite;">⚠️</span>';
+      html += '<span style="font-weight:bold;color:#fca5a5;">FÛTS EN CIRCULATION DEPUIS +4H</span>';
+      html += '</div>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+      futsOublies.forEach(function(f) {
+        var emoji = f.type === "biere" ? "🍺" : "🍎";
+        html += '<span style="background:#450a0a;padding:4px 8px;border-radius:6px;font-size:12px;">';
+        html += emoji + " " + f.bar + " (Fût " + f.idx + ") : <b>" + f.duree + "</b>";
+        html += '</span>';
+      });
+      html += '</div></div>';
+      alertContainer.innerHTML = html;
+      alertContainer.style.display = "block";
+    } else {
+      alertContainer.style.display = "none";
+    }
+  });
+}
+
+// #01 #02 #03 - Calcul des écarts et Dashboard
+function calculateEcarts(callback) {
+  var sc = localStorage.getItem("gestionFuts_session");
+  if (!sc) return callback(null);
+  
+  var result = {
+    biere: { futsSortis: 0, futsVides: 0, futsEnCours: 0, litresSortis: 0, litresServis: 0, ecartVolume: 0, ecartVolumePct: 0 },
+    cidre: { futsSortis: 0, futsVides: 0, futsEnCours: 0, litresSortis: 0, litresServis: 0, ecartVolume: 0, ecartVolumePct: 0 },
+    financier: { caTheorique: 0, caDeclare: 0, ecart: 0, ecartPct: 0, pintes: 0, pichets: 0, gobelets: 0 }
+  };
+  
+  // Charger historique des fûts
+  firebase.database().ref("sessions/" + sc + "/historique").once("value", function(snapHist) {
+    var historique = snapHist.val() || {};
+    
+    Object.values(historique).forEach(function(h) {
+      if (h.annule) return;
+      
+      var type = h.typeFut === "biere" ? "biere" : "cidre";
+      var volumeFut = type === "biere" ? v20Config.volumeFutBiere : v20Config.volumeFutCidre;
+      
+      if (h.type === "SORTIE") {
+        result[type].futsSortis++;
+      } else if (h.type === "RETOUR_VIDE") {
+        result[type].futsVides++;
+        result[type].litresSortis += volumeFut;
+      } else if (h.type === "RETOUR_CASSE") {
+        // Fût cassé = perte partielle estimée à 50%
+        result[type].litresSortis += volumeFut * 0.5;
+      }
+    });
+    
+    // Fûts en cours (dans les bars)
+    firebase.database().ref("sessions/" + sc + "/barsNomades").once("value", function(snapBars) {
+      var bars = snapBars.val() || {};
+      
+      Object.values(bars).forEach(function(bar) {
+        var type = bar.type === "biere" ? "biere" : "cidre";
+        if (bar.futs && Array.isArray(bar.futs)) {
+          result[type].futsEnCours += bar.futs.length;
+        }
+      });
+      
+      // Charger ventes
+      firebase.database().ref("sessions/" + sc + "/historiqueVentes").once("value", function(snapVentes) {
+        var ventes = snapVentes.val() || {};
+        
+        Object.values(ventes).forEach(function(v) {
+          if (v.annule) return;
+          
+          var pintes = v.nbPintes || 0;
+          var pichets = v.nbPichets || 0;
+          var gobelets = v.nbGobelets || 0;
+          var montant = v.montant || 0;
+          
+          result.financier.pintes += pintes;
+          result.financier.pichets += pichets;
+          result.financier.gobelets += gobelets;
+          result.financier.caDeclare += montant;
+          
+          // Volume servi (TODO: distinguer bière/cidre par bar)
+          var litresServis = (pintes * v20Config.volumePinte) + (pichets * v20Config.volumePichet);
+          result.biere.litresServis += litresServis; // Simplification: tout en bière pour l'instant
+        });
+        
+        // Calcul CA théorique
+        result.financier.caTheorique = 
+          (result.financier.pintes * v20Config.prixPinte) +
+          (result.financier.pichets * v20Config.prixPichet) +
+          (result.financier.gobelets * v20Config.prixGobelet);
+        
+        result.financier.ecart = result.financier.caTheorique - result.financier.caDeclare;
+        result.financier.ecartPct = result.financier.caTheorique > 0 
+          ? ((result.financier.ecart / result.financier.caTheorique) * 100).toFixed(1)
+          : 0;
+        
+        // Calcul écart volume bière
+        result.biere.ecartVolume = result.biere.litresSortis - result.biere.litresServis;
+        result.biere.ecartVolumePct = result.biere.litresSortis > 0
+          ? ((result.biere.ecartVolume / result.biere.litresSortis) * 100).toFixed(1)
+          : 0;
+        
+        callback(result);
+      });
+    });
+  });
+}
+
+// Créer le bouton Dashboard Écarts
+function createEcartsButton() {
+  var isAdmin = localStorage.getItem("gestionFuts_isAdmin") === "true";
+  if (!isAdmin) return;
+  
+  // Vérifier si le bouton existe déjà
+  if (document.getElementById("v20-btn-ecarts")) return;
+  
+  // Trouver la zone des boutons (près de Stats)
+  var statsBtn = Array.from(document.querySelectorAll("button")).find(function(b) {
+    return b.textContent.includes("Stats") || b.textContent.includes("📈");
+  });
+  
+  if (statsBtn && statsBtn.parentNode) {
+    var btn = document.createElement("button");
+    btn.id = "v20-btn-ecarts";
+    btn.innerHTML = "📊 Écarts";
+    btn.className = statsBtn.className;
+    btn.style.cssText = "background:linear-gradient(135deg,#7c3aed,#5b21b6);";
+    btn.onclick = function() { showEcartsModal(); };
+    statsBtn.parentNode.insertBefore(btn, statsBtn.nextSibling);
+  }
+}
+
+// Modal Dashboard Écarts
+function showEcartsModal() {
+  // Supprimer ancien modal si existe
+  var oldModal = document.getElementById("v20-modal-ecarts");
+  if (oldModal) oldModal.remove();
+  
+  var modal = document.createElement("div");
+  modal.id = "v20-modal-ecarts";
+  modal.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:9999;overflow-y:auto;padding:16px;";
+  
+  modal.innerHTML = '<div style="max-width:500px;margin:0 auto;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
+    '<h2 style="font-size:24px;font-weight:bold;color:#a78bfa;">📊 Dashboard Écarts</h2>' +
+    '<button onclick="document.getElementById('v20-modal-ecarts').remove()" style="font-size:24px;background:none;border:none;color:white;cursor:pointer;">✕</button>' +
+    '</div>' +
+    '<div id="v20-ecarts-content" style="color:white;">' +
+    '<p style="text-align:center;padding:40px;">⏳ Calcul en cours...</p>' +
+    '</div></div>';
+  
+  document.body.appendChild(modal);
+  
+  // Calculer et afficher les écarts
+  calculateEcarts(function(data) {
+    var container = document.getElementById("v20-ecarts-content");
+    if (!container || !data) return;
+    
+    var volStatus = Math.abs(data.biere.ecartVolumePct) <= v20Config.seuilToleranceVolume ? "ok" : "alert";
+    var finStatus = Math.abs(data.financier.ecartPct) <= v20Config.seuilToleranceFinancier ? "ok" : "alert";
+    
+    var html = '';
+    
+    // Section Volume
+    html += '<div style="background:#1e1b4b;border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid #4c1d95;">';
+    html += '<h3 style="font-size:18px;font-weight:bold;margin-bottom:12px;">🍺 ÉCART VOLUME</h3>';
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:14px;">';
+    html += '<div>Fûts vidés :</div><div style="text-align:right;font-weight:bold;">' + data.biere.futsVides + '</div>';
+    html += '<div>Fûts en cours :</div><div style="text-align:right;font-weight:bold;">' + data.biere.futsEnCours + '</div>';
+    html += '<div>Litres sortis :</div><div style="text-align:right;font-weight:bold;">' + data.biere.litresSortis.toFixed(1) + ' L</div>';
+    html += '<div>Litres servis :</div><div style="text-align:right;font-weight:bold;">' + data.biere.litresServis.toFixed(1) + ' L</div>';
+    html += '</div>';
+    html += '<div style="margin-top:12px;padding:12px;border-radius:8px;text-align:center;' + 
+      (volStatus === "ok" ? 'background:#065f46;border:1px solid #10b981;' : 'background:#991b1b;border:1px solid #f87171;') + '">';
+    html += '<div style="font-size:24px;font-weight:bold;">' + data.biere.ecartVolume.toFixed(1) + ' L (' + data.biere.ecartVolumePct + '%)</div>';
+    html += '<div style="font-size:12px;margin-top:4px;">' + (volStatus === "ok" ? '✅ Dans la tolérance' : '⚠️ Hors tolérance !') + '</div>';
+    html += '</div></div>';
+    
+    // Section Financier
+    html += '<div style="background:#1e1b4b;border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid #4c1d95;">';
+    html += '<h3 style="font-size:18px;font-weight:bold;margin-bottom:12px;">💶 ÉCART FINANCIER</h3>';
+    html += '<div style="font-size:14px;margin-bottom:8px;">';
+    html += '<div style="color:#a5b4fc;">CA Théorique :</div>';
+    html += '<div style="padding-left:12px;">' + data.financier.pintes + ' pintes × ' + v20Config.prixPinte + '€ = ' + (data.financier.pintes * v20Config.prixPinte).toFixed(2) + '€</div>';
+    html += '<div style="padding-left:12px;">' + data.financier.pichets + ' pichets × ' + v20Config.prixPichet + '€ = ' + (data.financier.pichets * v20Config.prixPichet).toFixed(2) + '€</div>';
+    html += '<div style="padding-left:12px;">' + data.financier.gobelets + ' gobelets × ' + v20Config.prixGobelet + '€ = ' + (data.financier.gobelets * v20Config.prixGobelet).toFixed(2) + '€</div>';
+    html += '<div style="padding-left:12px;font-weight:bold;border-top:1px solid #4c1d95;margin-top:4px;padding-top:4px;">Total : ' + data.financier.caTheorique.toFixed(2) + '€</div>';
+    html += '</div>';
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:14px;">';
+    html += '<div>CA Déclaré :</div><div style="text-align:right;font-weight:bold;">' + data.financier.caDeclare.toFixed(2) + '€</div>';
+    html += '</div>';
+    html += '<div style="margin-top:12px;padding:12px;border-radius:8px;text-align:center;' + 
+      (finStatus === "ok" ? 'background:#065f46;border:1px solid #10b981;' : 'background:#991b1b;border:1px solid #f87171;') + '">';
+    html += '<div style="font-size:24px;font-weight:bold;">' + data.financier.ecart.toFixed(2) + '€ (' + data.financier.ecartPct + '%)</div>';
+    html += '<div style="font-size:12px;margin-top:4px;">' + (finStatus === "ok" ? '✅ Dans la tolérance' : '⚠️ Hors tolérance !') + '</div>';
+    html += '</div></div>';
+    
+    // Diagnostic
+    html += '<div style="background:#1f2937;border-radius:12px;padding:16px;border:1px solid #374151;">';
+    html += '<h3 style="font-size:16px;font-weight:bold;margin-bottom:8px;">📋 DIAGNOSTIC</h3>';
+    if (volStatus === "ok" && finStatus === "ok") {
+      html += '<p style="color:#10b981;">✅ Tous les indicateurs sont dans les tolérances définies. RAS.</p>';
+    } else if (volStatus !== "ok" && finStatus === "ok") {
+      html += '<p style="color:#fbbf24;">⚠️ Écart volume hors tolérance mais CA cohérent. Possible remplissage généreux ou pertes non déclarées.</p>';
+    } else if (volStatus === "ok" && finStatus !== "ok") {
+      html += '<p style="color:#fbbf24;">⚠️ Écart financier hors tolérance. Vérifier les erreurs de saisie ou gobelets non comptés.</p>';
+    } else {
+      html += '<p style="color:#f87171;">🚨 Écarts volume ET financier hors tolérance. Investigation nécessaire !</p>';
+    }
+    html += '</div>';
+    
+    container.innerHTML = html;
+  });
+}
+
+// Interface de paramétrage (Super Admin)
+function showConfigModal() {
+  var isCreator = localStorage.getItem("gestionFuts_isCreator") === "true";
+  if (!isCreator) {
+    alert("Accès réservé au Super Admin");
+    return;
+  }
+  
+  var oldModal = document.getElementById("v20-modal-config");
+  if (oldModal) oldModal.remove();
+  
+  var modal = document.createElement("div");
+  modal.id = "v20-modal-config";
+  modal.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);z-index:9999;overflow-y:auto;padding:16px;";
+  
+  modal.innerHTML = '<div style="max-width:400px;margin:0 auto;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
+    '<h2 style="font-size:20px;font-weight:bold;color:#fbbf24;">⚙️ Configuration Session</h2>' +
+    '<button onclick="document.getElementById('v20-modal-config').remove()" style="font-size:24px;background:none;border:none;color:white;cursor:pointer;">✕</button>' +
+    '</div>' +
+    '<div style="background:#1f2937;border-radius:12px;padding:16px;margin-bottom:12px;">' +
+    '<h3 style="font-size:14px;color:#9ca3af;margin-bottom:12px;">📦 VOLUMES (litres)</h3>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+    '<label style="font-size:13px;">Fût bière<input type="number" id="cfg-volFutBiere" value="' + v20Config.volumeFutBiere + '" style="width:100%;padding:8px;background:#374151;border:1px solid #4b5563;border-radius:6px;color:white;margin-top:4px;"></label>' +
+    '<label style="font-size:13px;">Fût cidre<input type="number" id="cfg-volFutCidre" value="' + v20Config.volumeFutCidre + '" style="width:100%;padding:8px;background:#374151;border:1px solid #4b5563;border-radius:6px;color:white;margin-top:4px;"></label>' +
+    '<label style="font-size:13px;">Pinte<input type="number" step="0.1" id="cfg-volPinte" value="' + v20Config.volumePinte + '" style="width:100%;padding:8px;background:#374151;border:1px solid #4b5563;border-radius:6px;color:white;margin-top:4px;"></label>' +
+    '<label style="font-size:13px;">Pichet<input type="number" step="0.1" id="cfg-volPichet" value="' + v20Config.volumePichet + '" style="width:100%;padding:8px;background:#374151;border:1px solid #4b5563;border-radius:6px;color:white;margin-top:4px;"></label>' +
+    '</div></div>' +
+    '<div style="background:#1f2937;border-radius:12px;padding:16px;margin-bottom:12px;">' +
+    '<h3 style="font-size:14px;color:#9ca3af;margin-bottom:12px;">💶 PRIX (euros)</h3>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">' +
+    '<label style="font-size:13px;">Pinte<input type="number" step="0.5" id="cfg-prixPinte" value="' + v20Config.prixPinte + '" style="width:100%;padding:8px;background:#374151;border:1px solid #4b5563;border-radius:6px;color:white;margin-top:4px;"></label>' +
+    '<label style="font-size:13px;">Pichet<input type="number" step="0.5" id="cfg-prixPichet" value="' + v20Config.prixPichet + '" style="width:100%;padding:8px;background:#374151;border:1px solid #4b5563;border-radius:6px;color:white;margin-top:4px;"></label>' +
+    '<label style="font-size:13px;">Gobelet<input type="number" step="0.5" id="cfg-prixGobelet" value="' + v20Config.prixGobelet + '" style="width:100%;padding:8px;background:#374151;border:1px solid #4b5563;border-radius:6px;color:white;margin-top:4px;"></label>' +
+    '</div></div>' +
+    '<div style="background:#1f2937;border-radius:12px;padding:16px;margin-bottom:12px;">' +
+    '<h3 style="font-size:14px;color:#9ca3af;margin-bottom:12px;">⚠️ SEUILS DE TOLÉRANCE (%)</h3>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+    '<label style="font-size:13px;">Écart volume<input type="number" id="cfg-seuilVol" value="' + v20Config.seuilToleranceVolume + '" style="width:100%;padding:8px;background:#374151;border:1px solid #4b5563;border-radius:6px;color:white;margin-top:4px;"></label>' +
+    '<label style="font-size:13px;">Écart financier<input type="number" id="cfg-seuilFin" value="' + v20Config.seuilToleranceFinancier + '" style="width:100%;padding:8px;background:#374151;border:1px solid #4b5563;border-radius:6px;color:white;margin-top:4px;"></label>' +
+    '</div></div>' +
+    '<div style="background:#1f2937;border-radius:12px;padding:16px;margin-bottom:16px;">' +
+    '<h3 style="font-size:14px;color:#9ca3af;margin-bottom:12px;">👥 ORGANISATION</h3>' +
+    '<label style="font-size:13px;">Min. bénévoles/bar<input type="number" id="cfg-minBenev" value="' + v20Config.minBenevolesParBar + '" style="width:100%;padding:8px;background:#374151;border:1px solid #4b5563;border-radius:6px;color:white;margin-top:4px;"></label>' +
+    '</div>' +
+    '<button onclick="saveV20Config()" style="width:100%;padding:14px;background:linear-gradient(135deg,#16a34a,#15803d);border:none;border-radius:8px;color:white;font-weight:bold;font-size:16px;cursor:pointer;">💾 Enregistrer</button>' +
+    '</div>';
+  
+  document.body.appendChild(modal);
+}
+
+function saveV20Config() {
+  var sc = localStorage.getItem("gestionFuts_session");
+  if (!sc) return;
+  
+  var newConfig = {
+    volumeFutBiere: parseFloat(document.getElementById("cfg-volFutBiere").value) || 30,
+    volumeFutCidre: parseFloat(document.getElementById("cfg-volFutCidre").value) || 20,
+    volumePinte: parseFloat(document.getElementById("cfg-volPinte").value) || 0.5,
+    volumePichet: parseFloat(document.getElementById("cfg-volPichet").value) || 1.5,
+    prixPinte: parseFloat(document.getElementById("cfg-prixPinte").value) || 6,
+    prixPichet: parseFloat(document.getElementById("cfg-prixPichet").value) || 15,
+    prixGobelet: parseFloat(document.getElementById("cfg-prixGobelet").value) || 2,
+    seuilToleranceVolume: parseFloat(document.getElementById("cfg-seuilVol").value) || 10,
+    seuilToleranceFinancier: parseFloat(document.getElementById("cfg-seuilFin").value) || 5,
+    minBenevolesParBar: parseInt(document.getElementById("cfg-minBenev").value) || 2
+  };
+  
+  firebase.database().ref("sessions/" + sc + "/config").update(newConfig).then(function() {
+    // Mettre à jour local
+    Object.assign(v20Config, newConfig);
+    document.getElementById("v20-modal-config").remove();
+    alert("✅ Configuration enregistrée !");
+  }).catch(function(err) {
+    alert("❌ Erreur : " + err.message);
+  });
+}
+
+// Créer bouton Config (Super Admin only)
+function createConfigButton() {
+  var isCreator = localStorage.getItem("gestionFuts_isCreator") === "true";
+  if (!isCreator) return;
+  
+  if (document.getElementById("v20-btn-config")) return;
+  
+  // Trouver le bouton Paramètres
+  var paramBtn = Array.from(document.querySelectorAll("button")).find(function(b) {
+    return b.textContent.includes("⚙") || b.textContent.includes("Param");
+  });
+  
+  if (paramBtn && paramBtn.parentNode) {
+    var btn = document.createElement("button");
+    btn.id = "v20-btn-config";
+    btn.innerHTML = "🔧 Config";
+    btn.className = paramBtn.className || "";
+    btn.style.cssText = "background:linear-gradient(135deg,#d97706,#b45309);margin-left:4px;padding:8px 12px;border-radius:8px;border:none;color:white;font-weight:500;cursor:pointer;";
+    btn.onclick = function() { showConfigModal(); };
+    paramBtn.parentNode.insertBefore(btn, paramBtn.nextSibling);
+  }
+}
+
+// Initialisation V20
+function initV20() {
+  loadV20Config();
+  
+  // Vérifier fûts oubliés toutes les 2 minutes
+  checkFutsOublies();
+  setInterval(checkFutsOublies, 120000);
+  
+  // Créer boutons après chargement
+  setTimeout(createEcartsButton, 2000);
+  setTimeout(createConfigButton, 2500);
+  setInterval(createEcartsButton, 5000);
+  setInterval(createConfigButton, 5000);
+}
+
+// Lancer
+if (document.readyState === "complete") {
+  initV20();
+} else {
+  window.addEventListener("load", initV20);
+}
+
+// Style animation pulse
+var style = document.createElement("style");
+style.textContent = "@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}";
+document.head.appendChild(style);
+
+})();
+// === FIN PATCH V20 ===
 </script>
 </body>
 </html>
