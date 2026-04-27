@@ -825,26 +825,24 @@ var userIsSecretaire = null;
 function applySecretaireRestrictions() {
   if (userIsSecretaire !== true) return;
   
-  // Corriger le badge "Admin" en "Secrétaire" sur la page d'accueil
-  var badges = document.querySelectorAll('span');
-  badges.forEach(function(span) {
-    if (span.textContent === 'Admin' && span.className.includes('bg-green-800')) {
+  // 1. Corriger le badge "Admin" → "Secrétaire"
+  document.querySelectorAll('span').forEach(function(span) {
+    if (span.textContent === 'Admin' && span.className && span.className.includes('bg-green-800')) {
       span.textContent = 'Secrétaire';
       span.className = span.className.replace('bg-green-800', 'bg-blue-800');
     }
   });
   
-  // Masquer tous les éléments interdits aux secrétaires
-  var allBtns = document.querySelectorAll('button');
-  allBtns.forEach(function(btn) {
+  // 2. Masquer les boutons interdits
+  document.querySelectorAll('button').forEach(function(btn) {
     var txt = btn.textContent || '';
     
     // Stats
-    if (txt.includes('Stats') || txt.includes('📈')) {
+    if (txt.includes('Stats')) {
       btn.style.display = 'none';
     }
     // Paramètres
-    if (txt.includes('⚙') || txt.includes('Paramètre') || txt.includes('Param')) {
+    if (txt.includes('Param')) {
       btn.style.display = 'none';
     }
     // Annuler
@@ -852,54 +850,62 @@ function applySecretaireRestrictions() {
       btn.style.display = 'none';
     }
     // Export
-    if (txt.includes('📥') || txt.includes('Export') || txt.includes('Exporter')) {
+    if (txt.includes('Export')) {
+      btn.style.display = 'none';
+    }
+    // HISTORIQUES - masquer tous les boutons contenant "Historique"
+    if (txt.includes('Historique')) {
       btn.style.display = 'none';
     }
   });
   
-  // Masquer les compteurs cliquables (historiques)
-  // Les compteurs de fûts/ventes qui ouvrent les historiques
-  var clickables = document.querySelectorAll('[class*="cursor-pointer"]');
-  clickables.forEach(function(el) {
-    var txt = el.textContent || '';
-    // Si c'est un compteur avec chiffres (fûts sortis, ventes)
-    if (/^\d+$/.test(txt.trim()) || txt.includes('fût') || txt.includes('vente')) {
-      // Vérifier si c'est un compteur d'historique
-      var parent = el.closest('div');
-      if (parent) {
-        var parentTxt = parent.textContent || '';
-        if (parentTxt.includes('sortis') || parentTxt.includes('Ventes') || parentTxt.includes('historique')) {
-          el.style.pointerEvents = 'none';
-          el.style.cursor = 'default';
-          el.onclick = null;
-        }
-      }
+  // 3. FERMER les modals historiques s'ils sont ouverts
+  document.querySelectorAll('div').forEach(function(div) {
+    // Chercher les modals avec "Historique Fûts" ou "Historique Ventes"
+    var txt = div.textContent || '';
+    if (div.className && div.className.includes('fixed') && 
+        (txt.includes('Historique Fûts') || txt.includes('Historique Ventes') || 
+         txt.includes('📋 Historique') || txt.includes('📊 Historique'))) {
+      // C'est un modal historique, le masquer
+      div.style.display = 'none';
     }
   });
-}
-
-function initSecretaireRestrictions() {
-  // Vérifier d'abord si déjà confirmé par fixRoleOnStartup
-  if (window.userIsSecretaireConfirmed) {
-    userIsSecretaire = true;
-    console.log("[V21] Secrétaire confirmé au démarrage");
-    applySecretaireRestrictions();
-    setInterval(applySecretaireRestrictions, 500);
-    return;
-  }
   
-  isSecretaireCheck(function(isSec) {
-    userIsSecretaire = isSec;
-    console.log("[V21] Utilisateur secrétaire:", isSec);
-    if (isSec) {
-      applySecretaireRestrictions();
-      setInterval(applySecretaireRestrictions, 500);
+  // 4. Bloquer les clics sur les compteurs d'historique
+  // Les compteurs sont des éléments avec cursor-pointer qui contiennent des chiffres
+  document.querySelectorAll('[class*="cursor-pointer"]').forEach(function(el) {
+    // Vérifier le parent/contexte pour voir si c'est lié aux historiques
+    var parent = el.parentElement;
+    var grandParent = parent ? parent.parentElement : null;
+    var context = '';
+    if (parent) context += parent.textContent || '';
+    if (grandParent) context += grandParent.textContent || '';
+    
+    // Si le contexte contient des termes liés aux historiques
+    if (context.includes('sortis') || context.includes('Fûts') || 
+        context.includes('retournés') || context.includes('Ventes') ||
+        context.includes('enregistrement')) {
+      el.style.pointerEvents = 'none';
+      el.style.cursor = 'default';
+      el.onclick = function(e) { e.preventDefault(); e.stopPropagation(); return false; };
+    }
+  });
+  
+  // 5. Masquer la ligne des compteurs dans le header (fûts sortis, ventes, etc.)
+  document.querySelectorAll('div').forEach(function(div) {
+    var txt = div.textContent || '';
+    // Ligne avec "X fûts sortis" ou similaire - on garde visible mais on désactive les clics
+    if ((txt.includes('sortis') || txt.includes('retournés')) && 
+        div.className && div.className.includes('flex')) {
+      div.querySelectorAll('*').forEach(function(child) {
+        if (child.onclick || (child.className && child.className.includes('cursor-pointer'))) {
+          child.style.pointerEvents = 'none';
+          child.onclick = null;
+        }
+      });
     }
   });
 }
-
-// Lancer après un délai pour que l'UI soit chargée
-setTimeout(initSecretaireRestrictions, 500);
 
 // === FIN PATCH V21 ===
 </script>
