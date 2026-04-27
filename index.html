@@ -757,6 +757,17 @@ if(document.readyState==="complete")init();else window.addEventListener("load",i
 var st=document.createElement("style");st.textContent="@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}";document.head.appendChild(st);
 })();
 // === CORRECTION REFRESH : Vérifier rôle réel au démarrage ===
+function fixBadgeSecretaire() {
+  // Corriger le badge "Admin" en "Secrétaire" sur la page d'accueil
+  var badges = document.querySelectorAll('span');
+  badges.forEach(function(span) {
+    if (span.textContent === 'Admin' && span.className && span.className.includes('bg-green-800')) {
+      span.textContent = 'Secrétaire';
+      span.className = span.className.replace('bg-green-800', 'bg-blue-800');
+    }
+  });
+}
+
 function fixRoleOnStartup() {
   var sc = localStorage.getItem("gestionFuts_session");
   var userName = localStorage.getItem("gestionFuts_userName");
@@ -769,10 +780,15 @@ function fixRoleOnStartup() {
     if (!user) return;
     
     if (user.role === "secretaire" || user.promotedBy) {
-      console.log("[V21] Secrétaire détecté au refresh - correction droits");
+      console.log("[V21] Secrétaire détecté - correction affichage");
       localStorage.setItem("gestionFuts_isAdmin", "false");
       window.userIsSecretaireConfirmed = true;
-      // Appliquer immédiatement les restrictions
+      
+      // Corriger le badge immédiatement et régulièrement
+      fixBadgeSecretaire();
+      setInterval(fixBadgeSecretaire, 200);
+      
+      // Appliquer les restrictions
       setTimeout(function() {
         userIsSecretaire = true;
         applySecretaireRestrictions();
