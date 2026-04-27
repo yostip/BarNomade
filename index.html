@@ -756,6 +756,34 @@ if(document.readyState==="complete")init();else window.addEventListener("load",i
 
 var st=document.createElement("style");st.textContent="@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}";document.head.appendChild(st);
 })();
+// === CORRECTION REFRESH : Vérifier rôle réel au démarrage ===
+function fixRoleOnStartup() {
+  var sc = localStorage.getItem("gestionFuts_session");
+  var userName = localStorage.getItem("gestionFuts_userName");
+  var isCreator = localStorage.getItem("gestionFuts_isCreator") === "true";
+  
+  if (isCreator || !sc || !userName) return;
+  
+  firebase.database().ref("sessions/" + sc + "/users/" + userName).once("value", function(snap) {
+    var user = snap.val();
+    if (!user) return;
+    
+    if (user.role === "secretaire" || user.promotedBy) {
+      console.log("[V21] Secrétaire détecté au refresh - correction droits");
+      localStorage.setItem("gestionFuts_isAdmin", "false");
+      window.userIsSecretaireConfirmed = true;
+      // Appliquer immédiatement les restrictions
+      setTimeout(function() {
+        userIsSecretaire = true;
+        applySecretaireRestrictions();
+      }, 100);
+    }
+  });
+}
+
+// Exécuter immédiatement
+fixRoleOnStartup();
+
 // === RESTRICTIONS SECRÉTAIRES ===
 function isSecretaireCheck(callback) {
   var isCreator = localStorage.getItem("gestionFuts_isCreator") === "true";
@@ -826,19 +854,27 @@ function applySecretaireRestrictions() {
 }
 
 function initSecretaireRestrictions() {
+  // Vérifier d'abord si déjà confirmé par fixRoleOnStartup
+  if (window.userIsSecretaireConfirmed) {
+    userIsSecretaire = true;
+    console.log("[V21] Secrétaire confirmé au démarrage");
+    applySecretaireRestrictions();
+    setInterval(applySecretaireRestrictions, 500);
+    return;
+  }
+  
   isSecretaireCheck(function(isSec) {
     userIsSecretaire = isSec;
     console.log("[V21] Utilisateur secrétaire:", isSec);
     if (isSec) {
       applySecretaireRestrictions();
-      // Réappliquer régulièrement (en cas de changement de vue)
-      setInterval(applySecretaireRestrictions, 1000);
+      setInterval(applySecretaireRestrictions, 500);
     }
   });
 }
 
 // Lancer après un délai pour que l'UI soit chargée
-setTimeout(initSecretaireRestrictions, 2000);
+setTimeout(initSecretaireRestrictions, 500);
 
 // === FIN PATCH V21 ===
 </script>
