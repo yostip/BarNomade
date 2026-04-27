@@ -809,6 +809,15 @@ var userIsSecretaire = null;
 function applySecretaireRestrictions() {
   if (userIsSecretaire !== true) return;
   
+  // Corriger le badge "Admin" en "Secrétaire" sur la page d'accueil
+  var badges = document.querySelectorAll('span');
+  badges.forEach(function(span) {
+    if (span.textContent === 'Admin' && span.className.includes('bg-green-800')) {
+      span.textContent = 'Secrétaire';
+      span.className = span.className.replace('bg-green-800', 'bg-blue-800');
+    }
+  });
+  
   // Masquer tous les éléments interdits aux secrétaires
   var allBtns = document.querySelectorAll('button');
   allBtns.forEach(function(btn) {
