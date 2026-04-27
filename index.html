@@ -556,7 +556,7 @@ if(h){ac=document.createElement("div");ac.id="v20-alert";ac.style.display="none"
 }
 if(!ac)return;
 var sc=localStorage.getItem("gestionFuts_session");
-var isA=localStorage.getItem("gestionFuts_isAdmin")==="true";
+var isC=localStorage.getItem("gestionFuts_isCreator")==="true";var isA=isC||localStorage.getItem("gestionFuts_isAdmin")==="true";
 if(!sc||!isA){ac.style.display="none";return;}
 firebase.database().ref("sessions/"+sc+"/barsNomades").once("value",function(snap){
 var bars=snap.val();if(!bars){ac.style.display="none";return;}
@@ -714,10 +714,9 @@ window.showEcarts=showEcarts;
 window.showV20Cfg=showCfg;
 
 function addBtns(){
-var isA=localStorage.getItem("gestionFuts_isAdmin")==="true";
 var isC=localStorage.getItem("gestionFuts_isCreator")==="true";
-if(!isA)return;
-if(!document.getElementById("v20-btn-ec")){
+var isA=localStorage.getItem("gestionFuts_isAdmin")==="true";
+if(isC&&!document.getElementById("v20-btn-ec")){
 var ref=Array.from(document.querySelectorAll("button")).find(function(b){return b.textContent.includes("Stats")||b.textContent.includes("📈");});
 if(ref&&ref.parentNode){
 var b=document.createElement("button");b.id="v20-btn-ec";b.innerHTML="📊 Écarts";
@@ -740,6 +739,359 @@ if(document.readyState==="complete")init();else window.addEventListener("load",i
 var st=document.createElement("style");st.textContent="@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}";document.head.appendChild(st);
 })();
 // === FIN PATCH V20 ===
+
+// === PATCH V21 - Phase 1 ===
+(function(){
+console.log("[V21] Phase 1 - Restrictions accès + Situation + Alertes");
+
+// === RESTRICTIONS D'ACCÈS (E07, E14, E18) ===
+function applyAccessRestrictions() {
+  var isCreator = localStorage.getItem("gestionFuts_isCreator") === "true";
+  var isAdmin = localStorage.getItem("gestionFuts_isAdmin") === "true";
+  
+  // E07 - Stats : Admin et Super Admin uniquement (déjà OK via D&&)
+  // Rien à faire, déjà conditionné dans React
+  
+  // E14 - Stocks : Super Admin uniquement
+  // E18 - Export : Super Admin uniquement
+  // On masque ces sections dans le modal Paramètres si pas Super Admin
+  
+  if (!isCreator) {
+    // Masquer les inputs de stock initial
+    var stockInputs = document.querySelectorAll('input[id="stockBiere"], input[id="stockCidre"]');
+    stockInputs.forEach(function(input) {
+      var container = input.closest('div');
+      if (container && container.parentNode) {
+        container.parentNode.style.display = 'none';
+      }
+    });
+    
+    // Masquer les boutons d'export/réinitialisation
+    var buttons = document.querySelectorAll('button');
+    buttons.forEach(function(btn) {
+      var text = btn.textContent || '';
+      if (text.includes('Exporter') || text.includes('réinitialiser') || text.includes('Réinitialiser')) {
+        btn.style.display = 'none';
+      }
+    });
+  }
+}
+
+// Observer pour appliquer les restrictions quand les modals s'ouvrent
+var restrictionObserver = new MutationObserver(function(mutations) {
+  mutations.forEach(function(m) {
+    if (m.addedNodes.length > 0) {
+      setTimeout(applyAccessRestrictions, 100);
+    }
+  });
+});
+restrictionObserver.observe(document.body, { childList: true, subtree: true });
+
+// === P03 - VUE SITUATION TEMPS RÉEL ===
+function showSituation() {
+  var isAdmin = localStorage.getItem("gestionFuts_isAdmin") === "true";
+  if (!isAdmin) {
+    alert("Accès réservé aux Admins");
+    return;
+  }
+  
+  var old = document.getElementById("v21-situation");
+  if (old) old.remove();
+  
+  var modal = document.createElement("div");
+  modal.id = "v21-situation";
+  modal.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);z-index:9999;overflow-y:auto;padding:16px;";
+  
+  modal.innerHTML = '<div style="max-width:600px;margin:0 auto;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
+    '<h2 style="font-size:22px;font-weight:bold;color:#60a5fa;">🎯 Situation Temps Réel</h2>' +
+    '<button onclick="document.getElementById(&quot;v21-situation&quot;).remove()" style="font-size:24px;background:none;border:none;color:white;cursor:pointer;">✕</button>' +
+    '</div>' +
+    '<div id="v21-sit-content" style="color:white;"><p style="text-align:center;padding:40px;">⏳ Chargement...</p></div>' +
+    '</div>';
+  
+  document.body.appendChild(modal);
+  loadSituationData();
+}
+
+function loadSituationData() {
+  var sc = localStorage.getItem("gestionFuts_session");
+  if (!sc) return;
+  
+  var container = document.getElementById("v21-sit-content");
+  if (!container) return;
+  
+  // Charger bars et bénévoles
+  Promise.all([
+    firebase.database().ref("sessions/" + sc + "/barsNomades").once("value"),
+    firebase.database().ref("sessions/" + sc + "/users").once("value"),
+    firebase.database().ref("sessions/" + sc + "/config").once("value")
+  ]).then(function(results) {
+    var bars = results[0].val() || {};
+    var users = results[1].val() || {};
+    var config = results[2].val() || {};
+    
+    var now = Date.now();
+    var html = '';
+    
+    // Statistiques globales
+    var totalFuts = 0;
+    var futsAlerte = 0;
+    var barsSansBenev = 0;
+    
+    Object.values(bars).forEach(function(bar) {
+      if (bar.futs) totalFuts += bar.futs.length;
+      if (bar.futs) {
+        bar.futs.forEach(function(f) {
+          if (f && f.dateAttribution && (now - f.dateAttribution) > 4 * 3600000) futsAlerte++;
+        });
+      }
+      // Compter bénévoles sur ce bar
+      var benevCount = 0;
+      Object.values(users).forEach(function(u) {
+        if (u.barActuel && Object.keys(bars).find(function(bid) { return bars[bid].nom === u.barActuel; })) {
+          if (bars[Object.keys(bars).find(function(bid) { return bars[bid].nom === u.barActuel; })]) benevCount++;
+        }
+      });
+    });
+    
+    // Résumé
+    html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;">';
+    html += '<div style="background:#1e3a5f;padding:16px;border-radius:12px;text-align:center;">';
+    html += '<div style="font-size:28px;font-weight:bold;">' + totalFuts + '</div>';
+    html += '<div style="font-size:12px;color:#93c5fd;">Fûts en circulation</div></div>';
+    html += '<div style="background:' + (futsAlerte > 0 ? '#991b1b' : '#065f46') + ';padding:16px;border-radius:12px;text-align:center;">';
+    html += '<div style="font-size:28px;font-weight:bold;">' + futsAlerte + '</div>';
+    html += '<div style="font-size:12px;color:#fca5a5;">Fûts > 4h ⚠️</div></div>';
+    html += '<div style="background:#1e3a5f;padding:16px;border-radius:12px;text-align:center;">';
+    html += '<div style="font-size:28px;font-weight:bold;">' + Object.keys(bars).length + '</div>';
+    html += '<div style="font-size:12px;color:#93c5fd;">Bars actifs</div></div>';
+    html += '</div>';
+    
+    // Liste des bars
+    html += '<h3 style="font-size:16px;font-weight:bold;margin-bottom:12px;color:#fbbf24;">📍 État des bars</h3>';
+    
+    Object.keys(bars).forEach(function(barId) {
+      var bar = bars[barId];
+      var emoji = bar.type === "biere" ? "🍺" : "🍎";
+      var nbFuts = bar.futs ? bar.futs.length : 0;
+      var maxFuts = config.maxFutsParBar || 3;
+      
+      // Fûts en alerte pour ce bar
+      var alerteFuts = 0;
+      var futsDetails = [];
+      if (bar.futs) {
+        bar.futs.forEach(function(f, idx) {
+          if (f && f.dateAttribution) {
+            var dur = now - f.dateAttribution;
+            var h = Math.floor(dur / 3600000);
+            var m = Math.floor((dur % 3600000) / 60000);
+            var durStr = h + "h" + (m < 10 ? "0" : "") + m;
+            var isAlert = dur > 4 * 3600000;
+            if (isAlert) alerteFuts++;
+            futsDetails.push({ idx: idx + 1, dur: durStr, alert: isAlert });
+          }
+        });
+      }
+      
+      // Bénévoles sur ce bar
+      var benevoles = [];
+      Object.keys(users).forEach(function(uid) {
+        var u = users[uid];
+        if (u.barActuel === bar.nom) {
+          benevoles.push(u.role ? uid + " (" + u.role + ")" : uid);
+        }
+      });
+      
+      var bgColor = alerteFuts > 0 ? '#7f1d1d' : '#1f2937';
+      var borderColor = alerteFuts > 0 ? '#fca5a5' : '#374151';
+      
+      html += '<div style="background:' + bgColor + ';border:1px solid ' + borderColor + ';border-radius:12px;padding:12px;margin-bottom:8px;">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
+      html += '<div style="font-weight:bold;">' + emoji + ' ' + bar.nom + '</div>';
+      html += '<div style="display:flex;gap:4px;">';
+      for (var i = 0; i < maxFuts; i++) {
+        var futColor = i < nbFuts ? '#fbbf24' : '#4b5563';
+        html += '<span style="font-size:16px;color:' + futColor + ';">🛢️</span>';
+      }
+      html += ' <span style="font-size:12px;color:#9ca3af;">[' + nbFuts + '/' + maxFuts + ']</span></div>';
+      html += '</div>';
+      
+      // Détails fûts
+      if (futsDetails.length > 0) {
+        html += '<div style="font-size:12px;margin-bottom:6px;">';
+        futsDetails.forEach(function(fd) {
+          var col = fd.alert ? '#f87171' : '#10b981';
+          html += '<span style="color:' + col + ';margin-right:8px;">Fût ' + fd.idx + ': ' + fd.dur + (fd.alert ? ' ⚠️' : '') + '</span>';
+        });
+        html += '</div>';
+      }
+      
+      // Bénévoles
+      html += '<div style="font-size:12px;color:#9ca3af;">';
+      if (benevoles.length > 0) {
+        html += '👥 ' + benevoles.join(', ');
+      } else {
+        html += '👥 <span style="color:#fbbf24;">Aucun bénévole affecté</span>';
+      }
+      html += '</div></div>';
+    });
+    
+    container.innerHTML = html;
+  }).catch(function(err) {
+    container.innerHTML = '<p style="color:#f87171;">Erreur: ' + err.message + '</p>';
+  });
+}
+
+window.showSituation = showSituation;
+
+// === P05 - ALERTES ÉCARTS ANORMAUX ===
+function checkEcartsAnormaux() {
+  var isCreator = localStorage.getItem("gestionFuts_isCreator") === "true";
+  if (!isCreator) return; // Super Admin only
+  
+  var sc = localStorage.getItem("gestionFuts_session");
+  if (!sc) return;
+  
+  // Charger la config pour les seuils
+  firebase.database().ref("sessions/" + sc + "/config").once("value", function(snapCfg) {
+    var cfg = snapCfg.val() || {};
+    var seuilVol = cfg.seuilPerte || 10;
+    var seuilFin = cfg.seuilToleranceFinancier || 5;
+    
+    // Calculer les écarts (simplifié - on réutilise la logique V20)
+    var prixPinte = cfg.prixPinte || 6;
+    var prixPichet = cfg.prixPichet || 15;
+    var prixGobelet = cfg.prixGobelet || 2;
+    var volFut = cfg.volumeFutBiere || 30;
+    var volPinte = cfg.volumePinte || 0.5;
+    var volPichet = cfg.volumePichet || 1.5;
+    
+    Promise.all([
+      firebase.database().ref("sessions/" + sc + "/historique").once("value"),
+      firebase.database().ref("sessions/" + sc + "/historiqueVentes").once("value")
+    ]).then(function(results) {
+      var hist = results[0].val() || {};
+      var ventes = results[1].val() || {};
+      
+      var litresSortis = 0;
+      var litresServis = 0;
+      var caTheo = 0;
+      var caDecl = 0;
+      
+      Object.values(hist).forEach(function(h) {
+        if (h.annule) return;
+        if (h.type === "RETOUR_VIDE") litresSortis += volFut;
+        else if (h.type === "RETOUR_CASSE") litresSortis += volFut * 0.5;
+      });
+      
+      Object.values(ventes).forEach(function(v) {
+        if (v.annule) return;
+        var p = v.nbPintes || 0;
+        var pi = v.nbPichets || 0;
+        var g = v.nbGobelets || 0;
+        litresServis += (p * volPinte) + (pi * volPichet);
+        caTheo += (p * prixPinte) + (pi * prixPichet) + (g * prixGobelet);
+        caDecl += v.montant || 0;
+      });
+      
+      var ecartVol = litresSortis > 0 ? ((litresSortis - litresServis) / litresSortis * 100) : 0;
+      var ecartFin = caTheo > 0 ? ((caTheo - caDecl) / caTheo * 100) : 0;
+      
+      // Afficher alerte si dépassement
+      var alertContainer = document.getElementById("v21-alert-ecarts");
+      if (!alertContainer) {
+        var header = document.querySelector(".sticky.top-0");
+        if (header) {
+          alertContainer = document.createElement("div");
+          alertContainer.id = "v21-alert-ecarts";
+          alertContainer.style.display = "none";
+          var v20Alert = document.getElementById("v20-alert");
+          if (v20Alert) {
+            v20Alert.parentNode.insertBefore(alertContainer, v20Alert.nextSibling);
+          } else {
+            header.parentNode.insertBefore(alertContainer, header.nextSibling);
+          }
+        }
+      }
+      
+      if (!alertContainer) return;
+      
+      var alertes = [];
+      if (Math.abs(ecartVol) > seuilVol) {
+        alertes.push({ type: 'volume', val: ecartVol.toFixed(1), seuil: seuilVol });
+      }
+      if (Math.abs(ecartFin) > seuilFin) {
+        alertes.push({ type: 'financier', val: ecartFin.toFixed(1), seuil: seuilFin });
+      }
+      
+      if (alertes.length > 0) {
+        var html = '<div style="background:linear-gradient(135deg,#7c2d12,#78350f);border:2px solid #fbbf24;border-radius:12px;padding:12px;margin:8px;">';
+        html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
+        html += '<span style="font-size:20px;">🚨</span>';
+        html += '<span style="font-weight:bold;color:#fbbf24;">ÉCARTS ANORMAUX DÉTECTÉS</span>';
+        html += '</div><div style="display:flex;flex-wrap:wrap;gap:8px;">';
+        alertes.forEach(function(a) {
+          var emoji = a.type === 'volume' ? '🍺' : '💶';
+          var label = a.type === 'volume' ? 'Volume' : 'Financier';
+          html += '<span style="background:#451a03;padding:6px 10px;border-radius:6px;font-size:13px;">';
+          html += emoji + ' ' + label + ': <b>' + a.val + '%</b> (seuil: ' + a.seuil + '%)';
+          html += '</span>';
+        });
+        html += '</div></div>';
+        alertContainer.innerHTML = html;
+        alertContainer.style.display = "block";
+      } else {
+        alertContainer.style.display = "none";
+      }
+    });
+  });
+}
+
+// === BOUTON SITUATION ===
+function addSituationBtn() {
+  var isAdmin = localStorage.getItem("gestionFuts_isAdmin") === "true";
+  if (!isAdmin) return;
+  
+  if (document.getElementById("v21-btn-sit")) return;
+  
+  var ref = document.getElementById("v20-btn-ec") || 
+            Array.from(document.querySelectorAll("button")).find(function(b) { 
+              return b.textContent.includes("Stats"); 
+            });
+  
+  if (ref && ref.parentNode) {
+    var btn = document.createElement("button");
+    btn.id = "v21-btn-sit";
+    btn.innerHTML = "🎯 Situation";
+    btn.className = ref.className || "";
+    btn.style.cssText = "background:linear-gradient(135deg,#0891b2,#0e7490);margin-left:4px;padding:8px 12px;border-radius:8px;border:none;color:white;font-weight:500;cursor:pointer;";
+    btn.onclick = showSituation;
+    ref.parentNode.insertBefore(btn, ref);
+  }
+}
+
+// === INIT V21 ===
+function initV21() {
+  console.log("[V21] Initialisation...");
+  
+  // Alertes écarts (Super Admin)
+  checkEcartsAnormaux();
+  setInterval(checkEcartsAnormaux, 300000); // Toutes les 5 min
+  
+  // Bouton Situation
+  setTimeout(addSituationBtn, 2500);
+  setInterval(addSituationBtn, 5000);
+}
+
+if (document.readyState === "complete") {
+  initV21();
+} else {
+  window.addEventListener("load", initV21);
+}
+
+})();
+// === FIN PATCH V21 ===
 </script>
 </body>
 </html>
