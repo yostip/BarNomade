@@ -756,6 +756,90 @@ if(document.readyState==="complete")init();else window.addEventListener("load",i
 
 var st=document.createElement("style");st.textContent="@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}";document.head.appendChild(st);
 })();
+// === RESTRICTIONS SECRÉTAIRES ===
+function isSecretaireCheck(callback) {
+  var isCreator = localStorage.getItem("gestionFuts_isCreator") === "true";
+  if (isCreator) { callback(false); return; }
+  
+  var sc = localStorage.getItem("gestionFuts_session");
+  var userName = localStorage.getItem("gestionFuts_userName");
+  if (!sc || !userName) { callback(false); return; }
+  
+  firebase.database().ref("sessions/" + sc + "/users/" + userName).once("value", function(snap) {
+    var user = snap.val();
+    if (!user) { callback(false); return; }
+    if (user.role === "secretaire" || user.promotedBy) {
+      callback(true);
+    } else {
+      callback(false);
+    }
+  });
+}
+
+var userIsSecretaire = null;
+
+function applySecretaireRestrictions() {
+  if (userIsSecretaire !== true) return;
+  
+  // Masquer tous les éléments interdits aux secrétaires
+  var allBtns = document.querySelectorAll('button');
+  allBtns.forEach(function(btn) {
+    var txt = btn.textContent || '';
+    
+    // Stats
+    if (txt.includes('Stats') || txt.includes('📈')) {
+      btn.style.display = 'none';
+    }
+    // Paramètres
+    if (txt.includes('⚙') || txt.includes('Paramètre') || txt.includes('Param')) {
+      btn.style.display = 'none';
+    }
+    // Annuler
+    if (txt.includes('Annuler')) {
+      btn.style.display = 'none';
+    }
+    // Export
+    if (txt.includes('📥') || txt.includes('Export') || txt.includes('Exporter')) {
+      btn.style.display = 'none';
+    }
+  });
+  
+  // Masquer les compteurs cliquables (historiques)
+  // Les compteurs de fûts/ventes qui ouvrent les historiques
+  var clickables = document.querySelectorAll('[class*="cursor-pointer"]');
+  clickables.forEach(function(el) {
+    var txt = el.textContent || '';
+    // Si c'est un compteur avec chiffres (fûts sortis, ventes)
+    if (/^\d+$/.test(txt.trim()) || txt.includes('fût') || txt.includes('vente')) {
+      // Vérifier si c'est un compteur d'historique
+      var parent = el.closest('div');
+      if (parent) {
+        var parentTxt = parent.textContent || '';
+        if (parentTxt.includes('sortis') || parentTxt.includes('Ventes') || parentTxt.includes('historique')) {
+          el.style.pointerEvents = 'none';
+          el.style.cursor = 'default';
+          el.onclick = null;
+        }
+      }
+    }
+  });
+}
+
+function initSecretaireRestrictions() {
+  isSecretaireCheck(function(isSec) {
+    userIsSecretaire = isSec;
+    console.log("[V21] Utilisateur secrétaire:", isSec);
+    if (isSec) {
+      applySecretaireRestrictions();
+      // Réappliquer régulièrement (en cas de changement de vue)
+      setInterval(applySecretaireRestrictions, 1000);
+    }
+  });
+}
+
+// Lancer après un délai pour que l'UI soit chargée
+setTimeout(initSecretaireRestrictions, 2000);
+
 // === FIN PATCH V21 ===
 </script>
 </body>
