@@ -757,42 +757,67 @@ if(document.readyState==="complete")init();else window.addEventListener("load",i
 var st=document.createElement("style");st.textContent="@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}";document.head.appendChild(st);
 })();
 // === CORRECTION REFRESH : Vérifier rôle réel au démarrage ===
-function fixBadgeSecretaire() {
-  // Corriger le badge "Admin" en "Secrétaire" sur la page d'accueil
-  var badges = document.querySelectorAll('span');
-  badges.forEach(function(span) {
-    if (span.textContent === 'Admin' && span.className && span.className.includes('bg-green-800')) {
-      span.textContent = 'Secrétaire';
-      span.className = span.className.replace('bg-green-800', 'bg-blue-800');
-    }
-  });
-}
+// Problème: React lit localStorage.isAdmin AVANT que Firebase réponde
+// Solution: Si secrétaire détecté avec isAdmin=true, corriger et recharger la page
 
 function fixRoleOnStartup() {
   var sc = localStorage.getItem("gestionFuts_session");
   var userName = localStorage.getItem("gestionFuts_userName");
   var isCreator = localStorage.getItem("gestionFuts_isCreator") === "true";
+  var currentIsAdmin = localStorage.getItem("gestionFuts_isAdmin") === "true";
   
-  if (isCreator || !sc || !userName) return;
+  // Super Admin = rien à corriger
+  if (isCreator) return;
+  
+  // Pas de session = rien à corriger
+  if (!sc || !userName) return;
+  
+  // Protection anti-boucle de reload (max 2 tentatives par session navigateur)
+  var reloadCount = parseInt(sessionStorage.getItem("v21_reloadCount") || "0");
   
   firebase.database().ref("sessions/" + sc + "/users/" + userName).once("value", function(snap) {
     var user = snap.val();
     if (!user) return;
     
-    if (user.role === "secretaire" || user.promotedBy) {
-      console.log("[V21] Secrétaire détecté - correction affichage");
-      localStorage.setItem("gestionFuts_isAdmin", "false");
-      window.userIsSecretaireConfirmed = true;
+    var isSecretaire = (user.role === "secretaire" || user.promotedBy);
+    
+    if (isSecretaire) {
+      console.log("[V21] Secrétaire détecté, isAdmin actuel:", currentIsAdmin);
       
-      // Corriger le badge immédiatement et régulièrement
+      // Si localStorage dit Admin mais c'est un secrétaire → corriger et recharger
+      if (currentIsAdmin && reloadCount < 2) {
+        console.log("[V21] Correction: isAdmin true → false, reload...");
+        localStorage.setItem("gestionFuts_isAdmin", "false");
+        sessionStorage.setItem("v21_reloadCount", String(reloadCount + 1));
+        window.location.reload();
+        return;
+      }
+      
+      // Déjà corrigé ou limite de reload atteinte
+      window.userIsSecretaireConfirmed = true;
+      console.log("[V21] Secrétaire confirmé, application des restrictions");
+      
+      // Appliquer les restrictions visuelles
       fixBadgeSecretaire();
       setInterval(fixBadgeSecretaire, 200);
       
-      // Appliquer les restrictions
       setTimeout(function() {
         userIsSecretaire = true;
         applySecretaireRestrictions();
-      }, 100);
+        setInterval(applySecretaireRestrictions, 500);
+      }, 300);
+    } else {
+      // Pas secrétaire, nettoyer le compteur
+      sessionStorage.removeItem("v21_reloadCount");
+    }
+  });
+}
+
+function fixBadgeSecretaire() {
+  document.querySelectorAll('span').forEach(function(span) {
+    if (span.textContent === 'Admin' && span.className && span.className.includes('bg-green-800')) {
+      span.textContent = 'Secrétaire';
+      span.className = span.className.replace('bg-green-800', 'bg-blue-800');
     }
   });
 }
