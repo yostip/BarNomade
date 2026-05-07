@@ -938,784 +938,861 @@ function applySecretaireRestrictions() {
 
 // === FIN PATCH V21 ===
 
-// === PATCH V22 - P14, P04, P11, P18, P06 ===
+// === PATCH V23 - BILAN SHIFT, ALERTES ÉCARTS, HISTORIQUE ANNULATIONS ===
 (function(){
-console.log("[V22] Initialisation - Audit, Rapport, Graphiques, Prévision, Export");
+console.log("[V23] Initialisation - Bilan, Alertes, Historique");
 
 // =============================================================================
-// P14 - AUDIT TRAIL COMPLET
+// CONFIGURATION
 // =============================================================================
-function logAudit(action, details) {
-  var sc = localStorage.getItem("gestionFuts_session");
-  var userName = localStorage.getItem("gestionFuts_userName") || "Inconnu";
-  if (!sc) return;
-  
-  var entry = {
-    timestamp: Date.now(),
-    dateHeure: new Date().toLocaleString("fr-FR"),
-    user: userName,
-    action: action,
-    details: details || {}
-  };
-  
-  firebase.database().ref("sessions/" + sc + "/auditTrail").push(entry);
+var v23Config = {
+  seuilAlerte: 10,  // % d'écart pour déclencher une alerte
+  shifts: [
+    { id: "c1", label: "11:30 - 15:00", startH: 11.5, endH: 15 },
+    { id: "c2", label: "15:00 - 18:00", startH: 15, endH: 18 },
+    { id: "c3", label: "18:00 - 21:30", startH: 18, endH: 21.5 },
+    { id: "c4", label: "21:30 - 00:30", startH: 21.5, endH: 24.5 }
+  ]
+};
+
+// =============================================================================
+// UTILITAIRES
+// =============================================================================
+function getShiftFromTimestamp(ts) {
+  var d = new Date(ts);
+  var h = d.getHours() + d.getMinutes() / 60;
+  for (var i = 0; i < v23Config.shifts.length; i++) {
+    var s = v23Config.shifts[i];
+    if (h >= s.startH && h < s.endH) return s.id;
+    // Gestion minuit
+    if (s.endH > 24 && (h >= s.startH || h < s.endH - 24)) return s.id;
+  }
+  return "c4"; // Par défaut dernier shift
 }
 
-// Exposer globalement pour utilisation
-window.logAudit = logAudit;
-
-// Intercepter les actions existantes pour les logger
-function setupAuditInterceptors() {
-  var sc = localStorage.getItem("gestionFuts_session");
-  if (!sc) return;
-  
-  var barsRef = firebase.database().ref("sessions/" + sc + "/barsNomades");
-  var histRef = firebase.database().ref("sessions/" + sc + "/historique");
-  var ventesRef = firebase.database().ref("sessions/" + sc + "/historiqueVentes");
-  var usersRef = firebase.database().ref("sessions/" + sc + "/users");
-  
-  // Écouter les nouveaux fûts dans l'historique
-  histRef.on("child_added", function(snap) {
-    var h = snap.val();
-    if (h && h.type && !h._logged) {
-      var details = { bar: h.bar, type: h.type };
-      if (h.type === "ATTRIBUTION") {
-        logAudit("FUT_ATTRIBUE", details);
-      } else if (h.type === "RETOUR_VIDE") {
-        logAudit("FUT_RETOUR_VIDE", details);
-      } else if (h.type === "RETOUR_CASSE") {
-        logAudit("FUT_RETOUR_CASSE", details);
-      } else if (h.type === "RETOUR_PARTIEL") {
-        logAudit("FUT_RETOUR_PARTIEL", details);
-      }
-    }
-  });
-  
-  // Écouter les nouvelles ventes
-  ventesRef.on("child_added", function(snap) {
-    var v = snap.val();
-    if (v && v.bar && !v._logged) {
-      logAudit("VENTE_ENREGISTREE", {
-        bar: v.bar,
-        pintes: v.nbPintes || 0,
-        pichets: v.nbPichets || 0,
-        gobelets: v.nbGobelets || 0,
-        montant: v.montant || 0
-      });
-    }
-  });
-  
-  // Écouter les changements de rôle utilisateur
-  usersRef.on("child_changed", function(snap) {
-    var u = snap.val();
-    var userId = snap.key;
-    if (u && u.role) {
-      logAudit("ROLE_MODIFIE", { utilisateur: userId, nouveauRole: u.role });
-    }
-  });
+function getJourFromTimestamp(ts) {
+  var d = new Date(ts);
+  // Si entre 00h et 06h, c'est encore la veille
+  if (d.getHours() < 6) {
+    d.setDate(d.getDate() - 1);
+  }
+  return d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
 }
 
-// Modal Audit Trail
-function showAuditTrail() {
-  var isCreator = localStorage.getItem("gestionFuts_isCreator") === "true";
-  if (!isCreator) {
-    alert("Accès réservé au Super Admin");
+// =============================================================================
+// 1. BILAN PAR SHIFT
+// =============================================================================
+function showBilanShift() {
+  var isAdmin = localStorage.getItem("gestionFuts_isAdmin") === "true";
+  if (!isAdmin) {
+    alert("Accès réservé aux administrateurs");
     return;
   }
   
   var sc = localStorage.getItem("gestionFuts_session");
   if (!sc) return;
   
-  var old = document.getElementById("v22-audit-modal");
+  var old = document.getElementById("v23-bilan-modal");
   if (old) old.remove();
   
   var modal = document.createElement("div");
-  modal.id = "v22-audit-modal";
+  modal.id = "v23-bilan-modal";
   modal.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);z-index:9999;overflow-y:auto;padding:16px;";
   
-  modal.innerHTML = '<div style="max-width:700px;margin:0 auto;">' +
+  modal.innerHTML = '<div style="max-width:900px;margin:0 auto;">' +
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
-    '<h2 style="font-size:20px;font-weight:bold;color:#f59e0b;">📜 Audit Trail</h2>' +
-    '<button onclick="document.getElementById(\'v22-audit-modal\').remove()" style="font-size:24px;background:none;border:none;color:white;cursor:pointer;">✕</button>' +
+    '<h2 style="font-size:20px;font-weight:bold;color:#3b82f6;">📊 Bilan par Shift</h2>' +
+    '<button onclick="document.getElementById(\'v23-bilan-modal\').remove()" style="font-size:24px;background:none;border:none;color:white;cursor:pointer;">✕</button>' +
     '</div>' +
-    '<div id="v22-audit-content" style="color:white;"><p style="text-align:center;padding:40px;">⏳ Chargement...</p></div>' +
+    '<div id="v23-bilan-content" style="color:white;"><p style="text-align:center;padding:40px;">⏳ Chargement...</p></div>' +
     '</div>';
   
   document.body.appendChild(modal);
-  
-  firebase.database().ref("sessions/" + sc + "/auditTrail").orderByChild("timestamp").limitToLast(100).once("value", function(snap) {
-    var entries = [];
-    snap.forEach(function(child) {
-      entries.push(child.val());
-    });
-    entries.reverse(); // Plus récent en premier
-    
-    var container = document.getElementById("v22-audit-content");
-    if (!container) return;
-    
-    if (entries.length === 0) {
-      container.innerHTML = '<p style="text-align:center;color:#9ca3af;">Aucune action enregistrée</p>';
-      return;
-    }
-    
-    var html = '<div style="max-height:70vh;overflow-y:auto;">';
-    entries.forEach(function(e) {
-      var icon = "📝";
-      var color = "#9ca3af";
-      if (e.action.includes("FUT")) { icon = "🛢️"; color = "#fbbf24"; }
-      else if (e.action.includes("VENTE")) { icon = "💰"; color = "#10b981"; }
-      else if (e.action.includes("ANNUL")) { icon = "❌"; color = "#ef4444"; }
-      else if (e.action.includes("ROLE")) { icon = "👤"; color = "#8b5cf6"; }
-      
-      var detailsStr = "";
-      if (e.details) {
-        var parts = [];
-        for (var k in e.details) {
-          parts.push(k + ": " + e.details[k]);
-        }
-        detailsStr = parts.join(", ");
-      }
-      
-      html += '<div style="background:#1f2937;border-radius:8px;padding:10px;margin-bottom:6px;border-left:3px solid ' + color + ';">';
-      html += '<div style="display:flex;justify-content:space-between;font-size:12px;color:#9ca3af;margin-bottom:4px;">';
-      html += '<span>' + e.dateHeure + '</span>';
-      html += '<span>' + e.user + '</span></div>';
-      html += '<div style="font-size:14px;">' + icon + ' <span style="color:' + color + ';font-weight:bold;">' + e.action + '</span></div>';
-      if (detailsStr) {
-        html += '<div style="font-size:12px;color:#9ca3af;margin-top:4px;">' + detailsStr + '</div>';
-      }
-      html += '</div>';
-    });
-    html += '</div>';
-    
-    container.innerHTML = html;
-  });
+  loadBilanData();
 }
 
-window.showAuditTrail = showAuditTrail;
-
-// =============================================================================
-// P04 + P11 - RAPPORT ET GRAPHIQUE PAR HEURE
-// =============================================================================
-function showRapportHoraire() {
-  var isCreator = localStorage.getItem("gestionFuts_isCreator") === "true";
-  if (!isCreator) {
-    alert("Accès réservé au Super Admin");
-    return;
-  }
-  
+function loadBilanData() {
   var sc = localStorage.getItem("gestionFuts_session");
-  if (!sc) return;
-  
-  var old = document.getElementById("v22-rapport-modal");
-  if (old) old.remove();
-  
-  var modal = document.createElement("div");
-  modal.id = "v22-rapport-modal";
-  modal.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);z-index:9999;overflow-y:auto;padding:16px;";
-  
-  modal.innerHTML = '<div style="max-width:700px;margin:0 auto;">' +
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
-    '<h2 style="font-size:20px;font-weight:bold;color:#3b82f6;">📊 Rapport Horaire</h2>' +
-    '<button onclick="document.getElementById(\'v22-rapport-modal\').remove()" style="font-size:24px;background:none;border:none;color:white;cursor:pointer;">✕</button>' +
-    '</div>' +
-    '<div id="v22-rapport-content" style="color:white;"><p style="text-align:center;padding:40px;">⏳ Chargement...</p></div>' +
-    '</div>';
-  
-  document.body.appendChild(modal);
-  loadRapportData();
-}
-
-function loadRapportData() {
-  var sc = localStorage.getItem("gestionFuts_session");
-  var container = document.getElementById("v22-rapport-content");
+  var container = document.getElementById("v23-bilan-content");
   if (!sc || !container) return;
-  
-  Promise.all([
-    firebase.database().ref("sessions/" + sc + "/historique").once("value"),
-    firebase.database().ref("sessions/" + sc + "/historiqueVentes").once("value"),
-    firebase.database().ref("sessions/" + sc + "/config").once("value")
-  ]).then(function(results) {
-    var hist = results[0].val() || {};
-    var ventes = results[1].val() || {};
-    var config = results[2].val() || {};
-    
-    var volFut = config.volumeFutBiere || 30;
-    var volPinte = config.volumePinte || 0.5;
-    var volPichet = config.volumePichet || 1.5;
-    var prixPinte = config.prixPinte || 6;
-    var prixPichet = config.prixPichet || 15;
-    var prixGobelet = config.prixGobelet || 2;
-    
-    // Agréger par heure
-    var dataByHour = {};
-    
-    // Traiter les retours de fûts (volume sorti)
-    Object.values(hist).forEach(function(h) {
-      if (h.annule) return;
-      var date = new Date(h.date);
-      var hour = date.getHours();
-      var key = hour + "h";
-      
-      if (!dataByHour[key]) {
-        dataByHour[key] = { hour: hour, litresSortis: 0, litresServis: 0, caTheo: 0, caDecl: 0, nbVentes: 0, nbFuts: 0 };
-      }
-      
-      if (h.type === "RETOUR_VIDE") {
-        dataByHour[key].litresSortis += volFut;
-        dataByHour[key].nbFuts++;
-      } else if (h.type === "RETOUR_CASSE") {
-        // Utiliser volumeInfo si présent, sinon 50% par défaut
-        var pctCasse = 0.5;
-        if (h.volumeInfo) {
-          pctCasse = h.volumeInfo.comptabiliser ? (h.volumeInfo.pourcentage / 100) : 0;
-        }
-        dataByHour[key].litresSortis += volFut * pctCasse;
-        if (pctCasse > 0) dataByHour[key].nbFuts++;
-      } else if (h.type === "RETOUR_PARTIEL" || h.type === "RETOUR_REUTILISABLE") {
-        // Non terminé = pas de volume comptabilisé par défaut
-        var pctPartiel = 0;
-        if (h.volumeInfo && h.volumeInfo.comptabiliser) {
-          pctPartiel = h.volumeInfo.pourcentage / 100;
-        }
-        dataByHour[key].litresSortis += volFut * pctPartiel;
-        if (pctPartiel > 0) dataByHour[key].nbFuts++;
-      }
-    });
-    
-    // Traiter les ventes
-    Object.values(ventes).forEach(function(v) {
-      if (v.annule) return;
-      var date = new Date(v.date);
-      var hour = date.getHours();
-      var key = hour + "h";
-      
-      if (!dataByHour[key]) {
-        dataByHour[key] = { hour: hour, litresSortis: 0, litresServis: 0, caTheo: 0, caDecl: 0, nbVentes: 0, nbFuts: 0 };
-      }
-      
-      var p = v.nbPintes || 0;
-      var pi = v.nbPichets || 0;
-      var g = v.nbGobelets || 0;
-      
-      dataByHour[key].litresServis += (p * volPinte) + (pi * volPichet);
-      dataByHour[key].caTheo += (p * prixPinte) + (pi * prixPichet) + (g * prixGobelet);
-      dataByHour[key].caDecl += v.montant || 0;
-      dataByHour[key].nbVentes++;
-    });
-    
-    // Trier par heure
-    var hours = Object.keys(dataByHour).sort(function(a, b) {
-      return dataByHour[a].hour - dataByHour[b].hour;
-    });
-    
-    if (hours.length === 0) {
-      container.innerHTML = '<p style="text-align:center;color:#9ca3af;">Aucune donnée</p>';
-      return;
-    }
-    
-    // Générer le graphique SVG
-    var maxLitres = 0;
-    hours.forEach(function(k) { 
-      maxLitres = Math.max(maxLitres, dataByHour[k].litresServis, dataByHour[k].litresSortis); 
-    });
-    maxLitres = Math.max(maxLitres, 10);
-    
-    var svgWidth = 650;
-    var svgHeight = 200;
-    var barWidth = Math.min(40, (svgWidth - 60) / hours.length - 10);
-    var startX = 50;
-    
-    var svg = '<svg viewBox="0 0 ' + svgWidth + ' ' + svgHeight + '" style="width:100%;background:#1f2937;border-radius:12px;margin-bottom:16px;">';
-    
-    // Axes
-    svg += '<line x1="45" y1="20" x2="45" y2="170" stroke="#4b5563" stroke-width="1"/>';
-    svg += '<line x1="45" y1="170" x2="' + (svgWidth - 10) + '" y2="170" stroke="#4b5563" stroke-width="1"/>';
-    
-    // Légende
-    svg += '<rect x="' + (svgWidth - 180) + '" y="5" width="12" height="12" fill="#fbbf24"/>';
-    svg += '<text x="' + (svgWidth - 165) + '" y="15" fill="#9ca3af" font-size="10">Litres sortis</text>';
-    svg += '<rect x="' + (svgWidth - 90) + '" y="5" width="12" height="12" fill="#3b82f6"/>';
-    svg += '<text x="' + (svgWidth - 75) + '" y="15" fill="#9ca3af" font-size="10">Litres servis</text>';
-    
-    // Barres
-    hours.forEach(function(k, i) {
-      var d = dataByHour[k];
-      var x = startX + i * (barWidth * 2 + 15);
-      var hSortis = (d.litresSortis / maxLitres) * 140;
-      var hServis = (d.litresServis / maxLitres) * 140;
-      
-      // Barre sortis
-      svg += '<rect x="' + x + '" y="' + (170 - hSortis) + '" width="' + barWidth + '" height="' + hSortis + '" fill="#fbbf24" rx="2"/>';
-      // Barre servis
-      svg += '<rect x="' + (x + barWidth + 2) + '" y="' + (170 - hServis) + '" width="' + barWidth + '" height="' + hServis + '" fill="#3b82f6" rx="2"/>';
-      // Label heure
-      svg += '<text x="' + (x + barWidth) + '" y="185" fill="#9ca3af" font-size="10" text-anchor="middle">' + k + '</text>';
-    });
-    
-    svg += '</svg>';
-    
-    // Tableau détaillé
-    var html = svg;
-    html += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
-    html += '<tr style="background:#374151;">';
-    html += '<th style="padding:8px;text-align:left;border:1px solid #4b5563;">Heure</th>';
-    html += '<th style="padding:8px;text-align:right;border:1px solid #4b5563;">Fûts</th>';
-    html += '<th style="padding:8px;text-align:right;border:1px solid #4b5563;">L. sortis</th>';
-    html += '<th style="padding:8px;text-align:right;border:1px solid #4b5563;">L. servis</th>';
-    html += '<th style="padding:8px;text-align:right;border:1px solid #4b5563;">Écart</th>';
-    html += '<th style="padding:8px;text-align:right;border:1px solid #4b5563;">CA théo.</th>';
-    html += '<th style="padding:8px;text-align:right;border:1px solid #4b5563;">CA décl.</th>';
-    html += '</tr>';
-    
-    var totals = { futs: 0, sortis: 0, servis: 0, caTheo: 0, caDecl: 0 };
-    
-    hours.forEach(function(k) {
-      var d = dataByHour[k];
-      var ecartVol = d.litresSortis - d.litresServis;
-      var ecartPct = d.litresSortis > 0 ? (ecartVol / d.litresSortis * 100).toFixed(1) : 0;
-      var ecartColor = Math.abs(ecartPct) > 10 ? "#ef4444" : "#10b981";
-      
-      totals.futs += d.nbFuts;
-      totals.sortis += d.litresSortis;
-      totals.servis += d.litresServis;
-      totals.caTheo += d.caTheo;
-      totals.caDecl += d.caDecl;
-      
-      html += '<tr style="background:#1f2937;">';
-      html += '<td style="padding:8px;border:1px solid #4b5563;font-weight:bold;">' + k + '</td>';
-      html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + d.nbFuts + '</td>';
-      html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + d.litresSortis.toFixed(1) + ' L</td>';
-      html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + d.litresServis.toFixed(1) + ' L</td>';
-      html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;color:' + ecartColor + ';">' + ecartVol.toFixed(1) + ' L (' + ecartPct + '%)</td>';
-      html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + d.caTheo.toFixed(0) + ' €</td>';
-      html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + d.caDecl.toFixed(0) + ' €</td>';
-      html += '</tr>';
-    });
-    
-    // Ligne totaux
-    var ecartTotal = totals.sortis - totals.servis;
-    var ecartTotalPct = totals.sortis > 0 ? (ecartTotal / totals.sortis * 100).toFixed(1) : 0;
-    
-    html += '<tr style="background:#374151;font-weight:bold;">';
-    html += '<td style="padding:8px;border:1px solid #4b5563;">TOTAL</td>';
-    html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + totals.futs + '</td>';
-    html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + totals.sortis.toFixed(1) + ' L</td>';
-    html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + totals.servis.toFixed(1) + ' L</td>';
-    html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + ecartTotal.toFixed(1) + ' L (' + ecartTotalPct + '%)</td>';
-    html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + totals.caTheo.toFixed(0) + ' €</td>';
-    html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + totals.caDecl.toFixed(0) + ' €</td>';
-    html += '</tr></table>';
-    
-    container.innerHTML = html;
-  });
-}
-
-window.showRapportHoraire = showRapportHoraire;
-
-// =============================================================================
-// P18 - PRÉVISION CONSOMMATION (basée sur 2h)
-// =============================================================================
-function showPrevision() {
-  var isCreator = localStorage.getItem("gestionFuts_isCreator") === "true";
-  if (!isCreator) {
-    alert("Accès réservé au Super Admin");
-    return;
-  }
-  
-  var sc = localStorage.getItem("gestionFuts_session");
-  if (!sc) return;
-  
-  var old = document.getElementById("v22-prevision-modal");
-  if (old) old.remove();
-  
-  var modal = document.createElement("div");
-  modal.id = "v22-prevision-modal";
-  modal.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);z-index:9999;overflow-y:auto;padding:16px;";
-  
-  modal.innerHTML = '<div style="max-width:500px;margin:0 auto;">' +
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
-    '<h2 style="font-size:20px;font-weight:bold;color:#8b5cf6;">🔮 Prévision</h2>' +
-    '<button onclick="document.getElementById(\'v22-prevision-modal\').remove()" style="font-size:24px;background:none;border:none;color:white;cursor:pointer;">✕</button>' +
-    '</div>' +
-    '<div id="v22-prevision-content" style="color:white;"><p style="text-align:center;padding:40px;">⏳ Calcul...</p></div>' +
-    '</div>';
-  
-  document.body.appendChild(modal);
-  loadPrevisionData();
-}
-
-function loadPrevisionData() {
-  var sc = localStorage.getItem("gestionFuts_session");
-  var container = document.getElementById("v22-prevision-content");
-  if (!sc || !container) return;
-  
-  Promise.all([
-    firebase.database().ref("sessions/" + sc + "/historique").once("value"),
-    firebase.database().ref("sessions/" + sc + "/historiqueVentes").once("value"),
-    firebase.database().ref("sessions/" + sc + "/config").once("value")
-  ]).then(function(results) {
-    var hist = results[0].val() || {};
-    var ventes = results[1].val() || {};
-    var config = results[2].val() || {};
-    
-    var volFut = config.volumeFutBiere || 30;
-    var volPinte = config.volumePinte || 0.5;
-    var volPichet = config.volumePichet || 1.5;
-    
-    var now = Date.now();
-    var deuxHeures = 2 * 60 * 60 * 1000;
-    var limite = now - deuxHeures;
-    
-    // Données des 2 dernières heures
-    var futsRecents = 0;
-    var litresRecents = 0;
-    var ventesRecentes = 0;
-    
-    Object.values(hist).forEach(function(h) {
-      if (h.annule) return;
-      var ts = h.date;
-      if (ts >= limite) {
-        if (h.type === "RETOUR_VIDE") futsRecents++;
-        else if (h.type === "RETOUR_CASSE" || h.type === "RETOUR_PARTIEL") futsRecents += 0.5;
-      }
-    });
-    
-    Object.values(ventes).forEach(function(v) {
-      if (v.annule) return;
-      var ts = v.date;
-      if (ts >= limite) {
-        var p = v.nbPintes || 0;
-        var pi = v.nbPichets || 0;
-        litresRecents += (p * volPinte) + (pi * volPichet);
-        ventesRecentes++;
-      }
-    });
-    
-    // Calcul des moyennes horaires
-    var futsParHeure = futsRecents / 2;
-    var litresParHeure = litresRecents / 2;
-    var ventesParHeure = ventesRecentes / 2;
-    
-    // Heures restantes (supposons fin à 2h du matin)
-    var maintenant = new Date();
-    var heureActuelle = maintenant.getHours();
-    var heuresRestantes;
-    
-    if (heureActuelle >= 10 && heureActuelle < 24) {
-      heuresRestantes = (24 - heureActuelle) + 2; // jusqu'à 2h
-    } else if (heureActuelle < 2) {
-      heuresRestantes = 2 - heureActuelle;
-    } else {
-      heuresRestantes = 0;
-    }
-    
-    // Prévisions
-    var prevFuts = Math.round(futsParHeure * heuresRestantes);
-    var prevLitres = Math.round(litresParHeure * heuresRestantes);
-    var prevVentes = Math.round(ventesParHeure * heuresRestantes);
-    
-    var html = '<div style="background:#1f2937;border-radius:12px;padding:20px;margin-bottom:16px;">';
-    html += '<h3 style="color:#9ca3af;font-size:14px;margin-bottom:12px;">📈 Données des 2 dernières heures</h3>';
-    html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;text-align:center;">';
-    html += '<div><div style="font-size:24px;font-weight:bold;color:#fbbf24;">' + futsRecents.toFixed(1) + '</div><div style="font-size:12px;color:#9ca3af;">Fûts vidés</div></div>';
-    html += '<div><div style="font-size:24px;font-weight:bold;color:#3b82f6;">' + litresRecents.toFixed(1) + ' L</div><div style="font-size:12px;color:#9ca3af;">Servis</div></div>';
-    html += '<div><div style="font-size:24px;font-weight:bold;color:#10b981;">' + ventesRecentes + '</div><div style="font-size:12px;color:#9ca3af;">Ventes</div></div>';
-    html += '</div></div>';
-    
-    html += '<div style="background:linear-gradient(135deg,#4c1d95,#5b21b6);border-radius:12px;padding:20px;">';
-    html += '<h3 style="color:#c4b5fd;font-size:14px;margin-bottom:12px;">🔮 Prévision d&#39;ici fin de journée (' + heuresRestantes + 'h restantes)</h3>';
-    html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;text-align:center;">';
-    html += '<div><div style="font-size:28px;font-weight:bold;color:#fbbf24;">' + prevFuts + '</div><div style="font-size:12px;color:#c4b5fd;">Fûts à prévoir</div></div>';
-    html += '<div><div style="font-size:28px;font-weight:bold;color:#3b82f6;">' + prevLitres + ' L</div><div style="font-size:12px;color:#c4b5fd;">Volume estimé</div></div>';
-    html += '<div><div style="font-size:28px;font-weight:bold;color:#10b981;">' + prevVentes + '</div><div style="font-size:12px;color:#c4b5fd;">Ventes estimées</div></div>';
-    html += '</div></div>';
-    
-    html += '<p style="text-align:center;color:#6b7280;font-size:11px;margin-top:12px;">⚠️ Prévision basée sur le rythme des 2 dernières heures</p>';
-    
-    container.innerHTML = html;
-  });
-}
-
-window.showPrevision = showPrevision;
-
-// =============================================================================
-// P06 - EXPORT ADAPTÉ (avec écarts)
-// Le bouton export existant sera enrichi via interception
-// =============================================================================
-// Note: L'export existant est dans le code React, on ajoute un bouton séparé
-
-function exportAvecEcarts() {
-  var isCreator = localStorage.getItem("gestionFuts_isCreator") === "true";
-  if (!isCreator) {
-    alert("Accès réservé au Super Admin");
-    return;
-  }
-  
-  var sc = localStorage.getItem("gestionFuts_session");
-  if (!sc) return;
   
   Promise.all([
     firebase.database().ref("sessions/" + sc + "/historique").once("value"),
     firebase.database().ref("sessions/" + sc + "/historiqueVentes").once("value"),
     firebase.database().ref("sessions/" + sc + "/barsNomades").once("value"),
-    firebase.database().ref("sessions/" + sc + "/config").once("value"),
-    firebase.database().ref("sessions/" + sc + "/auditTrail").orderByChild("timestamp").once("value")
+    firebase.database().ref("sessions/" + sc + "/config").once("value")
   ]).then(function(results) {
     var hist = results[0].val() || {};
     var ventes = results[1].val() || {};
     var bars = results[2].val() || {};
     var config = results[3].val() || {};
-    var audit = results[4].val() || {};
     
-    var volFut = config.volumeFutBiere || 30;
+    var volFutBiere = config.volumeFutBiere || 30;
+    var volFutCidre = config.volumeFutCidre || 20;
     var volPinte = config.volumePinte || 0.5;
     var volPichet = config.volumePichet || 1.5;
-    var prixPinte = config.prixPinte || 6;
-    var prixPichet = config.prixPichet || 15;
+    var prixPinte = config.prixPinte || 7;
+    var prixPichet = config.prixPichet || 19;
     var prixGobelet = config.prixGobelet || 2;
+    var seuilAlerte = config.seuilPerte || 10;
     
-    // Calculer les écarts par bar
-    var ecartsByBar = {};
+    // Structure : bilan[barNom][shiftId] = { futsVides, litresSortis, pintes, pichets, gobelets, ca, litresVendus, ecart }
+    var bilan = {};
+    var barsList = [];
     
+    // Initialiser
     Object.values(bars).forEach(function(bar) {
-      ecartsByBar[bar.nom] = { litresSortis: 0, litresServis: 0, caTheo: 0, caDecl: 0 };
+      barsList.push({ nom: bar.nom, type: bar.type });
+      bilan[bar.nom] = {};
+      v23Config.shifts.forEach(function(s) {
+        bilan[bar.nom][s.id] = {
+          futsVides: 0, litresSortis: 0,
+          pintes: 0, pichets: 0, gobelets: 0, ca: 0, litresVendus: 0
+        };
+      });
     });
     
+    // Compter les fûts vides par bar/shift
     Object.values(hist).forEach(function(h) {
-      if (h.annule || !ecartsByBar[h.bar]) return;
+      if (h.annule) return;
+      var barNom = h.bar || h.barNom;
+      if (!bilan[barNom]) return;
+      
+      var shift = getShiftFromTimestamp(h.timestamp || h.date);
+      var bar = barsList.find(function(b) { return b.nom === barNom; });
+      var volFut = (bar && bar.type === "cidre") ? volFutCidre : volFutBiere;
+      
       if (h.type === "RETOUR_VIDE") {
-        ecartsByBar[h.bar].litresSortis += volFut;
+        bilan[barNom][shift].futsVides++;
+        bilan[barNom][shift].litresSortis += volFut;
       } else if (h.type === "RETOUR_CASSE") {
-        var pctCasse = 0.5;
+        var pct = 0.5;
         if (h.volumeInfo) {
-          pctCasse = h.volumeInfo.comptabiliser ? (h.volumeInfo.pourcentage / 100) : 0;
+          pct = h.volumeInfo.comptabiliser ? (h.volumeInfo.pourcentage / 100) : 0;
         }
-        ecartsByBar[h.bar].litresSortis += volFut * pctCasse;
-      } else if (h.type === "RETOUR_PARTIEL" || h.type === "RETOUR_REUTILISABLE") {
-        var pctPartiel = 0;
-        if (h.volumeInfo && h.volumeInfo.comptabiliser) {
-          pctPartiel = h.volumeInfo.pourcentage / 100;
+        if (pct > 0) {
+          bilan[barNom][shift].litresSortis += volFut * pct;
         }
-        ecartsByBar[h.bar].litresSortis += volFut * pctPartiel;
       }
     });
     
+    // Compter les ventes par bar/shift
     Object.values(ventes).forEach(function(v) {
-      if (v.annule || !ecartsByBar[v.bar]) return;
+      if (v.annule) return;
+      var barNom = v.bar || v.barNom;
+      if (!bilan[barNom]) return;
+      
+      var shift = v.creneau || getShiftFromTimestamp(v.timestamp || v.date);
+      
       var p = v.nbPintes || 0;
       var pi = v.nbPichets || 0;
       var g = v.nbGobelets || 0;
-      ecartsByBar[v.bar].litresServis += (p * volPinte) + (pi * volPichet);
-      ecartsByBar[v.bar].caTheo += (p * prixPinte) + (pi * prixPichet) + (g * prixGobelet);
-      ecartsByBar[v.bar].caDecl += v.montant || 0;
-    });
-    
-    // Générer le CSV
-    var csv = "RAPPORT HELLFEST - EXPORT AVEC ÉCARTS\n";
-    csv += "Date export;" + new Date().toLocaleString("fr-FR") + "\n\n";
-    
-    csv += "=== ÉCARTS PAR BAR ===\n";
-    csv += "Bar;Litres Sortis;Litres Servis;Écart Volume;Écart %;CA Théorique;CA Déclaré;Écart CA\n";
-    
-    var totalSortis = 0, totalServis = 0, totalCaTheo = 0, totalCaDecl = 0;
-    
-    Object.keys(ecartsByBar).forEach(function(barNom) {
-      var e = ecartsByBar[barNom];
-      var ecartVol = e.litresSortis - e.litresServis;
-      var ecartPct = e.litresSortis > 0 ? (ecartVol / e.litresSortis * 100).toFixed(1) : 0;
-      var ecartCa = e.caTheo - e.caDecl;
       
-      totalSortis += e.litresSortis;
-      totalServis += e.litresServis;
-      totalCaTheo += e.caTheo;
-      totalCaDecl += e.caDecl;
+      bilan[barNom][shift].pintes += p;
+      bilan[barNom][shift].pichets += pi;
+      bilan[barNom][shift].gobelets += g;
+      bilan[barNom][shift].ca += v.montant || ((p * prixPinte) + (pi * prixPichet) + (g * prixGobelet));
+      bilan[barNom][shift].litresVendus += (p * volPinte) + (pi * volPichet);
+    });
+    
+    // Générer le HTML
+    var html = '';
+    
+    // Tableau par shift
+    v23Config.shifts.forEach(function(shift) {
+      html += '<div style="margin-bottom:24px;">';
+      html += '<h3 style="font-size:16px;font-weight:bold;color:#fbbf24;margin-bottom:12px;">⏰ ' + shift.label + '</h3>';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+      html += '<tr style="background:#374151;">';
+      html += '<th style="padding:8px;text-align:left;border:1px solid #4b5563;">Bar</th>';
+      html += '<th style="padding:8px;text-align:right;border:1px solid #4b5563;">Fûts vides</th>';
+      html += '<th style="padding:8px;text-align:right;border:1px solid #4b5563;">Litres</th>';
+      html += '<th style="padding:8px;text-align:right;border:1px solid #4b5563;">Pintes</th>';
+      html += '<th style="padding:8px;text-align:right;border:1px solid #4b5563;">Pichets</th>';
+      html += '<th style="padding:8px;text-align:right;border:1px solid #4b5563;">CA</th>';
+      html += '<th style="padding:8px;text-align:right;border:1px solid #4b5563;">Écart</th>';
+      html += '</tr>';
       
-      csv += barNom + ";" + e.litresSortis.toFixed(1) + ";" + e.litresServis.toFixed(1) + ";" + ecartVol.toFixed(1) + ";" + ecartPct + "%;" + e.caTheo.toFixed(0) + ";" + e.caDecl.toFixed(0) + ";" + ecartCa.toFixed(0) + "\n";
+      var totaux = { futs: 0, litres: 0, pintes: 0, pichets: 0, ca: 0, litresVendus: 0 };
+      
+      barsList.forEach(function(bar) {
+        var b = bilan[bar.nom][shift.id];
+        var ecartL = b.litresSortis - b.litresVendus;
+        var ecartPct = b.litresSortis > 0 ? (ecartL / b.litresSortis * 100) : 0;
+        var ecartColor = Math.abs(ecartPct) > seuilAlerte ? "#ef4444" : "#10b981";
+        var icon = bar.type === "cidre" ? "🍎" : "🍺";
+        
+        totaux.futs += b.futsVides;
+        totaux.litres += b.litresSortis;
+        totaux.pintes += b.pintes;
+        totaux.pichets += b.pichets;
+        totaux.ca += b.ca;
+        totaux.litresVendus += b.litresVendus;
+        
+        html += '<tr style="background:#1f2937;">';
+        html += '<td style="padding:8px;border:1px solid #4b5563;">' + icon + ' ' + bar.nom + '</td>';
+        html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + b.futsVides + '</td>';
+        html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + b.litresSortis.toFixed(0) + 'L</td>';
+        html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + b.pintes + '</td>';
+        html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + b.pichets + '</td>';
+        html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + b.ca.toFixed(0) + '€</td>';
+        html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;color:' + ecartColor + ';font-weight:bold;">';
+        if (b.litresSortis > 0) {
+          html += ecartPct.toFixed(1) + '%';
+          if (Math.abs(ecartPct) > seuilAlerte) html += ' ⚠️';
+        } else {
+          html += '-';
+        }
+        html += '</td></tr>';
+      });
+      
+      // Ligne total
+      var ecartTotalL = totaux.litres - totaux.litresVendus;
+      var ecartTotalPct = totaux.litres > 0 ? (ecartTotalL / totaux.litres * 100) : 0;
+      
+      html += '<tr style="background:#374151;font-weight:bold;">';
+      html += '<td style="padding:8px;border:1px solid #4b5563;">TOTAL</td>';
+      html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + totaux.futs + '</td>';
+      html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + totaux.litres.toFixed(0) + 'L</td>';
+      html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + totaux.pintes + '</td>';
+      html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + totaux.pichets + '</td>';
+      html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + totaux.ca.toFixed(0) + '€</td>';
+      html += '<td style="padding:8px;text-align:right;border:1px solid #4b5563;">' + ecartTotalPct.toFixed(1) + '%</td>';
+      html += '</tr></table></div>';
     });
     
-    var ecartTotalVol = totalSortis - totalServis;
-    var ecartTotalPct = totalSortis > 0 ? (ecartTotalVol / totalSortis * 100).toFixed(1) : 0;
-    var ecartTotalCa = totalCaTheo - totalCaDecl;
+    // Résumé journée
+    html += '<div style="background:linear-gradient(135deg,#1e3a5f,#1e40af);border-radius:12px;padding:20px;margin-top:20px;">';
+    html += '<h3 style="font-size:16px;font-weight:bold;color:white;margin-bottom:15px;">📈 Résumé Journée</h3>';
     
-    csv += "TOTAL;" + totalSortis.toFixed(1) + ";" + totalServis.toFixed(1) + ";" + ecartTotalVol.toFixed(1) + ";" + ecartTotalPct + "%;" + totalCaTheo.toFixed(0) + ";" + totalCaDecl.toFixed(0) + ";" + ecartTotalCa.toFixed(0) + "\n\n";
-    
-    // Audit trail
-    csv += "=== AUDIT TRAIL ===\n";
-    csv += "Date;Utilisateur;Action;Détails\n";
-    
-    Object.values(audit).forEach(function(a) {
-      var detailsStr = "";
-      if (a.details) {
-        var parts = [];
-        for (var k in a.details) { parts.push(k + "=" + a.details[k]); }
-        detailsStr = parts.join(" | ");
-      }
-      csv += a.dateHeure + ";" + a.user + ";" + a.action + ";" + detailsStr + "\n";
+    var grandTotal = { futs: 0, litres: 0, pintes: 0, pichets: 0, gobelets: 0, ca: 0, litresVendus: 0 };
+    barsList.forEach(function(bar) {
+      v23Config.shifts.forEach(function(s) {
+        var b = bilan[bar.nom][s.id];
+        grandTotal.futs += b.futsVides;
+        grandTotal.litres += b.litresSortis;
+        grandTotal.pintes += b.pintes;
+        grandTotal.pichets += b.pichets;
+        grandTotal.gobelets += b.gobelets;
+        grandTotal.ca += b.ca;
+        grandTotal.litresVendus += b.litresVendus;
+      });
     });
     
-    // Télécharger
-    var blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = "Hellfest_Export_Ecarts_" + new Date().toISOString().slice(0, 10) + ".csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    var ecartGlobal = grandTotal.litres > 0 ? ((grandTotal.litres - grandTotal.litresVendus) / grandTotal.litres * 100) : 0;
     
-    alert("Export téléchargé !");
+    html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:15px;text-align:center;">';
+    html += '<div><div style="font-size:28px;font-weight:bold;color:#fbbf24;">' + grandTotal.futs + '</div><div style="font-size:12px;color:#93c5fd;">Fûts vidés</div></div>';
+    html += '<div><div style="font-size:28px;font-weight:bold;color:#3b82f6;">' + grandTotal.litres.toFixed(0) + 'L</div><div style="font-size:12px;color:#93c5fd;">Volume sorti</div></div>';
+    html += '<div><div style="font-size:28px;font-weight:bold;color:#10b981;">' + grandTotal.ca.toFixed(0) + '€</div><div style="font-size:12px;color:#93c5fd;">CA Total</div></div>';
+    html += '<div><div style="font-size:28px;font-weight:bold;color:' + (Math.abs(ecartGlobal) > seuilAlerte ? "#ef4444" : "#10b981") + ';">' + ecartGlobal.toFixed(1) + '%</div><div style="font-size:12px;color:#93c5fd;">Écart global</div></div>';
+    html += '</div></div>';
+    
+    container.innerHTML = html;
   });
 }
 
-window.exportAvecEcarts = exportAvecEcarts;
+window.showBilanShift = showBilanShift;
 
 // =============================================================================
-// BOUTONS V22
+// 2. ALERTES ÉCARTS
 // =============================================================================
-function addV22Buttons() {
-  var isCreator = localStorage.getItem("gestionFuts_isCreator") === "true";
-  if (!isCreator) return;
+function showAlertesEcarts() {
+  var isAdmin = localStorage.getItem("gestionFuts_isAdmin") === "true";
+  if (!isAdmin) {
+    alert("Accès réservé aux administrateurs");
+    return;
+  }
   
-  if (document.getElementById("v22-btn-container")) return;
+  var sc = localStorage.getItem("gestionFuts_session");
+  if (!sc) return;
   
-  // Trouver un point d'ancrage (après les boutons existants)
+  var old = document.getElementById("v23-alertes-modal");
+  if (old) old.remove();
+  
+  var modal = document.createElement("div");
+  modal.id = "v23-alertes-modal";
+  modal.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);z-index:9999;overflow-y:auto;padding:16px;";
+  
+  modal.innerHTML = '<div style="max-width:600px;margin:0 auto;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
+    '<h2 style="font-size:20px;font-weight:bold;color:#ef4444;">🚨 Alertes Écarts</h2>' +
+    '<button onclick="document.getElementById(\'v23-alertes-modal\').remove()" style="font-size:24px;background:none;border:none;color:white;cursor:pointer;">✕</button>' +
+    '</div>' +
+    '<div id="v23-alertes-content" style="color:white;"><p style="text-align:center;padding:40px;">⏳ Analyse...</p></div>' +
+    '</div>';
+  
+  document.body.appendChild(modal);
+  loadAlertesData();
+}
+
+function loadAlertesData() {
+  var sc = localStorage.getItem("gestionFuts_session");
+  var container = document.getElementById("v23-alertes-content");
+  if (!sc || !container) return;
+  
+  Promise.all([
+    firebase.database().ref("sessions/" + sc + "/historique").once("value"),
+    firebase.database().ref("sessions/" + sc + "/historiqueVentes").once("value"),
+    firebase.database().ref("sessions/" + sc + "/barsNomades").once("value"),
+    firebase.database().ref("sessions/" + sc + "/config").once("value")
+  ]).then(function(results) {
+    var hist = results[0].val() || {};
+    var ventes = results[1].val() || {};
+    var bars = results[2].val() || {};
+    var config = results[3].val() || {};
+    
+    var volFutBiere = config.volumeFutBiere || 30;
+    var volFutCidre = config.volumeFutCidre || 20;
+    var volPinte = config.volumePinte || 0.5;
+    var volPichet = config.volumePichet || 1.5;
+    var seuilAlerte = config.seuilPerte || 10;
+    
+    // Calculer écarts par bar/shift
+    var alertes = [];
+    var bilan = {};
+    
+    Object.values(bars).forEach(function(bar) {
+      bilan[bar.nom] = { type: bar.type };
+      v23Config.shifts.forEach(function(s) {
+        bilan[bar.nom][s.id] = { litresSortis: 0, litresVendus: 0, user: null };
+      });
+    });
+    
+    // Fûts vides
+    Object.values(hist).forEach(function(h) {
+      if (h.annule) return;
+      var barNom = h.bar || h.barNom;
+      if (!bilan[barNom]) return;
+      
+      var shift = getShiftFromTimestamp(h.timestamp || h.date);
+      var volFut = bilan[barNom].type === "cidre" ? volFutCidre : volFutBiere;
+      
+      if (h.type === "RETOUR_VIDE") {
+        bilan[barNom][shift].litresSortis += volFut;
+      } else if (h.type === "RETOUR_CASSE" && h.volumeInfo && h.volumeInfo.comptabiliser) {
+        bilan[barNom][shift].litresSortis += volFut * (h.volumeInfo.pourcentage / 100);
+      }
+    });
+    
+    // Ventes
+    Object.values(ventes).forEach(function(v) {
+      if (v.annule) return;
+      var barNom = v.bar || v.barNom;
+      if (!bilan[barNom]) return;
+      
+      var shift = v.creneau || getShiftFromTimestamp(v.timestamp || v.date);
+      var p = v.nbPintes || 0;
+      var pi = v.nbPichets || 0;
+      
+      bilan[barNom][shift].litresVendus += (p * volPinte) + (pi * volPichet);
+      bilan[barNom][shift].user = v.user;
+    });
+    
+    // Détecter alertes
+    Object.keys(bilan).forEach(function(barNom) {
+      v23Config.shifts.forEach(function(s) {
+        var b = bilan[barNom][s.id];
+        if (b.litresSortis > 0) {
+          var ecart = (b.litresSortis - b.litresVendus) / b.litresSortis * 100;
+          if (Math.abs(ecart) > seuilAlerte) {
+            alertes.push({
+              bar: barNom,
+              shift: s.label,
+              shiftId: s.id,
+              litresSortis: b.litresSortis,
+              litresVendus: b.litresVendus,
+              ecart: ecart,
+              user: b.user,
+              type: ecart > 0 ? "sous-declaration" : "sur-declaration"
+            });
+          }
+        }
+      });
+    });
+    
+    // Trier par écart décroissant
+    alertes.sort(function(a, b) { return Math.abs(b.ecart) - Math.abs(a.ecart); });
+    
+    var html = '';
+    
+    if (alertes.length === 0) {
+      html = '<div style="text-align:center;padding:40px;">';
+      html += '<div style="font-size:48px;margin-bottom:15px;">✅</div>';
+      html += '<div style="font-size:18px;color:#10b981;font-weight:bold;">Aucune alerte</div>';
+      html += '<div style="font-size:14px;color:#9ca3af;margin-top:10px;">Tous les écarts sont inférieurs à ' + seuilAlerte + '%</div>';
+      html += '</div>';
+    } else {
+      html += '<div style="background:#7f1d1d;border-radius:8px;padding:12px;margin-bottom:16px;text-align:center;">';
+      html += '<span style="font-size:24px;font-weight:bold;">' + alertes.length + '</span> ';
+      html += '<span style="color:#fca5a5;">alerte(s) détectée(s)</span>';
+      html += '</div>';
+      
+      alertes.forEach(function(a) {
+        var icon = a.type === "sous-declaration" ? "📉" : "📈";
+        var color = a.type === "sous-declaration" ? "#ef4444" : "#f59e0b";
+        var desc = a.type === "sous-declaration" ? "Sous-déclaration" : "Sur-déclaration";
+        
+        html += '<div style="background:#1f2937;border-radius:8px;padding:15px;margin-bottom:10px;border-left:4px solid ' + color + ';">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+        html += '<div>';
+        html += '<div style="font-weight:bold;font-size:16px;">' + icon + ' ' + a.bar + '</div>';
+        html += '<div style="font-size:13px;color:#9ca3af;margin-top:4px;">Shift ' + a.shift + '</div>';
+        html += '</div>';
+        html += '<div style="text-align:right;">';
+        html += '<div style="font-size:24px;font-weight:bold;color:' + color + ';">' + Math.abs(a.ecart).toFixed(1) + '%</div>';
+        html += '<div style="font-size:12px;color:#9ca3af;">' + desc + '</div>';
+        html += '</div></div>';
+        html += '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #374151;font-size:12px;color:#9ca3af;">';
+        html += '<span>Sorti: <b>' + a.litresSortis.toFixed(0) + 'L</b></span> → ';
+        html += '<span>Vendu: <b>' + a.litresVendus.toFixed(0) + 'L</b></span>';
+        if (a.user) {
+          html += '<span style="float:right;">Saisie par: <b>' + a.user + '</b></span>';
+        }
+        html += '</div></div>';
+      });
+    }
+    
+    container.innerHTML = html;
+  });
+}
+
+window.showAlertesEcarts = showAlertesEcarts;
+
+// =============================================================================
+// 3. HISTORIQUE ANNULATIONS
+// =============================================================================
+function showHistoriqueAnnulations() {
+  var isAdmin = localStorage.getItem("gestionFuts_isAdmin") === "true";
+  if (!isAdmin) {
+    alert("Accès réservé aux administrateurs");
+    return;
+  }
+  
+  var sc = localStorage.getItem("gestionFuts_session");
+  if (!sc) return;
+  
+  var old = document.getElementById("v23-annul-modal");
+  if (old) old.remove();
+  
+  var modal = document.createElement("div");
+  modal.id = "v23-annul-modal";
+  modal.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);z-index:9999;overflow-y:auto;padding:16px;";
+  
+  modal.innerHTML = '<div style="max-width:700px;margin:0 auto;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
+    '<h2 style="font-size:20px;font-weight:bold;color:#f59e0b;">📜 Historique Annulations</h2>' +
+    '<button onclick="document.getElementById(\'v23-annul-modal\').remove()" style="font-size:24px;background:none;border:none;color:white;cursor:pointer;">✕</button>' +
+    '</div>' +
+    '<div id="v23-annul-content" style="color:white;"><p style="text-align:center;padding:40px;">⏳ Chargement...</p></div>' +
+    '</div>';
+  
+  document.body.appendChild(modal);
+  loadAnnulationsData();
+}
+
+function loadAnnulationsData() {
+  var sc = localStorage.getItem("gestionFuts_session");
+  var container = document.getElementById("v23-annul-content");
+  if (!sc || !container) return;
+  
+  Promise.all([
+    firebase.database().ref("sessions/" + sc + "/historique").once("value"),
+    firebase.database().ref("sessions/" + sc + "/historiqueVentes").once("value")
+  ]).then(function(results) {
+    var hist = results[0].val() || {};
+    var ventes = results[1].val() || {};
+    
+    var annulations = [];
+    
+    // Fûts annulés
+    Object.keys(hist).forEach(function(key) {
+      var h = hist[key];
+      if (h.annule) {
+        annulations.push({
+          type: "fut",
+          typeAction: h.type,
+          bar: h.bar || h.barNom,
+          timestamp: h.annuleTimestamp || h.timestamp || h.date,
+          annulePar: h.annulePar || "Inconnu",
+          motif: h.annuleMotif || "",
+          original: h
+        });
+      }
+    });
+    
+    // Ventes annulées
+    Object.keys(ventes).forEach(function(key) {
+      var v = ventes[key];
+      if (v.annule) {
+        annulations.push({
+          type: "vente",
+          bar: v.bar || v.barNom,
+          timestamp: v.annuleTimestamp || v.timestamp || v.date,
+          annulePar: v.annulePar || "Inconnu",
+          motif: v.annuleMotif || "",
+          montant: v.montant,
+          pintes: v.nbPintes,
+          pichets: v.nbPichets,
+          original: v
+        });
+      }
+    });
+    
+    // Trier par date décroissante
+    annulations.sort(function(a, b) { return (b.timestamp || 0) - (a.timestamp || 0); });
+    
+    var html = '';
+    
+    if (annulations.length === 0) {
+      html = '<div style="text-align:center;padding:40px;">';
+      html += '<div style="font-size:48px;margin-bottom:15px;">✅</div>';
+      html += '<div style="font-size:18px;color:#10b981;font-weight:bold;">Aucune annulation</div>';
+      html += '<div style="font-size:14px;color:#9ca3af;margin-top:10px;">Aucun fût ou vente n\'a été annulé</div>';
+      html += '</div>';
+    } else {
+      html += '<div style="background:#78350f;border-radius:8px;padding:12px;margin-bottom:16px;text-align:center;">';
+      html += '<span style="font-size:24px;font-weight:bold;">' + annulations.length + '</span> ';
+      html += '<span style="color:#fcd34d;">annulation(s)</span>';
+      html += '</div>';
+      
+      annulations.forEach(function(a) {
+        var icon = a.type === "fut" ? "🛢️" : "💰";
+        var color = a.type === "fut" ? "#fbbf24" : "#ef4444";
+        var dateStr = a.timestamp ? new Date(a.timestamp).toLocaleString("fr-FR") : "Date inconnue";
+        
+        html += '<div style="background:#1f2937;border-radius:8px;padding:15px;margin-bottom:10px;border-left:4px solid ' + color + ';">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;">';
+        html += '<div>';
+        html += '<div style="font-weight:bold;font-size:16px;">' + icon + ' ';
+        
+        if (a.type === "fut") {
+          html += a.typeAction.replace("_", " ");
+        } else {
+          html += 'Vente (' + (a.pintes || 0) + ' pintes, ' + (a.pichets || 0) + ' pichets)';
+        }
+        html += '</div>';
+        html += '<div style="font-size:13px;color:#9ca3af;margin-top:4px;">' + a.bar + '</div>';
+        html += '</div>';
+        html += '<div style="text-align:right;font-size:12px;color:#9ca3af;">' + dateStr + '</div>';
+        html += '</div>';
+        
+        html += '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #374151;font-size:13px;">';
+        html += '<span style="color:#9ca3af;">Annulé par:</span> <b style="color:#f59e0b;">' + a.annulePar + '</b>';
+        if (a.motif) {
+          html += '<div style="margin-top:6px;color:#9ca3af;font-style:italic;">"' + a.motif + '"</div>';
+        }
+        if (a.type === "vente" && a.montant) {
+          html += '<div style="margin-top:6px;color:#ef4444;">Montant: ' + a.montant.toFixed(2) + '€</div>';
+        }
+        html += '</div></div>';
+      });
+    }
+    
+    container.innerHTML = html;
+  });
+}
+
+window.showHistoriqueAnnulations = showHistoriqueAnnulations;
+
+// =============================================================================
+// BOUTONS V23
+// =============================================================================
+function addV23Buttons() {
+  var isAdmin = localStorage.getItem("gestionFuts_isAdmin") === "true";
+  if (!isAdmin) return;
+  
+  if (document.getElementById("v23-btn-container")) return;
+  
+  // Supprimer les anciens boutons V22 s'ils existent
+  var oldV22 = document.getElementById("v22-btn-container");
+  if (oldV22) oldV22.remove();
+  
+  // Trouver un point d'ancrage
   var ref = document.getElementById("v21-btn-sit") || document.getElementById("v20-btn-ec");
   if (!ref || !ref.parentNode) return;
   
   var container = document.createElement("div");
-  container.id = "v22-btn-container";
+  container.id = "v23-btn-container";
   container.style.cssText = "display:flex;gap:4px;margin-left:4px;";
   
-  // Bouton Audit
-  var btnAudit = document.createElement("button");
-  btnAudit.innerHTML = "📜";
-  btnAudit.title = "Audit Trail";
-  btnAudit.style.cssText = "background:#78350f;padding:8px 10px;border-radius:8px;border:none;color:white;cursor:pointer;";
-  btnAudit.onclick = showAuditTrail;
+  // Bouton Bilan Shift
+  var btnBilan = document.createElement("button");
+  btnBilan.id = "v23-btn-bilan";
+  btnBilan.innerHTML = "📊";
+  btnBilan.title = "Bilan par Shift";
+  btnBilan.style.cssText = "background:#1e40af;padding:8px 10px;border-radius:8px;border:none;color:white;cursor:pointer;";
+  btnBilan.onclick = showBilanShift;
   
-  // Bouton Rapport
-  var btnRapport = document.createElement("button");
-  btnRapport.innerHTML = "📊";
-  btnRapport.title = "Rapport Horaire";
-  btnRapport.style.cssText = "background:#1e40af;padding:8px 10px;border-radius:8px;border:none;color:white;cursor:pointer;";
-  btnRapport.onclick = showRapportHoraire;
+  // Bouton Alertes
+  var btnAlertes = document.createElement("button");
+  btnAlertes.id = "v23-btn-alertes";
+  btnAlertes.innerHTML = "🚨";
+  btnAlertes.title = "Alertes Écarts";
+  btnAlertes.style.cssText = "background:#991b1b;padding:8px 10px;border-radius:8px;border:none;color:white;cursor:pointer;";
+  btnAlertes.onclick = showAlertesEcarts;
   
-  // Bouton Prévision
-  var btnPrev = document.createElement("button");
-  btnPrev.innerHTML = "🔮";
-  btnPrev.title = "Prévision";
-  btnPrev.style.cssText = "background:#5b21b6;padding:8px 10px;border-radius:8px;border:none;color:white;cursor:pointer;";
-  btnPrev.onclick = showPrevision;
+  // Bouton Annulations
+  var btnAnnul = document.createElement("button");
+  btnAnnul.id = "v23-btn-annul";
+  btnAnnul.innerHTML = "📜";
+  btnAnnul.title = "Historique Annulations";
+  btnAnnul.style.cssText = "background:#78350f;padding:8px 10px;border-radius:8px;border:none;color:white;cursor:pointer;";
+  btnAnnul.onclick = showHistoriqueAnnulations;
   
-  // Bouton Export+
-  var btnExport = document.createElement("button");
-  btnExport.innerHTML = "📤";
-  btnExport.title = "Export avec écarts";
-  btnExport.style.cssText = "background:#065f46;padding:8px 10px;border-radius:8px;border:none;color:white;cursor:pointer;";
-  btnExport.onclick = exportAvecEcarts;
-  
-  container.appendChild(btnAudit);
-  container.appendChild(btnRapport);
-  container.appendChild(btnPrev);
-  container.appendChild(btnExport);
+  container.appendChild(btnBilan);
+  container.appendChild(btnAlertes);
+  container.appendChild(btnAnnul);
   
   ref.parentNode.insertBefore(container, ref.nextSibling);
 }
 
 // =============================================================================
-// INTERCEPTION MODAL RETOUR CASSÉ - Ajout case à cocher volume
+// CORRECTIONS BUGS B1-B4
 // =============================================================================
-function interceptRetourCasse() {
-  // Observer le DOM pour détecter le modal de commentaire (retour cassé)
+
+// -----------------------------------------------------------------------------
+// B1 : RACE CONDITION - Masquer le contenu pendant la vérification du rôle
+// -----------------------------------------------------------------------------
+function fixB1_RaceCondition() {
+  var sc = localStorage.getItem("gestionFuts_session");
+  var userName = localStorage.getItem("gestionFuts_userName");
+  var isCreator = localStorage.getItem("gestionFuts_isCreator") === "true";
+  
+  // Super Admin ou pas connecté = pas de problème
+  if (isCreator || !sc || !userName) return;
+  
+  // Créer un overlay de chargement pour éviter le flash de contenu admin
+  var overlay = document.createElement("div");
+  overlay.id = "b1-loading-overlay";
+  overlay.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:#000;z-index:99998;display:flex;align-items:center;justify-content:center;";
+  overlay.innerHTML = '<div style="color:#fbbf24;font-size:16px;">⏳ Vérification des droits...</div>';
+  
+  // Ajouter immédiatement si le DOM est prêt
+  if (document.body) {
+    document.body.appendChild(overlay);
+  } else {
+    document.addEventListener("DOMContentLoaded", function() {
+      document.body.appendChild(overlay);
+    });
+  }
+  
+  // Vérifier le rôle dans Firebase
+  firebase.database().ref("sessions/" + sc + "/users/" + userName).once("value", function(snap) {
+    var user = snap.val();
+    var isSecretaire = user && (user.role === "secretaire" || user.promotedBy);
+    
+    if (isSecretaire) {
+      // Corriger localStorage AVANT que React ne lise
+      localStorage.setItem("gestionFuts_isAdmin", "false");
+      console.log("[B1] Rôle secrétaire détecté, isAdmin corrigé à false");
+    }
+    
+    // Retirer l'overlay après un court délai
+    setTimeout(function() {
+      var ov = document.getElementById("b1-loading-overlay");
+      if (ov) ov.remove();
+    }, 300);
+  }).catch(function() {
+    // En cas d'erreur, retirer l'overlay quand même
+    var ov = document.getElementById("b1-loading-overlay");
+    if (ov) ov.remove();
+  });
+}
+
+// Exécuter immédiatement
+fixB1_RaceCondition();
+
+// -----------------------------------------------------------------------------
+// B2 : BADGE RÔLE - Observer les changements de rôle en temps réel
+// -----------------------------------------------------------------------------
+function fixB2_BadgeRoleObserver() {
+  var sc = localStorage.getItem("gestionFuts_session");
+  var userName = localStorage.getItem("gestionFuts_userName");
+  if (!sc || !userName) return;
+  
+  firebase.database().ref("sessions/" + sc + "/users/" + userName).on("value", function(snap) {
+    var user = snap.val();
+    if (!user) return;
+    
+    var isSecretaire = user.role === "secretaire" || user.promotedBy;
+    var isAdmin = user.role === "admin";
+    
+    // Mettre à jour localStorage
+    if (isSecretaire) {
+      localStorage.setItem("gestionFuts_isAdmin", "false");
+    }
+    
+    // Mettre à jour le badge visuellement
+    var badges = document.querySelectorAll('[class*="bg-green-"], [class*="bg-blue-"], [class*="bg-yellow-"]');
+    badges.forEach(function(badge) {
+      var text = badge.textContent.trim();
+      if (text === "Admin" || text === "Secrétaire" || text === "Super Admin") {
+        if (isSecretaire) {
+          badge.textContent = "Secrétaire";
+          badge.className = badge.className.replace(/bg-green-\d+/g, "bg-blue-800");
+        } else if (isAdmin && !localStorage.getItem("gestionFuts_isCreator")) {
+          badge.textContent = "Admin";
+          badge.className = badge.className.replace(/bg-blue-\d+/g, "bg-green-800");
+        }
+      }
+    });
+    
+    console.log("[B2] Badge rôle mis à jour:", isSecretaire ? "Secrétaire" : "Admin");
+  });
+}
+
+// -----------------------------------------------------------------------------
+// B3 : ANNULATION VENTE - Libérer le créneau si équipement défaillant
+// -----------------------------------------------------------------------------
+// Note: Ce bug nécessite d'intercepter l'annulation de vente dans le code React.
+// Comme le code React est minifié, on ajoute un listener sur les changements Firebase
+// pour détecter les annulations et corriger le créneau si nécessaire.
+
+function fixB3_AnnulationVente() {
+  var sc = localStorage.getItem("gestionFuts_session");
+  if (!sc) return;
+  
+  firebase.database().ref("sessions/" + sc + "/historiqueVentes").on("child_changed", function(snap) {
+    var vente = snap.val();
+    var venteKey = snap.key;
+    
+    // Si la vente vient d'être annulée et avait un équipement défaillant
+    if (vente && vente.annule && vente.equipementDefaillant) {
+      console.log("[B3] Vente annulée avec équipement défaillant détectée:", venteKey);
+      
+      // Libérer le créneau dans les affectations si nécessaire
+      var barId = vente.barId;
+      var creneau = vente.creneau;
+      
+      if (barId && creneau) {
+        // Marquer que ce créneau peut être réutilisé
+        firebase.database().ref("sessions/" + sc + "/historiqueVentes/" + venteKey).update({
+          creneauLibere: true,
+          creneauLibereAt: Date.now()
+        });
+        console.log("[B3] Créneau libéré pour", barId, creneau);
+      }
+    }
+  });
+}
+
+// -----------------------------------------------------------------------------
+// B4 : BACKUP AVANT RÉINITIALISATION
+// -----------------------------------------------------------------------------
+function createBackupBeforeReset() {
+  return new Promise(function(resolve, reject) {
+    var sc = localStorage.getItem("gestionFuts_session");
+    if (!sc) {
+      resolve(null);
+      return;
+    }
+    
+    firebase.database().ref("sessions/" + sc).once("value", function(snap) {
+      var data = snap.val();
+      if (!data) {
+        resolve(null);
+        return;
+      }
+      
+      // Créer le backup en JSON
+      var backup = {
+        sessionCode: sc,
+        exportDate: new Date().toISOString(),
+        data: data
+      };
+      
+      var json = JSON.stringify(backup, null, 2);
+      var blob = new Blob([json], { type: "application/json" });
+      var url = URL.createObjectURL(blob);
+      
+      // Télécharger automatiquement
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "backup_" + sc + "_" + new Date().toISOString().slice(0, 10) + ".json";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      console.log("[B4] Backup créé et téléchargé");
+      resolve(backup);
+    }).catch(reject);
+  });
+}
+
+// Exposer globalement pour utilisation
+window.createBackupBeforeReset = createBackupBeforeReset;
+
+// Intercepter les boutons de réinitialisation
+function interceptResetButtons() {
+  // Observer le DOM pour les nouveaux boutons
   var observer = new MutationObserver(function(mutations) {
     mutations.forEach(function(m) {
       if (m.addedNodes.length > 0) {
-        // Chercher le modal avec "Commentaire obligatoire"
-        var modals = document.querySelectorAll('div.fixed');
-        modals.forEach(function(modal) {
-          var text = modal.textContent || '';
-          if (text.includes('Commentaire obligatoire') && !modal.querySelector('#v22-checkbox-volume')) {
-            // C'est le modal de retour cassé, ajouter la case à cocher
-            var commentDiv = modal.querySelector('div.bg-red-900\\/30');
-            if (commentDiv && commentDiv.parentElement) {
-              var checkboxDiv = document.createElement('div');
-              checkboxDiv.id = 'v22-volume-option';
-              checkboxDiv.style.cssText = 'background:#1e3a5f;border:1px solid #3b82f6;border-radius:8px;padding:12px;margin-bottom:12px;';
-              checkboxDiv.innerHTML = '<label style="display:flex;align-items:center;gap:10px;cursor:pointer;color:white;">' +
-                '<input type="checkbox" id="v22-checkbox-volume" checked style="width:20px;height:20px;accent-color:#3b82f6;">' +
-                '<div><span style="font-weight:bold;">Comptabiliser le volume consommé</span>' +
-                '<p style="font-size:12px;color:#9ca3af;margin-top:2px;">Si coché, 50% du fût sera comptabilisé dans les écarts</p></div>' +
-                '</label>';
+        // Chercher les boutons de réinitialisation
+        var buttons = document.querySelectorAll("button");
+        buttons.forEach(function(btn) {
+          var text = btn.textContent.toLowerCase();
+          if ((text.includes("réinit") || text.includes("reinit") || text.includes("reset") || text.includes("supprimer")) 
+              && !btn.dataset.b4Intercepted) {
+            btn.dataset.b4Intercepted = "true";
+            
+            var originalOnclick = btn.onclick;
+            btn.onclick = function(e) {
+              e.preventDefault();
+              e.stopPropagation();
               
-              // Insérer avant le champ de commentaire
-              commentDiv.parentElement.insertBefore(checkboxDiv, commentDiv);
-            }
+              if (confirm("⚠️ RÉINITIALISATION\n\nUn backup va être créé avant la réinitialisation.\n\nContinuer ?")) {
+                createBackupBeforeReset().then(function() {
+                  // Après le backup, exécuter l'action originale
+                  if (originalOnclick) {
+                    originalOnclick.call(btn, e);
+                  } else {
+                    // Simuler un clic sans l'interception
+                    btn.dataset.b4Intercepted = "skip";
+                    btn.click();
+                  }
+                });
+              }
+              
+              return false;
+            };
+            
+            console.log("[B4] Bouton de réinitialisation intercepté");
           }
         });
       }
     });
   });
   
-  observer.observe(document.body, { childList: true, subtree: true });
-}
-
-// Observer les nouveaux retours pour stocker l'info de volume
-function interceptRetourSave() {
-  var sc = localStorage.getItem("gestionFuts_session");
-  if (!sc) return;
-  
-  var histRef = firebase.database().ref("sessions/" + sc + "/historique");
-  
-  histRef.on("child_added", function(snap) {
-    var h = snap.val();
-    var key = snap.key;
-    
-    // Si c'est un retour cassé récent (moins de 5 secondes)
-    if (h && h.type === "RETOUR_CASSE" && !h.volumeInfo) {
-      var age = Date.now() - h.timestamp;
-      if (age < 5000) {
-        // Vérifier si la case était cochée
-        var checkbox = document.getElementById("v22-checkbox-volume");
-        var comptabiliser = checkbox ? checkbox.checked : true; // Par défaut true
-        
-        // Mettre à jour l'entrée
-        firebase.database().ref("sessions/" + sc + "/historique/" + key).update({
-          volumeInfo: {
-            comptabiliser: comptabiliser,
-            pourcentage: comptabiliser ? 50 : 0
-          }
-        });
-      }
-    }
-  });
+  observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
 }
 
 // =============================================================================
-// INIT V22
+// INIT V23
 // =============================================================================
-function initV22() {
-  console.log("[V22] Initialisation...");
+function initV23() {
+  console.log("[V23] Initialisation...");
   
-  // Interception modal retour cassé
-  interceptRetourCasse();
-  setTimeout(interceptRetourSave, 2000);
+  // Corrections de bugs
+  setTimeout(fixB2_BadgeRoleObserver, 1000);
+  setTimeout(fixB3_AnnulationVente, 1500);
+  setTimeout(interceptResetButtons, 2000);
   
-  // Setup audit interceptors
-  setTimeout(setupAuditInterceptors, 3000);
-  
-  // Ajouter les boutons
-  setTimeout(addV22Buttons, 2000);
-  setInterval(addV22Buttons, 5000);
+  // Boutons V23
+  setTimeout(addV23Buttons, 2000);
+  setInterval(addV23Buttons, 5000);
 }
 
 if (document.readyState === "complete") {
-  initV22();
+  initV23();
 } else {
-  window.addEventListener("load", initV22);
+  window.addEventListener("load", initV23);
 }
 
 })();
-// === FIN PATCH V22 ===
+// === FIN PATCH V23 ===
 </script>
 </body>
 </html>
