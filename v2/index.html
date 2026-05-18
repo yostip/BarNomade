@@ -4,31 +4,27 @@
   GESTION DES FÛTS - BARS NOMADES - HELLFEST
   Application reconstruite proprement (remplace la version V16-V23 minifiée).
 
-  MODULE 1 : SQUELETTE
-  Ce fichier contient pour l'instant :
-    - le démarrage de l'application
-    - la connexion à Firebase
-    - l'authentification anonyme (le "badge" invisible qui sécurise la base)
-    - l'écran d'accueil (saisie du prénom)
-    - la connexion d'un utilisateur à la session unique du festival
+  ÉTAT : MODULE 1 + MODULE 2
+  Contenu actuel :
+    - démarrage, connexion Firebase, authentification anonyme   (module 1)
+    - écran d'accueil (prénom), connexion utilisateur           (module 1)
+    - gestion des BARS : créer, renommer, supprimer             (module 2)
+    - gestion des FÛTS : attribuer, retourner                   (module 2)
+    - suivi du STOCK bière / cidre                              (module 2)
 
-  Ce fichier NE contient PAS encore : les fûts, les ventes, le planning,
-  le dashboard. Ils seront ajoutés dans les modules 2, 3 et 4.
+  Pas encore inclus : ventes, planning, dashboard (modules 3 et 4).
 
   PRINCIPE D'ARCHITECTURE
-    - Un seul fichier HTML, comme l'ancienne app, pour rester simple à publier.
-    - Mais code lisible : noms en français, sections clairement séparées,
-      commentaires abondants. Pas de minification.
-    - Une seule "session" pour tout le festival (pas de création/choix de
-      session par l'utilisateur).
+    - Un seul fichier HTML. Code lisible, commenté en français, non minifié.
+    - Une seule "session" pour tout le festival (sessions/festival).
     - 4 rôles : visiteur, secretaire, admin, superadmin.
-    - AUCUN mot de passe écrit dans ce fichier. Les droits viennent du rôle
-      stocké dans la base Firebase, lui-même protégé par les règles serveur.
+    - AUCUN mot de passe dans ce fichier. Les droits viennent du rôle stocké
+      en base, protégé par les règles de sécurité Firebase.
 
-  POUR LES DÉVELOPPEURS QUI REPRENDRONT CE CODE
-    Voir le document technique fourni séparément (module 6) pour l'architecture
-    d'ensemble. Chaque grande section ci-dessous est encadrée par une bannière
-    de commentaire.
+  NOTE DÉVELOPPEURS — STOCKAGE DES FÛTS
+    Chaque fût d'un bar est un ENFANT INDÉPENDANT sous une clé unique générée
+    par Firebase (push). PAS de tableau indexé : sinon deux attributions
+    simultanées s'écrasent (un fût "disparaît"). Voir SECTION 7.
 ===============================================================================
 -->
 <html lang="fr">
@@ -38,14 +34,6 @@
   <meta name="theme-color" content="#39ff14" />
   <title>Bars Nomades — Gestion des Fûts</title>
 
-  <!-- =======================================================================
-       DÉPENDANCES EXTERNES
-       React        : la bibliothèque qui construit l'interface.
-       Firebase     : la base de données temps réel + l'authentification.
-       Tailwind     : les styles (les classes comme "bg-black", "p-4"...).
-       NOTE : on charge aussi "firebase-auth-compat", absent de l'ancienne
-       app — c'est lui qui permet l'authentification.
-  ======================================================================== -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -60,25 +48,17 @@
 </head>
 
 <body class="bg-black">
-  <!-- L'application React vient s'afficher dans cette balise. -->
   <div id="root"></div>
 
   <script>
   /* =========================================================================
      OUTILS RACCOURCIS REACT
-     React fournit des "hooks". On leur donne ici un nom court pour alléger
-     la lecture du reste du code.
-       useState  : mémoriser une valeur qui peut changer (ex: le prénom saisi)
-       useEffect : exécuter du code à un moment précis (ex: au démarrage)
   ========================================================================= */
   const { useState, useEffect } = React;
 
   /* =========================================================================
      CONFIGURATION FIREBASE
-     Ces coordonnées identifient le projet Firebase "gestion-futs-hellfest".
-     Ce ne sont PAS des secrets : toute app web Firebase les expose. La
-     sécurité ne repose pas sur leur confidentialité, mais sur les RÈGLES
-     de sécurité déposées dans la console Firebase.
+     Coordonnées du projet. Non secrètes : la sécurité repose sur les RÈGLES.
   ========================================================================= */
   const firebaseConfig = {
     apiKey: "AIzaSyCgl30syyCEJif9q96E2jzv-aTXxXgvgv0",
@@ -90,8 +70,6 @@
     appId: "1:107509834680:web:3a58295d3268b5d19f654d"
   };
 
-  /* Démarrage de Firebase. "db" = la base de données, "auth" = le service
-     d'authentification. On s'en sert dans tout le reste du fichier. */
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
   const auth = firebase.auth();
@@ -99,14 +77,8 @@
   /* =========================================================================
      CONSTANTES DE L'APPLICATION
   ========================================================================= */
-
-  /* Identifiant de la session unique du festival. Comme il n'y a qu'une seule
-     session, ce nom est fixe : toutes les données vivent sous
-     sessions/festival dans la base. */
   const ID_SESSION = "festival";
 
-  /* Les 4 rôles possibles, du moins au plus puissant. Sert de référence
-     unique : tout le code se base sur ces valeurs exactes. */
   const ROLES = {
     VISITEUR: "visiteur",
     SECRETAIRE: "secretaire",
@@ -114,31 +86,63 @@
     SUPERADMIN: "superadmin"
   };
 
-  /* Clés utilisées pour mémoriser des infos sur l'appareil de l'utilisateur
-     (localStorage = petit espace de stockage propre au navigateur). Permet
-     de ne pas redemander le prénom à chaque ouverture. */
-  const STOCKAGE = {
-    PRENOM: "barnomade_prenom"
+  const TYPE_BAR = {
+    BIERE: "biere",
+    CIDRE: "cidre"
   };
+
+  /* Façons de retourner un fût.
+       VIDE        : entièrement consommé (compte dans le volume vendu).
+       CASSE       : incident. PAS d'estimation de volume (décision validée).
+       NON_TERMINE : reste de la boisson, gardé pour le lendemain.
+       PLEIN       : jamais entamé, remis au stock. */
+  const RETOUR = {
+    VIDE: "vide",
+    CASSE: "casse",
+    NON_TERMINE: "non_termine",
+    PLEIN: "plein"
+  };
+
+  /* Réglages par défaut (le super admin les changera au module 4). */
+  const PARAMS_DEFAUT = {
+    stockInitialBiere: 50,
+    stockInitialCidre: 20,
+    maxFutsParBar: 3
+  };
+
+  const STOCKAGE = { PRENOM: "barnomade_prenom" };
 
   /* =========================================================================
      SECTION 1 — AUTHENTIFICATION
-     Avant toute chose, l'app obtient un "badge" anonyme auprès de Firebase.
-     L'utilisateur ne voit rien : il ne saisit aucun identifiant. Mais ce
-     badge donne à l'appareil une identité que les règles de sécurité
-     Firebase peuvent vérifier. C'est ce qui rend la base réellement
-     protégée (au lieu d'être ouverte à tous).
   ========================================================================= */
-
-  /* Demande le badge anonyme. Renvoie une "promesse" : du code qui se
-     terminera plus tard (quand Firebase aura répondu). */
   function obtenirBadgeAnonyme() {
     return auth.signInAnonymously();
   }
 
   /* =========================================================================
-     SECTION 2 — COMPOSANT : ÉCRAN DE CHARGEMENT
-     Affiché pendant que l'app obtient son badge et se prépare.
+     SECTION 2 — RÉFÉRENCES À LA BASE
+     Centralisées : si l'organisation de la base change, on corrige ici.
+  ========================================================================= */
+  const Base = {
+    utilisateur: function (prenom) {
+      return db.ref("sessions/" + ID_SESSION + "/users/" + prenom);
+    },
+    bars: function () {
+      return db.ref("sessions/" + ID_SESSION + "/bars");
+    },
+    bar: function (idBar) {
+      return db.ref("sessions/" + ID_SESSION + "/bars/" + idBar);
+    },
+    futsDuBar: function (idBar) {
+      return db.ref("sessions/" + ID_SESSION + "/bars/" + idBar + "/futs");
+    },
+    historiqueFuts: function () {
+      return db.ref("sessions/" + ID_SESSION + "/historiqueFuts");
+    }
+  };
+
+  /* =========================================================================
+     SECTION 3 — ÉCRANS UTILITAIRES
   ========================================================================= */
   function EcranChargement({ message }) {
     return React.createElement(
@@ -149,12 +153,6 @@
     );
   }
 
-  /* =========================================================================
-     SECTION 3 — COMPOSANT : ÉCRAN D'ERREUR
-     Affiché si quelque chose empêche l'app de démarrer (ex: pas de réseau,
-     authentification refusée). On donne un message clair plutôt qu'une page
-     blanche silencieuse.
-  ========================================================================= */
   function EcranErreur({ details }) {
     return React.createElement(
       "div",
@@ -167,28 +165,21 @@
   }
 
   /* =========================================================================
-     SECTION 4 — COMPOSANT : ÉCRAN D'ACCUEIL
-     L'utilisateur saisit son prénom (ou surnom) et entre dans l'application.
-     C'est le seul écran de connexion : pas de mot de passe, pas de choix de
-     session. Conforme à la décision validée.
+     SECTION 4 — ÉCRAN D'ACCUEIL
   ========================================================================= */
   function EcranAccueil({ onEntrer }) {
-    /* "prenom" mémorise ce que l'utilisateur tape dans le champ. */
     const [prenom, setPrenom] = useState("");
 
-    /* Au premier affichage, on pré-remplit le champ si un prénom a déjà été
-       utilisé sur cet appareil (confort : éviter de retaper). */
     useEffect(function () {
       const memorise = localStorage.getItem(STOCKAGE.PRENOM);
       if (memorise) setPrenom(memorise);
     }, []);
 
-    /* Quand l'utilisateur valide. On vérifie que le champ n'est pas vide. */
     function valider() {
       const valeur = prenom.trim();
-      if (!valeur) return;            // champ vide : on ne fait rien
+      if (!valeur) return;
       localStorage.setItem(STOCKAGE.PRENOM, valeur);
-      onEntrer(valeur);               // on transmet le prénom à l'app
+      onEntrer(valeur);
     }
 
     return React.createElement(
@@ -197,16 +188,12 @@
       React.createElement(
         "div",
         { className: "w-full max-w-sm" },
-
-        /* Titre */
         React.createElement(
           "div",
           { className: "text-center mb-8" },
           React.createElement("h1", { className: "text-2xl font-bold text-white" }, "Bars Nomades"),
           React.createElement("p", { className: "text-green-400 font-bold mt-1" }, "Gestion des Fûts")
         ),
-
-        /* Champ prénom */
         React.createElement(
           "div",
           { className: "space-y-4" },
@@ -234,141 +221,621 @@
   }
 
   /* =========================================================================
-     SECTION 5 — COMPOSANT : ÉCRAN PRINCIPAL (PROVISOIRE)
-     Affiché une fois l'utilisateur connecté. Pour l'instant il ne montre que
-     des informations de contrôle. Le vrai contenu (fûts, ventes, planning)
-     sera ajouté aux modules suivants.
+     SECTION 5 — DROITS
+     Fonction de référence unique. Conforme au tableau des permissions gelé.
   ========================================================================= */
-  function EcranPrincipal({ prenom, role, onDeconnexion }) {
-    return React.createElement(
-      "div",
-      { className: "min-h-screen bg-black text-white p-4" },
+  const Droits = {
+    /* Gérer les fûts (attribuer, retourner) : secrétaire et plus. */
+    peutGererFuts: function (role) {
+      return role === ROLES.SECRETAIRE || role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
+    },
+    /* Gérer les bars (créer, renommer, supprimer) : admin et plus. */
+    peutGererBars: function (role) {
+      return role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
+    }
+  };
 
-      React.createElement("h1", { className: "text-xl font-bold text-green-400" }, "Bars Nomades"),
+  /* =========================================================================
+     SECTION 6 — ACTIONS SUR LES BARS
+  ========================================================================= */
+  const ActionsBars = {
 
-      React.createElement(
-        "div",
-        { className: "mt-6 p-4 bg-neutral-900 rounded-xl border border-neutral-700" },
-        React.createElement("p", { className: "text-sm text-neutral-400" }, "Connecté en tant que"),
-        React.createElement("p", { className: "text-lg text-white font-medium" }, prenom),
-        React.createElement("p", { className: "text-sm text-neutral-400 mt-3" }, "Rôle attribué"),
-        React.createElement("p", { className: "text-lg text-green-300 font-medium" }, role)
-      ),
+    /* Crée un bar. push() génère une clé unique : pas de collision. */
+    creer: function (nom, type) {
+      const nomPropre = (nom || "").trim();
+      if (!nomPropre) return Promise.reject(new Error("Nom de bar vide"));
+      return Base.bars().push({ nom: nomPropre, type: type });
+    },
 
-      React.createElement(
-        "div",
-        { className: "mt-6 p-4 bg-neutral-900 rounded-xl border border-dashed border-neutral-700 text-center" },
-        React.createElement("p", { className: "text-neutral-500" }, "L'écran principal est en construction."),
-        React.createElement("p", { className: "text-neutral-600 text-sm mt-1" },
-          "Fûts, ventes et planning seront ajoutés aux prochaines étapes.")
-      ),
+    renommer: function (idBar, nouveauNom) {
+      const nomPropre = (nouveauNom || "").trim();
+      if (!nomPropre) return Promise.reject(new Error("Nom de bar vide"));
+      return Base.bar(idBar).child("nom").set(nomPropre);
+    },
 
-      React.createElement(
+    /* Supprime un bar. Refuse si le bar a encore des fûts (pour ne pas les
+       perdre dans la nature). */
+    supprimer: function (bar) {
+      const nbFuts = bar.futs ? Object.keys(bar.futs).length : 0;
+      if (nbFuts > 0) {
+        return Promise.reject(new Error("Ce bar a encore " + nbFuts + " fût(s). Retournez-les d'abord."));
+      }
+      return Base.bar(bar.id).remove();
+    }
+  };
+
+  /* =========================================================================
+     SECTION 7 — ACTIONS SUR LES FÛTS
+     L'ATTRIBUTION UTILISE UNE TRANSACTION : même si deux personnes
+     attribuent au même instant, les opérations sont traitées proprement,
+     sans s'écraser. C'est la correction du bug de concurrence.
+  ========================================================================= */
+  const ActionsFuts = {
+
+    /* Attribue un fût au bar. */
+    attribuer: function (bar, type, maxFuts, prenomUtilisateur) {
+      const nbFutsActuels = bar.futs ? Object.keys(bar.futs).length : 0;
+      if (nbFutsActuels >= maxFuts) {
+        return Promise.reject(new Error("Ce bar a déjà le maximum de fûts (" + maxFuts + ")."));
+      }
+
+      const referenceFuts = Base.futsDuBar(bar.id);
+
+      return referenceFuts.transaction(function (futsActuels) {
+        const futs = futsActuels || {};
+        if (Object.keys(futs).length >= maxFuts) {
+          /* Renvoyer undefined annule la transaction (bar rempli entre-temps). */
+          return;
+        }
+        const cleNouveauFut = referenceFuts.push().key;
+        futs[cleNouveauFut] = {
+          type: type,
+          dateAttribution: Date.now(),
+          attribuePar: prenomUtilisateur
+        };
+        return futs;
+      }).then(function (resultat) {
+        if (!resultat.committed) {
+          throw new Error("Ce bar vient d'atteindre son maximum de fûts.");
+        }
+        return Base.historiqueFuts().push({
+          mouvement: "attribution",
+          typeFut: type,
+          idBar: bar.id,
+          nomBar: bar.nom,
+          par: prenomUtilisateur,
+          date: Date.now()
+        });
+      });
+    },
+
+    /* Retourne un fût avec un motif (RETOUR.VIDE / CASSE / ...). */
+    retourner: function (bar, idFut, fut, motif, commentaire, prenomUtilisateur) {
+      return Base.futsDuBar(bar.id).child(idFut).remove().then(function () {
+        return Base.historiqueFuts().push({
+          mouvement: "retour",
+          motifRetour: motif,
+          typeFut: fut.type,
+          idBar: bar.id,
+          nomBar: bar.nom,
+          commentaire: (commentaire || "").trim(),
+          par: prenomUtilisateur,
+          date: Date.now()
+        });
+      });
+    }
+  };
+
+  /* =========================================================================
+     SECTION 8 — CALCUL DU STOCK
+     Stock restant = stock initial - fûts sortis + fûts revenus pleins.
+     Recalculé depuis l'historique : toujours juste.
+  ========================================================================= */
+  function calculerStock(historique, params) {
+    let stockBiere = params.stockInitialBiere;
+    let stockCidre = params.stockInitialCidre;
+
+    historique.forEach(function (mvt) {
+      if (mvt.mouvement === "attribution") {
+        if (mvt.typeFut === TYPE_BAR.BIERE) stockBiere = stockBiere - 1;
+        if (mvt.typeFut === TYPE_BAR.CIDRE) stockCidre = stockCidre - 1;
+      } else if (mvt.mouvement === "retour" && mvt.motifRetour === RETOUR.PLEIN) {
+        if (mvt.typeFut === TYPE_BAR.BIERE) stockBiere = stockBiere + 1;
+        if (mvt.typeFut === TYPE_BAR.CIDRE) stockCidre = stockCidre + 1;
+      }
+    });
+
+    return { biere: stockBiere, cidre: stockCidre };
+  }
+
+  /* =========================================================================
+     SECTION 9 — FENÊTRE DE RETOUR D'UN FÛT
+  ========================================================================= */
+  function FenetreRetourFut({ bar, idFut, fut, onConfirmer, onAnnuler }) {
+    const [motif, setMotif] = useState("");
+    const [commentaire, setCommentaire] = useState("");
+
+    function confirmer() {
+      if (!motif) return;
+      if (motif === RETOUR.CASSE && !commentaire.trim()) {
+        alert("Merci de décrire le problème pour un fût cassé.");
+        return;
+      }
+      onConfirmer(motif, commentaire);
+    }
+
+    function boutonMotif(valeur, libelle, couleur) {
+      const actif = motif === valeur;
+      return React.createElement(
         "button",
         {
-          onClick: onDeconnexion,
-          className: "mt-6 w-full py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl"
+          onClick: function () { setMotif(valeur); },
+          className: "w-full py-3 rounded-lg font-medium text-left px-4 " +
+            (actif ? couleur + " text-white" : "bg-neutral-800 text-neutral-300")
         },
-        "Se déconnecter"
+        libelle
+      );
+    }
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" },
+      React.createElement(
+        "div",
+        { className: "bg-neutral-900 rounded-2xl w-full max-w-sm p-6" },
+        React.createElement("h3", { className: "text-xl font-bold text-white mb-1" }, "Retour de fût"),
+        React.createElement("p", { className: "text-neutral-400 text-sm mb-4" },
+          bar.nom + " — fût " + (fut.type === TYPE_BAR.BIERE ? "bière" : "cidre")),
+
+        React.createElement(
+          "div",
+          { className: "space-y-2" },
+          boutonMotif(RETOUR.VIDE, "Fût vide (entièrement consommé)", "bg-blue-600"),
+          boutonMotif(RETOUR.CASSE, "Fût cassé / endommagé", "bg-red-600"),
+          boutonMotif(RETOUR.NON_TERMINE, "Non terminé (reprise demain)", "bg-purple-600"),
+          boutonMotif(RETOUR.PLEIN, "Fût plein (jamais entamé, retour stock)", "bg-green-600")
+        ),
+
+        React.createElement(
+          "div",
+          { className: "mt-4" },
+          React.createElement("label", { className: "block text-sm text-neutral-400 mb-1" },
+            "Commentaire" + (motif === RETOUR.CASSE ? " (obligatoire)" : " (facultatif)")),
+          React.createElement("textarea", {
+            value: commentaire,
+            onChange: function (e) { setCommentaire(e.target.value); },
+            rows: 2,
+            className: "w-full px-3 py-2 bg-neutral-800 rounded-lg text-white text-sm",
+            placeholder: motif === RETOUR.CASSE ? "Ex : valve cassée, fût percé…" : ""
+          })
+        ),
+
+        React.createElement(
+          "div",
+          { className: "flex gap-2 mt-6" },
+          React.createElement(
+            "button",
+            { onClick: onAnnuler, className: "flex-1 py-3 bg-neutral-700 text-white rounded-lg" },
+            "Annuler"
+          ),
+          React.createElement(
+            "button",
+            {
+              onClick: confirmer,
+              disabled: !motif,
+              className: "flex-1 py-3 rounded-lg font-medium " +
+                (motif ? "bg-red-600 text-white" : "bg-neutral-800 text-neutral-600")
+            },
+            "Confirmer"
+          )
+        )
       )
     );
   }
 
   /* =========================================================================
-     SECTION 6 — COMPOSANT PRINCIPAL : L'APPLICATION
-     C'est le chef d'orchestre. Il gère les grandes étapes :
-       1. obtenir le badge anonyme
-       2. afficher l'accueil tant que l'utilisateur n'est pas entré
-       3. une fois le prénom saisi, l'enregistrer dans la base et lui
-          attribuer un rôle
-       4. afficher l'écran principal
+     SECTION 10 — FENÊTRE D'AJOUT D'UN BAR
+  ========================================================================= */
+  function FenetreAjoutBar({ onConfirmer, onAnnuler }) {
+    const [nom, setNom] = useState("");
+    const [type, setType] = useState(TYPE_BAR.BIERE);
+
+    function confirmer() {
+      if (!nom.trim()) return;
+      onConfirmer(nom, type);
+    }
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" },
+      React.createElement(
+        "div",
+        { className: "bg-neutral-900 rounded-2xl w-full max-w-sm p-6" },
+        React.createElement("h3", { className: "text-xl font-bold text-white mb-4" }, "Nouveau bar"),
+
+        React.createElement("label", { className: "block text-sm text-neutral-400 mb-1" }, "Nom du bar"),
+        React.createElement("input", {
+          type: "text",
+          value: nom,
+          onChange: function (e) { setNom(e.target.value); },
+          placeholder: "Ex : Bar Mainstage",
+          className: "w-full px-4 py-3 bg-neutral-800 rounded-lg text-white mb-4",
+          autoFocus: true
+        }),
+
+        React.createElement("label", { className: "block text-sm text-neutral-400 mb-1" }, "Type de boisson"),
+        React.createElement(
+          "div",
+          { className: "flex gap-2 mb-6" },
+          React.createElement(
+            "button",
+            {
+              onClick: function () { setType(TYPE_BAR.BIERE); },
+              className: "flex-1 py-3 rounded-lg font-medium " +
+                (type === TYPE_BAR.BIERE ? "bg-amber-600 text-white" : "bg-neutral-800 text-neutral-400")
+            },
+            "Bière"
+          ),
+          React.createElement(
+            "button",
+            {
+              onClick: function () { setType(TYPE_BAR.CIDRE); },
+              className: "flex-1 py-3 rounded-lg font-medium " +
+                (type === TYPE_BAR.CIDRE ? "bg-green-600 text-white" : "bg-neutral-800 text-neutral-400")
+            },
+            "Cidre"
+          )
+        ),
+
+        React.createElement(
+          "div",
+          { className: "flex gap-2" },
+          React.createElement(
+            "button",
+            { onClick: onAnnuler, className: "flex-1 py-3 bg-neutral-700 text-white rounded-lg" },
+            "Annuler"
+          ),
+          React.createElement(
+            "button",
+            {
+              onClick: confirmer,
+              disabled: !nom.trim(),
+              className: "flex-1 py-3 rounded-lg font-medium " +
+                (nom.trim() ? "bg-red-600 text-white" : "bg-neutral-800 text-neutral-600")
+            },
+            "Créer"
+          )
+        )
+      )
+    );
+  }
+
+  /* =========================================================================
+     SECTION 11 — CARTE D'UN BAR
+  ========================================================================= */
+  function CarteBar({ bar, role, maxFuts, prenom, onAttribuer, onDemanderRetour, onSupprimer }) {
+    const futs = bar.futs || {};
+    const listeFuts = Object.keys(futs).map(function (idFut) {
+      return { id: idFut, donnees: futs[idFut] };
+    });
+    const nbFuts = listeFuts.length;
+    const estBiere = bar.type === TYPE_BAR.BIERE;
+    const peutGererFuts = Droits.peutGererFuts(role);
+    const peutGererBars = Droits.peutGererBars(role);
+    const barComplet = nbFuts >= maxFuts;
+
+    return React.createElement(
+      "div",
+      { className: "rounded-xl border p-3 " +
+          (estBiere ? "border-amber-800 bg-amber-950/30" : "border-green-800 bg-green-950/30") },
+
+      React.createElement(
+        "div",
+        { className: "flex items-center justify-between mb-2" },
+        React.createElement(
+          "div",
+          null,
+          React.createElement("span", { className: "font-bold text-white" }, bar.nom),
+          React.createElement("span", { className: "ml-2 text-xs text-neutral-400" },
+            estBiere ? "Bière" : "Cidre")
+        ),
+        React.createElement(
+          "span",
+          { className: "text-sm font-bold px-2 py-0.5 rounded " +
+              (barComplet ? "bg-red-700 text-white" : "bg-neutral-700 text-neutral-200") },
+          nbFuts + " / " + maxFuts
+        )
+      ),
+
+      listeFuts.length === 0
+        ? React.createElement("p", { className: "text-neutral-500 text-sm" }, "Aucun fût en cours")
+        : React.createElement(
+            "div",
+            { className: "space-y-1" },
+            listeFuts.map(function (f) {
+              return React.createElement(
+                "div",
+                {
+                  key: f.id,
+                  className: "flex items-center justify-between bg-black/40 rounded px-2 py-1.5"
+                },
+                React.createElement("span", { className: "text-sm text-neutral-200" },
+                  "Fût " + (f.donnees.type === TYPE_BAR.BIERE ? "bière" : "cidre")),
+                peutGererFuts
+                  ? React.createElement(
+                      "button",
+                      {
+                        onClick: function () { onDemanderRetour(bar, f.id, f.donnees); },
+                        className: "text-xs px-2 py-1 bg-neutral-700 hover:bg-neutral-600 text-white rounded"
+                      },
+                      "Retour"
+                    )
+                  : null
+              );
+            })
+          ),
+
+      React.createElement(
+        "div",
+        { className: "flex gap-2 mt-3" },
+        peutGererFuts
+          ? React.createElement(
+              "button",
+              {
+                onClick: function () { onAttribuer(bar); },
+                disabled: barComplet,
+                className: "flex-1 py-2 rounded-lg text-sm font-medium " +
+                  (barComplet
+                    ? "bg-neutral-800 text-neutral-600"
+                    : "bg-emerald-600 hover:bg-emerald-500 text-white")
+              },
+              barComplet ? "Bar complet" : "+ Attribuer un fût"
+            )
+          : null,
+        peutGererBars
+          ? React.createElement(
+              "button",
+              {
+                onClick: function () { onSupprimer(bar); },
+                className: "py-2 px-3 rounded-lg text-sm bg-neutral-800 hover:bg-red-900 text-neutral-400"
+              },
+              "Supprimer"
+            )
+          : null
+      )
+    );
+  }
+
+  /* =========================================================================
+     SECTION 12 — ÉCRAN PRINCIPAL
+  ========================================================================= */
+  function EcranPrincipal({ prenom, role, onDeconnexion }) {
+    const [bars, setBars] = useState([]);
+    const [historique, setHistorique] = useState([]);
+    const [params] = useState(PARAMS_DEFAUT);
+    const [fenetreAjoutBar, setFenetreAjoutBar] = useState(false);
+    const [retourEnCours, setRetourEnCours] = useState(null);
+
+    const peutGererBars = Droits.peutGererBars(role);
+
+    /* Abonnement temps réel : bars + historique. */
+    useEffect(function () {
+      const refBars = Base.bars();
+      const refHisto = Base.historiqueFuts();
+
+      function surBars(instantane) {
+        const valeur = instantane.val() || {};
+        const liste = Object.keys(valeur).map(function (idBar) {
+          return Object.assign({ id: idBar }, valeur[idBar]);
+        });
+        setBars(liste);
+      }
+      function surHisto(instantane) {
+        const valeur = instantane.val() || {};
+        const liste = Object.keys(valeur).map(function (cle) {
+          return valeur[cle];
+        });
+        setHistorique(liste);
+      }
+
+      refBars.on("value", surBars);
+      refHisto.on("value", surHisto);
+
+      return function () {
+        refBars.off("value", surBars);
+        refHisto.off("value", surHisto);
+      };
+    }, []);
+
+    const stock = calculerStock(historique, params);
+
+    function creerBar(nom, type) {
+      ActionsBars.creer(nom, type)
+        .then(function () { setFenetreAjoutBar(false); })
+        .catch(function (e) { alert(e.message); });
+    }
+
+    function supprimerBar(bar) {
+      if (!confirm("Supprimer le bar « " + bar.nom + " » ?")) return;
+      ActionsBars.supprimer(bar).catch(function (e) { alert(e.message); });
+    }
+
+    function attribuerFut(bar) {
+      const stockDispo = bar.type === TYPE_BAR.BIERE ? stock.biere : stock.cidre;
+      if (stockDispo <= 0) {
+        alert("Stock épuisé pour ce type de boisson.");
+        return;
+      }
+      ActionsFuts.attribuer(bar, bar.type, params.maxFutsParBar, prenom)
+        .catch(function (e) { alert(e.message); });
+    }
+
+    function confirmerRetour(motif, commentaire) {
+      const r = retourEnCours;
+      ActionsFuts.retourner(r.bar, r.idFut, r.fut, motif, commentaire, prenom)
+        .then(function () { setRetourEnCours(null); })
+        .catch(function (e) { alert(e.message); });
+    }
+
+    return React.createElement(
+      "div",
+      { className: "min-h-screen bg-black text-white" },
+
+      React.createElement(
+        "div",
+        { className: "p-4 border-b border-neutral-800 flex items-center justify-between" },
+        React.createElement(
+          "div",
+          null,
+          React.createElement("h1", { className: "text-lg font-bold text-green-400" }, "Bars Nomades"),
+          React.createElement("p", { className: "text-xs text-neutral-500" }, prenom + " — " + role)
+        ),
+        React.createElement(
+          "button",
+          {
+            onClick: onDeconnexion,
+            className: "text-xs px-3 py-1.5 bg-neutral-800 text-neutral-300 rounded-lg"
+          },
+          "Quitter"
+        )
+      ),
+
+      React.createElement(
+        "div",
+        { className: "grid grid-cols-2 gap-2 p-3" },
+        React.createElement(
+          "div",
+          { className: "bg-amber-950/40 border border-amber-800 rounded-lg p-3 text-center" },
+          React.createElement("div", { className: "text-2xl font-bold text-amber-400" }, stock.biere),
+          React.createElement("div", { className: "text-xs text-amber-200" }, "Fûts bière en stock")
+        ),
+        React.createElement(
+          "div",
+          { className: "bg-green-950/40 border border-green-800 rounded-lg p-3 text-center" },
+          React.createElement("div", { className: "text-2xl font-bold text-green-400" }, stock.cidre),
+          React.createElement("div", { className: "text-xs text-green-200" }, "Fûts cidre en stock")
+        )
+      ),
+
+      peutGererBars
+        ? React.createElement(
+            "div",
+            { className: "px-3 pb-2" },
+            React.createElement(
+              "button",
+              {
+                onClick: function () { setFenetreAjoutBar(true); },
+                className: "w-full py-2.5 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg text-sm font-medium"
+              },
+              "+ Ajouter un bar"
+            )
+          )
+        : null,
+
+      React.createElement(
+        "div",
+        { className: "p-3 space-y-3" },
+        bars.length === 0
+          ? React.createElement(
+              "div",
+              { className: "text-center py-10 text-neutral-500" },
+              React.createElement("p", null, "Aucun bar pour l'instant."),
+              peutGererBars
+                ? React.createElement("p", { className: "text-sm mt-1" },
+                    "Utilisez « Ajouter un bar » pour commencer.")
+                : React.createElement("p", { className: "text-sm mt-1" },
+                    "Un administrateur doit créer les bars.")
+            )
+          : bars.map(function (bar) {
+              return React.createElement(CarteBar, {
+                key: bar.id,
+                bar: bar,
+                role: role,
+                maxFuts: params.maxFutsParBar,
+                prenom: prenom,
+                onAttribuer: attribuerFut,
+                onDemanderRetour: function (b, idFut, fut) {
+                  setRetourEnCours({ bar: b, idFut: idFut, fut: fut });
+                },
+                onSupprimer: supprimerBar
+              });
+            })
+      ),
+
+      fenetreAjoutBar
+        ? React.createElement(FenetreAjoutBar, {
+            onConfirmer: creerBar,
+            onAnnuler: function () { setFenetreAjoutBar(false); }
+          })
+        : null,
+
+      retourEnCours
+        ? React.createElement(FenetreRetourFut, {
+            bar: retourEnCours.bar,
+            idFut: retourEnCours.idFut,
+            fut: retourEnCours.fut,
+            onConfirmer: confirmerRetour,
+            onAnnuler: function () { setRetourEnCours(null); }
+          })
+        : null
+    );
+  }
+
+  /* =========================================================================
+     SECTION 13 — COMPOSANT PRINCIPAL : L'APPLICATION
   ========================================================================= */
   function Application() {
-
-    /* "etape" décrit où en est l'application :
-         "demarrage"  : on obtient le badge
-         "accueil"    : on attend que l'utilisateur saisisse son prénom
-         "connexion"  : on enregistre l'utilisateur dans la base
-         "pret"       : l'utilisateur est entré, on affiche l'écran principal
-         "erreur"     : quelque chose a échoué */
     const [etape, setEtape] = useState("demarrage");
-
-    /* Détail d'erreur éventuel, affiché par l'écran d'erreur. */
     const [erreur, setErreur] = useState("");
-
-    /* Le prénom de l'utilisateur, une fois saisi. */
     const [prenom, setPrenom] = useState("");
-
-    /* Le rôle de l'utilisateur. Par défaut "visiteur" : c'est le rôle de
-       quiconque ouvre l'application sans invitation particulière. */
     const [role, setRole] = useState(ROLES.VISITEUR);
 
-    /* ---- ÉTAPE 1 : obtenir le badge anonyme, une seule fois au démarrage. */
     useEffect(function () {
       obtenirBadgeAnonyme()
-        .then(function () {
-          /* Badge obtenu : on passe à l'écran d'accueil. */
-          setEtape("accueil");
-        })
+        .then(function () { setEtape("accueil"); })
         .catch(function (e) {
-          /* Échec : souvent pas de réseau, ou domaine non autorisé dans
-             la console Firebase. On affiche un écran d'erreur clair. */
           setErreur("L'authentification a échoué. (" + (e && e.code ? e.code : "inconnu") + ")");
           setEtape("erreur");
         });
     }, []);
 
-    /* ---- ÉTAPE 3 : appelée quand l'utilisateur valide son prénom.
-       On enregistre l'utilisateur dans la base, sous
-       sessions/festival/users/<prenom>, avec la date de connexion.
-       Le rôle, lui, sera déterminé proprement au module suivant ; pour
-       l'instant tout le monde entre en "visiteur". */
     function entrerDansApp(prenomSaisi) {
       setPrenom(prenomSaisi);
       setEtape("connexion");
 
-      const referenceUtilisateur = db.ref(
-        "sessions/" + ID_SESSION + "/users/" + prenomSaisi
-      );
+      const refUtilisateur = Base.utilisateur(prenomSaisi);
 
-      /* On écrit les informations de l'utilisateur dans la base. */
-      referenceUtilisateur
-        .update({
+      /* On conserve le rôle existant si l'utilisateur revient (ne pas
+         rétrograder un admin à chaque reconnexion). */
+      refUtilisateur.once("value").then(function (instantane) {
+        const existant = instantane.val();
+        const roleConserve = (existant && existant.role) ? existant.role : ROLES.VISITEUR;
+
+        return refUtilisateur.update({
           prenom: prenomSaisi,
           derniereConnexion: Date.now(),
-          role: ROLES.VISITEUR
-        })
-        .then(function () {
-          setRole(ROLES.VISITEUR);
+          role: roleConserve
+        }).then(function () {
+          setRole(roleConserve);
           setEtape("pret");
-        })
-        .catch(function (e) {
-          setErreur("Impossible d'enregistrer la connexion. (" + (e && e.code ? e.code : "inconnu") + ")");
-          setEtape("erreur");
         });
+      }).catch(function (e) {
+        setErreur("Impossible d'enregistrer la connexion. (" + (e && e.code ? e.code : "inconnu") + ")");
+        setEtape("erreur");
+      });
     }
 
-    /* ---- Déconnexion : on revient à l'écran d'accueil. */
     function seDeconnecter() {
       setPrenom("");
       setRole(ROLES.VISITEUR);
       setEtape("accueil");
     }
 
-    /* ---- AFFICHAGE selon l'étape en cours. */
-    if (etape === "erreur") {
-      return React.createElement(EcranErreur, { details: erreur });
-    }
-    if (etape === "demarrage") {
-      return React.createElement(EcranChargement, { message: "Connexion sécurisée…" });
-    }
-    if (etape === "connexion") {
-      return React.createElement(EcranChargement, { message: "Enregistrement…" });
-    }
-    if (etape === "accueil") {
-      return React.createElement(EcranAccueil, { onEntrer: entrerDansApp });
-    }
-    /* étape === "pret" */
+    if (etape === "erreur") return React.createElement(EcranErreur, { details: erreur });
+    if (etape === "demarrage") return React.createElement(EcranChargement, { message: "Connexion sécurisée…" });
+    if (etape === "connexion") return React.createElement(EcranChargement, { message: "Enregistrement…" });
+    if (etape === "accueil") return React.createElement(EcranAccueil, { onEntrer: entrerDansApp });
+
     return React.createElement(EcranPrincipal, {
       prenom: prenom,
       role: role,
@@ -378,7 +845,6 @@
 
   /* =========================================================================
      DÉMARRAGE
-     On affiche le composant Application dans la balise <div id="root">.
   ========================================================================= */
   ReactDOM.createRoot(document.getElementById("root")).render(
     React.createElement(Application)
