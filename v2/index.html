@@ -4,27 +4,30 @@
   GESTION DES FÛTS - BARS NOMADES - HELLFEST
   Application reconstruite proprement (remplace la version V16-V23 minifiée).
 
-  ÉTAT : MODULE 1 + MODULE 2
+  ÉTAT : MODULES 1 + 2 + 3A
   Contenu actuel :
-    - démarrage, connexion Firebase, authentification anonyme   (module 1)
+    - démarrage, Firebase, authentification anonyme             (module 1)
     - écran d'accueil (prénom), connexion utilisateur           (module 1)
     - gestion des BARS : créer, renommer, supprimer             (module 2)
-    - gestion des FÛTS : attribuer, retourner                   (module 2)
-    - suivi du STOCK bière / cidre                              (module 2)
+    - gestion des FÛTS : attribuer, retourner, stock            (module 2)
+    - gestion des JOURS et des CRÉNEAUX horaires                (module 3A)
 
-  Pas encore inclus : ventes, planning, dashboard (modules 3 et 4).
+  Pas encore inclus : saisie des ventes (3B), planning, dashboard.
 
   PRINCIPE D'ARCHITECTURE
     - Un seul fichier HTML. Code lisible, commenté en français, non minifié.
     - Une seule "session" pour tout le festival (sessions/festival).
     - 4 rôles : visiteur, secretaire, admin, superadmin.
-    - AUCUN mot de passe dans ce fichier. Les droits viennent du rôle stocké
-      en base, protégé par les règles de sécurité Firebase.
+    - AUCUN mot de passe dans ce fichier. Droits = rôle stocké en base.
 
-  NOTE DÉVELOPPEURS — STOCKAGE DES FÛTS
-    Chaque fût d'un bar est un ENFANT INDÉPENDANT sous une clé unique générée
-    par Firebase (push). PAS de tableau indexé : sinon deux attributions
-    simultanées s'écrasent (un fût "disparaît"). Voir SECTION 7.
+  NOTE DÉVELOPPEURS — JOURS ET CRÉNEAUX (module 3A)
+    Le festival a un NOMBRE DE JOURS réglable (paramètre nombreJours).
+    Chaque jour a SA PROPRE liste de créneaux horaires : un jour peut avoir
+    des créneaux différents d'un autre. Les créneaux d'un jour sont stockés
+    sous sessions/festival/creneaux/jour<N>.
+    Un créneau = { id (clé unique Firebase), libelle (texte affiché) }.
+    Le "jour actif" (jourActuel) est partagé par tous : il pilote ce que
+    voient les utilisateurs. Modifiable par admin/superadmin.
 ===============================================================================
 -->
 <html lang="fr">
@@ -91,11 +94,7 @@
     CIDRE: "cidre"
   };
 
-  /* Façons de retourner un fût.
-       VIDE        : entièrement consommé (compte dans le volume vendu).
-       CASSE       : incident. PAS d'estimation de volume (décision validée).
-       NON_TERMINE : reste de la boisson, gardé pour le lendemain.
-       PLEIN       : jamais entamé, remis au stock. */
+  /* Façons de retourner un fût. */
   const RETOUR = {
     VIDE: "vide",
     CASSE: "casse",
@@ -107,7 +106,8 @@
   const PARAMS_DEFAUT = {
     stockInitialBiere: 50,
     stockInitialCidre: 20,
-    maxFutsParBar: 3
+    maxFutsParBar: 3,
+    nombreJours: 4
   };
 
   const STOCKAGE = { PRENOM: "barnomade_prenom" };
@@ -121,7 +121,6 @@
 
   /* =========================================================================
      SECTION 2 — RÉFÉRENCES À LA BASE
-     Centralisées : si l'organisation de la base change, on corrige ici.
   ========================================================================= */
   const Base = {
     utilisateur: function (prenom) {
@@ -138,6 +137,18 @@
     },
     historiqueFuts: function () {
       return db.ref("sessions/" + ID_SESSION + "/historiqueFuts");
+    },
+    /* Les paramètres généraux (stock initial, nombre de jours...). */
+    params: function () {
+      return db.ref("sessions/" + ID_SESSION + "/params");
+    },
+    /* Le jour actuellement actif (un simple nombre, partagé par tous). */
+    jourActuel: function () {
+      return db.ref("sessions/" + ID_SESSION + "/jourActuel");
+    },
+    /* Les créneaux d'un jour donné (numéro du jour). */
+    creneauxDuJour: function (numeroJour) {
+      return db.ref("sessions/" + ID_SESSION + "/creneaux/jour" + numeroJour);
     }
   };
 
@@ -222,16 +233,25 @@
 
   /* =========================================================================
      SECTION 5 — DROITS
-     Fonction de référence unique. Conforme au tableau des permissions gelé.
+     Conforme au tableau des permissions gelé.
   ========================================================================= */
   const Droits = {
-    /* Gérer les fûts (attribuer, retourner) : secrétaire et plus. */
+    /* Gérer les fûts : secrétaire et plus. */
     peutGererFuts: function (role) {
       return role === ROLES.SECRETAIRE || role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
     },
-    /* Gérer les bars (créer, renommer, supprimer) : admin et plus. */
+    /* Gérer les bars : admin et plus. */
     peutGererBars: function (role) {
       return role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
+    },
+    /* Changer le jour actif : admin et plus. */
+    peutChangerJour: function (role) {
+      return role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
+    },
+    /* Configurer les créneaux horaires : super admin uniquement
+       (conforme au tableau gelé). */
+    peutGererCreneaux: function (role) {
+      return role === ROLES.SUPERADMIN;
     }
   };
 
@@ -239,22 +259,16 @@
      SECTION 6 — ACTIONS SUR LES BARS
   ========================================================================= */
   const ActionsBars = {
-
-    /* Crée un bar. push() génère une clé unique : pas de collision. */
     creer: function (nom, type) {
       const nomPropre = (nom || "").trim();
       if (!nomPropre) return Promise.reject(new Error("Nom de bar vide"));
       return Base.bars().push({ nom: nomPropre, type: type });
     },
-
     renommer: function (idBar, nouveauNom) {
       const nomPropre = (nouveauNom || "").trim();
       if (!nomPropre) return Promise.reject(new Error("Nom de bar vide"));
       return Base.bar(idBar).child("nom").set(nomPropre);
     },
-
-    /* Supprime un bar. Refuse si le bar a encore des fûts (pour ne pas les
-       perdre dans la nature). */
     supprimer: function (bar) {
       const nbFuts = bar.futs ? Object.keys(bar.futs).length : 0;
       if (nbFuts > 0) {
@@ -266,27 +280,18 @@
 
   /* =========================================================================
      SECTION 7 — ACTIONS SUR LES FÛTS
-     L'ATTRIBUTION UTILISE UNE TRANSACTION : même si deux personnes
-     attribuent au même instant, les opérations sont traitées proprement,
-     sans s'écraser. C'est la correction du bug de concurrence.
+     L'attribution utilise une TRANSACTION (anti-concurrence).
   ========================================================================= */
   const ActionsFuts = {
-
-    /* Attribue un fût au bar. */
     attribuer: function (bar, type, maxFuts, prenomUtilisateur) {
       const nbFutsActuels = bar.futs ? Object.keys(bar.futs).length : 0;
       if (nbFutsActuels >= maxFuts) {
         return Promise.reject(new Error("Ce bar a déjà le maximum de fûts (" + maxFuts + ")."));
       }
-
       const referenceFuts = Base.futsDuBar(bar.id);
-
       return referenceFuts.transaction(function (futsActuels) {
         const futs = futsActuels || {};
-        if (Object.keys(futs).length >= maxFuts) {
-          /* Renvoyer undefined annule la transaction (bar rempli entre-temps). */
-          return;
-        }
+        if (Object.keys(futs).length >= maxFuts) return;
         const cleNouveauFut = referenceFuts.push().key;
         futs[cleNouveauFut] = {
           type: type,
@@ -308,8 +313,6 @@
         });
       });
     },
-
-    /* Retourne un fût avec un motif (RETOUR.VIDE / CASSE / ...). */
     retourner: function (bar, idFut, fut, motif, commentaire, prenomUtilisateur) {
       return Base.futsDuBar(bar.id).child(idFut).remove().then(function () {
         return Base.historiqueFuts().push({
@@ -327,14 +330,65 @@
   };
 
   /* =========================================================================
-     SECTION 8 — CALCUL DU STOCK
-     Stock restant = stock initial - fûts sortis + fûts revenus pleins.
-     Recalculé depuis l'historique : toujours juste.
+     SECTION 8 — ACTIONS SUR LES JOURS ET LES CRÉNEAUX (module 3A)
+  ========================================================================= */
+  const ActionsCreneaux = {
+
+    /* Change le jour actif (le nombre partagé par tous). */
+    definirJourActuel: function (numeroJour) {
+      return Base.jourActuel().set(numeroJour);
+    },
+
+    /* Ajoute un créneau à un jour. push() = clé unique. */
+    ajouter: function (numeroJour, libelle) {
+      const texte = (libelle || "").trim();
+      if (!texte) return Promise.reject(new Error("Libellé de créneau vide"));
+      return Base.creneauxDuJour(numeroJour).push({ libelle: texte });
+    },
+
+    /* Renomme un créneau existant. */
+    renommer: function (numeroJour, idCreneau, nouveauLibelle) {
+      const texte = (nouveauLibelle || "").trim();
+      if (!texte) return Promise.reject(new Error("Libellé de créneau vide"));
+      return Base.creneauxDuJour(numeroJour).child(idCreneau).child("libelle").set(texte);
+    },
+
+    /* Supprime un créneau.
+       NOTE : en 3B (saisie des ventes), on ajoutera un garde-fou pour
+       empêcher de supprimer un créneau qui a déjà des ventes saisies.
+       Pour l'instant (3A) il n'y a pas encore de ventes : suppression libre. */
+    supprimer: function (numeroJour, idCreneau) {
+      return Base.creneauxDuJour(numeroJour).child(idCreneau).remove();
+    },
+
+    /* Copie tous les créneaux d'un jour vers un autre.
+       Pratique quand deux journées ont les mêmes horaires : évite de tout
+       retaper. Les créneaux du jour de destination sont remplacés. */
+    copierDepuisJour: function (jourSource, jourDestination) {
+      return Base.creneauxDuJour(jourSource).once("value").then(function (instantane) {
+        const creneauxSource = instantane.val();
+        if (!creneauxSource) {
+          return Promise.reject(new Error("Le jour " + jourSource + " n'a aucun créneau à copier."));
+        }
+        /* On recrée chaque créneau dans le jour de destination, avec de
+           nouvelles clés uniques (on ne réutilise pas les clés source). */
+        const refDestination = Base.creneauxDuJour(jourDestination);
+        const nouveau = {};
+        Object.keys(creneauxSource).forEach(function (idSource) {
+          const cleNeuve = refDestination.push().key;
+          nouveau[cleNeuve] = { libelle: creneauxSource[idSource].libelle };
+        });
+        return refDestination.set(nouveau);
+      });
+    }
+  };
+
+  /* =========================================================================
+     SECTION 9 — CALCUL DU STOCK
   ========================================================================= */
   function calculerStock(historique, params) {
     let stockBiere = params.stockInitialBiere;
     let stockCidre = params.stockInitialCidre;
-
     historique.forEach(function (mvt) {
       if (mvt.mouvement === "attribution") {
         if (mvt.typeFut === TYPE_BAR.BIERE) stockBiere = stockBiere - 1;
@@ -344,12 +398,11 @@
         if (mvt.typeFut === TYPE_BAR.CIDRE) stockCidre = stockCidre + 1;
       }
     });
-
     return { biere: stockBiere, cidre: stockCidre };
   }
 
   /* =========================================================================
-     SECTION 9 — FENÊTRE DE RETOUR D'UN FÛT
+     SECTION 10 — FENÊTRE DE RETOUR D'UN FÛT
   ========================================================================= */
   function FenetreRetourFut({ bar, idFut, fut, onConfirmer, onAnnuler }) {
     const [motif, setMotif] = useState("");
@@ -386,7 +439,6 @@
         React.createElement("h3", { className: "text-xl font-bold text-white mb-1" }, "Retour de fût"),
         React.createElement("p", { className: "text-neutral-400 text-sm mb-4" },
           bar.nom + " — fût " + (fut.type === TYPE_BAR.BIERE ? "bière" : "cidre")),
-
         React.createElement(
           "div",
           { className: "space-y-2" },
@@ -395,7 +447,6 @@
           boutonMotif(RETOUR.NON_TERMINE, "Non terminé (reprise demain)", "bg-purple-600"),
           boutonMotif(RETOUR.PLEIN, "Fût plein (jamais entamé, retour stock)", "bg-green-600")
         ),
-
         React.createElement(
           "div",
           { className: "mt-4" },
@@ -409,7 +460,6 @@
             placeholder: motif === RETOUR.CASSE ? "Ex : valve cassée, fût percé…" : ""
           })
         ),
-
         React.createElement(
           "div",
           { className: "flex gap-2 mt-6" },
@@ -434,7 +484,7 @@
   }
 
   /* =========================================================================
-     SECTION 10 — FENÊTRE D'AJOUT D'UN BAR
+     SECTION 11 — FENÊTRE D'AJOUT D'UN BAR
   ========================================================================= */
   function FenetreAjoutBar({ onConfirmer, onAnnuler }) {
     const [nom, setNom] = useState("");
@@ -452,7 +502,6 @@
         "div",
         { className: "bg-neutral-900 rounded-2xl w-full max-w-sm p-6" },
         React.createElement("h3", { className: "text-xl font-bold text-white mb-4" }, "Nouveau bar"),
-
         React.createElement("label", { className: "block text-sm text-neutral-400 mb-1" }, "Nom du bar"),
         React.createElement("input", {
           type: "text",
@@ -462,7 +511,6 @@
           className: "w-full px-4 py-3 bg-neutral-800 rounded-lg text-white mb-4",
           autoFocus: true
         }),
-
         React.createElement("label", { className: "block text-sm text-neutral-400 mb-1" }, "Type de boisson"),
         React.createElement(
           "div",
@@ -486,7 +534,6 @@
             "Cidre"
           )
         ),
-
         React.createElement(
           "div",
           { className: "flex gap-2" },
@@ -511,7 +558,186 @@
   }
 
   /* =========================================================================
-     SECTION 11 — CARTE D'UN BAR
+     SECTION 12 — FENÊTRE DE GESTION DES CRÉNEAUX (module 3A)
+     Réservée au super admin. Permet de définir les créneaux du jour affiché,
+     et de copier les créneaux d'un autre jour.
+  ========================================================================= */
+  function FenetreCreneaux({ jourActuel, nombreJours, creneaux, onFermer }) {
+    /* Champ de saisie d'un nouveau créneau. */
+    const [nouveauLibelle, setNouveauLibelle] = useState("");
+    /* Le créneau en cours de renommage (son id), ou null. */
+    const [enRenommage, setEnRenommage] = useState(null);
+    const [libelleRenomme, setLibelleRenomme] = useState("");
+
+    /* Liste des créneaux du jour, transformée en tableau. */
+    const listeCreneaux = Object.keys(creneaux || {}).map(function (id) {
+      return { id: id, libelle: creneaux[id].libelle };
+    });
+
+    function ajouter() {
+      if (!nouveauLibelle.trim()) return;
+      ActionsCreneaux.ajouter(jourActuel, nouveauLibelle)
+        .then(function () { setNouveauLibelle(""); })
+        .catch(function (e) { alert(e.message); });
+    }
+
+    function supprimer(idCreneau) {
+      if (!confirm("Supprimer ce créneau ?")) return;
+      ActionsCreneaux.supprimer(jourActuel, idCreneau)
+        .catch(function (e) { alert(e.message); });
+    }
+
+    function lancerRenommage(creneau) {
+      setEnRenommage(creneau.id);
+      setLibelleRenomme(creneau.libelle);
+    }
+
+    function validerRenommage() {
+      ActionsCreneaux.renommer(jourActuel, enRenommage, libelleRenomme)
+        .then(function () { setEnRenommage(null); })
+        .catch(function (e) { alert(e.message); });
+    }
+
+    function copierDepuis(jourSource) {
+      if (jourSource === jourActuel) return;
+      if (!confirm("Copier les créneaux du jour " + jourSource +
+          " ? Les créneaux actuels du jour " + jourActuel + " seront remplacés.")) return;
+      ActionsCreneaux.copierDepuisJour(jourSource, jourActuel)
+        .catch(function (e) { alert(e.message); });
+    }
+
+    /* Liste des autres jours, pour proposer la copie. */
+    const autresJours = [];
+    for (let n = 1; n <= nombreJours; n++) {
+      if (n !== jourActuel) autresJours.push(n);
+    }
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" },
+      React.createElement(
+        "div",
+        { className: "bg-neutral-900 rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto" },
+
+        React.createElement("h3", { className: "text-xl font-bold text-white mb-1" },
+          "Créneaux du jour " + jourActuel),
+        React.createElement("p", { className: "text-neutral-500 text-sm mb-4" },
+          "Définissez les tranches horaires de cette journée."),
+
+        /* Liste des créneaux existants. */
+        listeCreneaux.length === 0
+          ? React.createElement("p", { className: "text-neutral-500 text-sm mb-3" },
+              "Aucun créneau pour ce jour.")
+          : React.createElement(
+              "div",
+              { className: "space-y-2 mb-4" },
+              listeCreneaux.map(function (creneau) {
+                /* Si ce créneau est en cours de renommage : champ d'édition. */
+                if (enRenommage === creneau.id) {
+                  return React.createElement(
+                    "div",
+                    { key: creneau.id, className: "flex gap-2 items-center bg-neutral-800 rounded-lg p-2" },
+                    React.createElement("input", {
+                      type: "text",
+                      value: libelleRenomme,
+                      onChange: function (e) { setLibelleRenomme(e.target.value); },
+                      className: "flex-1 px-2 py-1 bg-neutral-700 rounded text-white text-sm",
+                      autoFocus: true
+                    }),
+                    React.createElement(
+                      "button",
+                      { onClick: validerRenommage, className: "px-2 py-1 bg-green-600 text-white rounded text-sm" },
+                      "OK"
+                    ),
+                    React.createElement(
+                      "button",
+                      { onClick: function () { setEnRenommage(null); },
+                        className: "px-2 py-1 bg-neutral-600 text-white rounded text-sm" },
+                      "Annuler"
+                    )
+                  );
+                }
+                /* Sinon : affichage normal. */
+                return React.createElement(
+                  "div",
+                  { key: creneau.id, className: "flex gap-2 items-center bg-neutral-800 rounded-lg p-2" },
+                  React.createElement("span", { className: "flex-1 text-white text-sm px-1" }, creneau.libelle),
+                  React.createElement(
+                    "button",
+                    { onClick: function () { lancerRenommage(creneau); },
+                      className: "px-2 py-1 bg-neutral-700 text-white rounded text-sm" },
+                    "Renommer"
+                  ),
+                  React.createElement(
+                    "button",
+                    { onClick: function () { supprimer(creneau.id); },
+                      className: "px-2 py-1 bg-red-900 text-white rounded text-sm" },
+                    "Suppr."
+                  )
+                );
+              })
+            ),
+
+        /* Ajout d'un créneau. */
+        React.createElement(
+          "div",
+          { className: "flex gap-2 mb-5" },
+          React.createElement("input", {
+            type: "text",
+            value: nouveauLibelle,
+            onChange: function (e) { setNouveauLibelle(e.target.value); },
+            onKeyDown: function (e) { if (e.key === "Enter") ajouter(); },
+            placeholder: "Ex : 15h - 18h",
+            className: "flex-1 px-3 py-2 bg-neutral-800 rounded-lg text-white text-sm"
+          }),
+          React.createElement(
+            "button",
+            {
+              onClick: ajouter,
+              disabled: !nouveauLibelle.trim(),
+              className: "px-4 py-2 rounded-lg font-medium text-sm " +
+                (nouveauLibelle.trim() ? "bg-emerald-600 text-white" : "bg-neutral-800 text-neutral-600")
+            },
+            "Ajouter"
+          )
+        ),
+
+        /* Copie depuis un autre jour. */
+        autresJours.length > 0
+          ? React.createElement(
+              "div",
+              { className: "border-t border-neutral-800 pt-4 mb-4" },
+              React.createElement("p", { className: "text-sm text-neutral-400 mb-2" },
+                "Copier les créneaux d'un autre jour :"),
+              React.createElement(
+                "div",
+                { className: "flex flex-wrap gap-2" },
+                autresJours.map(function (n) {
+                  return React.createElement(
+                    "button",
+                    {
+                      key: n,
+                      onClick: function () { copierDepuis(n); },
+                      className: "px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-lg text-sm"
+                    },
+                    "Depuis jour " + n
+                  );
+                })
+              )
+            )
+          : null,
+
+        React.createElement(
+          "button",
+          { onClick: onFermer, className: "w-full py-3 bg-neutral-700 text-white rounded-lg" },
+          "Fermer"
+        )
+      )
+    );
+  }
+
+  /* =========================================================================
+     SECTION 13 — CARTE D'UN BAR
   ========================================================================= */
   function CarteBar({ bar, role, maxFuts, prenom, onAttribuer, onDemanderRetour, onSupprimer }) {
     const futs = bar.futs || {};
@@ -528,7 +754,6 @@
       "div",
       { className: "rounded-xl border p-3 " +
           (estBiere ? "border-amber-800 bg-amber-950/30" : "border-green-800 bg-green-950/30") },
-
       React.createElement(
         "div",
         { className: "flex items-center justify-between mb-2" },
@@ -546,7 +771,6 @@
           nbFuts + " / " + maxFuts
         )
       ),
-
       listeFuts.length === 0
         ? React.createElement("p", { className: "text-neutral-500 text-sm" }, "Aucun fût en cours")
         : React.createElement(
@@ -555,10 +779,7 @@
             listeFuts.map(function (f) {
               return React.createElement(
                 "div",
-                {
-                  key: f.id,
-                  className: "flex items-center justify-between bg-black/40 rounded px-2 py-1.5"
-                },
+                { key: f.id, className: "flex items-center justify-between bg-black/40 rounded px-2 py-1.5" },
                 React.createElement("span", { className: "text-sm text-neutral-200" },
                   "Fût " + (f.donnees.type === TYPE_BAR.BIERE ? "bière" : "cidre")),
                 peutGererFuts
@@ -574,7 +795,6 @@
               );
             })
           ),
-
       React.createElement(
         "div",
         { className: "flex gap-2 mt-3" },
@@ -607,45 +827,128 @@
   }
 
   /* =========================================================================
-     SECTION 12 — ÉCRAN PRINCIPAL
+     SECTION 14 — BANDEAU DU JOUR
+     Affiche le jour actif et permet d'en changer (admin et plus).
+  ========================================================================= */
+  function BandeauJour({ jourActuel, nombreJours, role, onChangerJour, onOuvrirCreneaux }) {
+    const peutChangerJour = Droits.peutChangerJour(role);
+    const peutGererCreneaux = Droits.peutGererCreneaux(role);
+
+    return React.createElement(
+      "div",
+      { className: "flex items-center justify-between px-3 py-2 bg-neutral-900 border-b border-neutral-800" },
+
+      /* Sélecteur de jour. */
+      React.createElement(
+        "div",
+        { className: "flex items-center gap-2" },
+        React.createElement("span", { className: "text-sm text-neutral-400" }, "Jour"),
+        peutChangerJour
+          ? React.createElement(
+              "button",
+              {
+                onClick: function () { onChangerJour(jourActuel - 1); },
+                disabled: jourActuel <= 1,
+                className: "w-8 h-8 rounded bg-neutral-800 text-white disabled:opacity-30"
+              },
+              "‹"
+            )
+          : null,
+        React.createElement("span", { className: "text-lg font-bold text-white w-6 text-center" }, jourActuel),
+        peutChangerJour
+          ? React.createElement(
+              "button",
+              {
+                onClick: function () { onChangerJour(jourActuel + 1); },
+                disabled: jourActuel >= nombreJours,
+                className: "w-8 h-8 rounded bg-neutral-800 text-white disabled:opacity-30"
+              },
+              "›"
+            )
+          : null,
+        React.createElement("span", { className: "text-xs text-neutral-500" }, "/ " + nombreJours)
+      ),
+
+      /* Bouton créneaux (super admin seulement). */
+      peutGererCreneaux
+        ? React.createElement(
+            "button",
+            {
+              onClick: onOuvrirCreneaux,
+              className: "text-xs px-3 py-1.5 bg-neutral-800 text-neutral-200 rounded-lg"
+            },
+            "Créneaux du jour"
+          )
+        : null
+    );
+  }
+
+  /* =========================================================================
+     SECTION 15 — ÉCRAN PRINCIPAL
   ========================================================================= */
   function EcranPrincipal({ prenom, role, onDeconnexion }) {
     const [bars, setBars] = useState([]);
     const [historique, setHistorique] = useState([]);
-    const [params] = useState(PARAMS_DEFAUT);
+    const [params, setParams] = useState(PARAMS_DEFAUT);
+    const [jourActuel, setJourActuel] = useState(1);
+    const [creneaux, setCreneaux] = useState({});
     const [fenetreAjoutBar, setFenetreAjoutBar] = useState(false);
     const [retourEnCours, setRetourEnCours] = useState(null);
+    const [fenetreCreneaux, setFenetreCreneaux] = useState(false);
 
     const peutGererBars = Droits.peutGererBars(role);
 
-    /* Abonnement temps réel : bars + historique. */
+    /* Abonnement temps réel : bars, historique, params, jour actif. */
     useEffect(function () {
       const refBars = Base.bars();
       const refHisto = Base.historiqueFuts();
+      const refParams = Base.params();
+      const refJour = Base.jourActuel();
 
-      function surBars(instantane) {
-        const valeur = instantane.val() || {};
-        const liste = Object.keys(valeur).map(function (idBar) {
-          return Object.assign({ id: idBar }, valeur[idBar]);
-        });
-        setBars(liste);
+      function surBars(s) {
+        const v = s.val() || {};
+        setBars(Object.keys(v).map(function (id) { return Object.assign({ id: id }, v[id]); }));
       }
-      function surHisto(instantane) {
-        const valeur = instantane.val() || {};
-        const liste = Object.keys(valeur).map(function (cle) {
-          return valeur[cle];
-        });
-        setHistorique(liste);
+      function surHisto(s) {
+        const v = s.val() || {};
+        setHistorique(Object.keys(v).map(function (cle) { return v[cle]; }));
+      }
+      function surParams(s) {
+        const v = s.val();
+        /* On fusionne avec les valeurs par défaut : si un paramètre manque
+           en base, on garde la valeur par défaut. */
+        if (v) setParams(Object.assign({}, PARAMS_DEFAUT, v));
+      }
+      function surJour(s) {
+        const v = s.val();
+        if (v) setJourActuel(v);
       }
 
       refBars.on("value", surBars);
       refHisto.on("value", surHisto);
+      refParams.on("value", surParams);
+      refJour.on("value", surJour);
 
       return function () {
         refBars.off("value", surBars);
         refHisto.off("value", surHisto);
+        refParams.off("value", surParams);
+        refJour.off("value", surJour);
       };
     }, []);
+
+    /* Abonnement aux créneaux : dépend du jour actif, donc recalculé à
+       chaque changement de jour. */
+    useEffect(function () {
+      const refCreneaux = Base.creneauxDuJour(jourActuel);
+      function surCreneaux(s) {
+        setCreneaux(s.val() || {});
+      }
+      refCreneaux.on("value", surCreneaux);
+      return function () {
+        refCreneaux.off("value", surCreneaux);
+      };
+    }, [jourActuel]);
 
     const stock = calculerStock(historique, params);
 
@@ -677,10 +980,20 @@
         .catch(function (e) { alert(e.message); });
     }
 
+    function changerJour(nouveauJour) {
+      if (nouveauJour < 1 || nouveauJour > params.nombreJours) return;
+      ActionsCreneaux.definirJourActuel(nouveauJour)
+        .catch(function (e) { alert(e.message); });
+    }
+
+    /* Nombre de créneaux du jour, pour l'affichage d'information. */
+    const nbCreneaux = Object.keys(creneaux).length;
+
     return React.createElement(
       "div",
       { className: "min-h-screen bg-black text-white" },
 
+      /* Bandeau du haut. */
       React.createElement(
         "div",
         { className: "p-4 border-b border-neutral-800 flex items-center justify-between" },
@@ -700,6 +1013,29 @@
         )
       ),
 
+      /* Bandeau du jour. */
+      React.createElement(BandeauJour, {
+        jourActuel: jourActuel,
+        nombreJours: params.nombreJours,
+        role: role,
+        onChangerJour: changerJour,
+        onOuvrirCreneaux: function () { setFenetreCreneaux(true); }
+      }),
+
+      /* Information sur les créneaux du jour. */
+      React.createElement(
+        "div",
+        { className: "px-3 py-2 text-xs " +
+            (nbCreneaux === 0 ? "text-amber-400" : "text-neutral-500") },
+        nbCreneaux === 0
+          ? "Aucun créneau défini pour le jour " + jourActuel +
+            (Droits.peutGererCreneaux(role)
+              ? " — utilisez « Créneaux du jour » pour les créer."
+              : " — le super admin doit les configurer.")
+          : nbCreneaux + " créneau(x) défini(s) pour le jour " + jourActuel
+      ),
+
+      /* Bandeau de stock. */
       React.createElement(
         "div",
         { className: "grid grid-cols-2 gap-2 p-3" },
@@ -717,6 +1053,7 @@
         )
       ),
 
+      /* Bouton d'ajout de bar (admin et plus). */
       peutGererBars
         ? React.createElement(
             "div",
@@ -732,6 +1069,7 @@
           )
         : null,
 
+      /* Liste des bars. */
       React.createElement(
         "div",
         { className: "p-3 space-y-3" },
@@ -762,6 +1100,7 @@
             })
       ),
 
+      /* Fenêtres. */
       fenetreAjoutBar
         ? React.createElement(FenetreAjoutBar, {
             onConfirmer: creerBar,
@@ -777,12 +1116,21 @@
             onConfirmer: confirmerRetour,
             onAnnuler: function () { setRetourEnCours(null); }
           })
+        : null,
+
+      fenetreCreneaux
+        ? React.createElement(FenetreCreneaux, {
+            jourActuel: jourActuel,
+            nombreJours: params.nombreJours,
+            creneaux: creneaux,
+            onFermer: function () { setFenetreCreneaux(false); }
+          })
         : null
     );
   }
 
   /* =========================================================================
-     SECTION 13 — COMPOSANT PRINCIPAL : L'APPLICATION
+     SECTION 16 — COMPOSANT PRINCIPAL : L'APPLICATION
   ========================================================================= */
   function Application() {
     const [etape, setEtape] = useState("demarrage");
@@ -802,15 +1150,10 @@
     function entrerDansApp(prenomSaisi) {
       setPrenom(prenomSaisi);
       setEtape("connexion");
-
       const refUtilisateur = Base.utilisateur(prenomSaisi);
-
-      /* On conserve le rôle existant si l'utilisateur revient (ne pas
-         rétrograder un admin à chaque reconnexion). */
       refUtilisateur.once("value").then(function (instantane) {
         const existant = instantane.val();
         const roleConserve = (existant && existant.role) ? existant.role : ROLES.VISITEUR;
-
         return refUtilisateur.update({
           prenom: prenomSaisi,
           derniereConnexion: Date.now(),
