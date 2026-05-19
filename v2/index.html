@@ -4,15 +4,17 @@
   GESTION DES FÛTS - BARS NOMADES - HELLFEST
   Application reconstruite proprement (remplace la version V16-V23 minifiée).
 
-  ÉTAT : MODULES 1 + 2 + 3A
+  ÉTAT : MODULES 1 + 2 + 3A + 3B-1
   Contenu actuel :
     - démarrage, Firebase, authentification anonyme             (module 1)
     - écran d'accueil (prénom), connexion utilisateur           (module 1)
     - gestion des BARS : créer, renommer, supprimer             (module 2)
     - gestion des FÛTS : attribuer, retourner, stock            (module 2)
     - gestion des JOURS et des CRÉNEAUX horaires                (module 3A)
+    - SAISIE DES VENTES cas simple + tableau bar x créneau      (module 3B-1)
 
-  Pas encore inclus : saisie des ventes (3B), planning, dashboard.
+  Pas encore inclus : PAD en panne / succession de PAD / clôture / annulation
+  (module 3B-2), planning, dashboard, exports.
 
   PRINCIPE D'ARCHITECTURE
     - Un seul fichier HTML. Code lisible, commenté en français, non minifié.
@@ -149,6 +151,19 @@
     /* Les créneaux d'un jour donné (numéro du jour). */
     creneauxDuJour: function (numeroJour) {
       return db.ref("sessions/" + ID_SESSION + "/creneaux/jour" + numeroJour);
+    },
+    /* ----- VENTES (module 3B) -----
+       Une "case de vente" = un bar + un créneau + un jour. Elle est rangée
+       sous ventes/jour<N>/<idBar>/<idCreneau>. Chaque case contient :
+         - cloturee : true/false (drapeau de clôture explicite — option A)
+         - saisies  : la liste des saisies PAD (clés uniques), ajoutée en 3B-2
+       En 3B-1 on gère le cas simple : une seule saisie, PAD OK. */
+    casesVentesDuJour: function (numeroJour) {
+      return db.ref("sessions/" + ID_SESSION + "/ventes/jour" + numeroJour);
+    },
+    caseVente: function (numeroJour, idBar, idCreneau) {
+      return db.ref("sessions/" + ID_SESSION + "/ventes/jour" + numeroJour +
+        "/" + idBar + "/" + idCreneau);
     }
   };
 
@@ -252,6 +267,10 @@
        (conforme au tableau gelé). */
     peutGererCreneaux: function (role) {
       return role === ROLES.SUPERADMIN;
+    },
+    /* Saisir les ventes : secrétaire et plus (module 3B). */
+    peutSaisirVentes: function (role) {
+      return role === ROLES.SECRETAIRE || role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
     }
   };
 
@@ -382,6 +401,77 @@
       });
     }
   };
+
+  /* =========================================================================
+     SECTION 8bis — ACTIONS SUR LES VENTES (module 3B-1)
+
+     RAPPEL DU MODÈLE (décision gelée)
+       Une "case de vente" = bar + créneau + jour.
+       Elle contient :
+         - cloturee : drapeau de clôture (option A). false par défaut.
+         - saisies  : liste de saisies PAD (clés uniques).
+       Chaque saisie PAD contient :
+         - montant, nbPintes, nbPichets, nbGobelets, commentaire
+         - padEnDefaut : true/false   (en 3B-1, toujours false)
+         - numeroPad, donneesPartielles : utilisés en 3B-2
+         - par, date : qui a saisi et quand (traçabilité)
+       Le TOTAL d'une case = somme des montants de toutes ses saisies.
+
+     3B-1 ne gère que le CAS SIMPLE : PAD OK, une saisie par case.
+     PAD en panne, succession de PAD, clôture, annulation : module 3B-2.
+  ========================================================================= */
+  const ActionsVentes = {
+
+    /* Enregistre une saisie de vente dans une case bar+créneau.
+       En 3B-1 : padEnDefaut est toujours false. */
+    saisir: function (numeroJour, idBar, idCreneau, donneesSaisie, prenomUtilisateur) {
+      const refCase = Base.caseVente(numeroJour, idBar, idCreneau);
+      /* On ajoute une saisie comme enfant unique sous "saisies". */
+      const refSaisies = refCase.child("saisies");
+      const nouvelleSaisie = {
+        montant: donneesSaisie.montant,
+        nbPintes: donneesSaisie.nbPintes,
+        nbPichets: donneesSaisie.nbPichets,
+        nbGobelets: donneesSaisie.nbGobelets,
+        commentaire: (donneesSaisie.commentaire || "").trim(),
+        padEnDefaut: false,
+        par: prenomUtilisateur,
+        date: Date.now()
+      };
+      return refSaisies.push(nouvelleSaisie);
+    }
+  };
+
+  /* Calcule le total (en euros) et le nombre de saisies d'une case de vente.
+     "uneCase" est l'objet stocké en base (ou null si rien saisi). */
+  function calculerTotalCase(uneCase) {
+    if (!uneCase || !uneCase.saisies) {
+      return { total: 0, nbSaisies: 0, cloturee: false };
+    }
+    let total = 0;
+    let nb = 0;
+    Object.keys(uneCase.saisies).forEach(function (cle) {
+      const s = uneCase.saisies[cle];
+      total = total + (s.montant || 0);
+      nb = nb + 1;
+    });
+    return {
+      total: total,
+      nbSaisies: nb,
+      cloturee: uneCase.cloturee === true
+    };
+  }
+
+  /* Détermine l'état d'affichage d'une case (pour la couleur du tableau).
+       "vide"     : rien saisi
+       "saisie"   : au moins une saisie, pas encore clôturée
+       "cloturee" : case clôturée */
+  function etatCase(uneCase) {
+    const info = calculerTotalCase(uneCase);
+    if (info.cloturee) return "cloturee";
+    if (info.nbSaisies > 0) return "saisie";
+    return "vide";
+  }
 
   /* =========================================================================
      SECTION 9 — CALCUL DU STOCK
@@ -884,6 +974,277 @@
   }
 
   /* =========================================================================
+     SECTION 14bis — FENÊTRE DE SAISIE D'UNE VENTE (module 3B-1)
+     S'ouvre quand on clique sur une case bar+créneau du tableau.
+     En 3B-1 : cas simple uniquement (PAD OK). On saisit montant + quantités.
+  ========================================================================= */
+  function FenetreSaisieVente({ bar, creneau, onConfirmer, onAnnuler }) {
+    /* Champs de saisie. On les garde en texte puis on convertit à la
+       validation : ça évite les soucis de champ vide. */
+    const [montant, setMontant] = useState("");
+    const [pintes, setPintes] = useState("");
+    const [pichets, setPichets] = useState("");
+    const [gobelets, setGobelets] = useState("");
+    const [commentaire, setCommentaire] = useState("");
+
+    /* Convertit un texte en nombre. Vide ou invalide => 0. */
+    function versNombre(texte) {
+      const n = parseFloat((texte || "").replace(",", "."));
+      return isNaN(n) ? 0 : n;
+    }
+    function versEntier(texte) {
+      const n = parseInt(texte, 10);
+      return isNaN(n) ? 0 : n;
+    }
+
+    function confirmer() {
+      const m = versNombre(montant);
+      const p = versEntier(pintes);
+      const pi = versEntier(pichets);
+      const g = versEntier(gobelets);
+
+      /* Garde-fou : on refuse une saisie totalement vide. */
+      if (m <= 0 && p <= 0 && pi <= 0 && g <= 0) {
+        alert("Saisissez au moins un montant ou une quantité.");
+        return;
+      }
+      /* Garde-fou : pas de nombres négatifs. */
+      if (m < 0 || p < 0 || pi < 0 || g < 0) {
+        alert("Les valeurs ne peuvent pas être négatives.");
+        return;
+      }
+
+      onConfirmer({
+        montant: m,
+        nbPintes: p,
+        nbPichets: pi,
+        nbGobelets: g,
+        commentaire: commentaire
+      });
+    }
+
+    /* Petit champ numérique réutilisable. */
+    function champNombre(libelle, valeur, onChange) {
+      return React.createElement(
+        "div",
+        null,
+        React.createElement("label", { className: "block text-xs text-neutral-400 mb-1" }, libelle),
+        React.createElement("input", {
+          type: "number",
+          inputMode: "decimal",
+          value: valeur,
+          onChange: function (e) { onChange(e.target.value); },
+          className: "w-full px-3 py-2 bg-neutral-800 rounded-lg text-white text-sm",
+          placeholder: "0"
+        })
+      );
+    }
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" },
+      React.createElement(
+        "div",
+        { className: "bg-neutral-900 rounded-2xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto" },
+
+        React.createElement("h3", { className: "text-xl font-bold text-white mb-1" }, "Saisie d'une vente"),
+        React.createElement("p", { className: "text-neutral-400 text-sm mb-4" },
+          bar.nom + " — " + creneau.libelle),
+
+        /* Montant en euros. */
+        React.createElement(
+          "div",
+          { className: "mb-3" },
+          React.createElement("label", { className: "block text-xs text-neutral-400 mb-1" }, "Montant total (€)"),
+          React.createElement("input", {
+            type: "number",
+            inputMode: "decimal",
+            value: montant,
+            onChange: function (e) { setMontant(e.target.value); },
+            className: "w-full px-3 py-2 bg-neutral-800 rounded-lg text-white",
+            placeholder: "0.00",
+            autoFocus: true
+          })
+        ),
+
+        /* Quantités. */
+        React.createElement(
+          "div",
+          { className: "grid grid-cols-3 gap-2 mb-3" },
+          champNombre("Pintes", pintes, setPintes),
+          champNombre("Pichets", pichets, setPichets),
+          champNombre("Gobelets", gobelets, setGobelets)
+        ),
+
+        /* Commentaire. */
+        React.createElement(
+          "div",
+          { className: "mb-5" },
+          React.createElement("label", { className: "block text-xs text-neutral-400 mb-1" }, "Commentaire (facultatif)"),
+          React.createElement("textarea", {
+            value: commentaire,
+            onChange: function (e) { setCommentaire(e.target.value); },
+            rows: 2,
+            className: "w-full px-3 py-2 bg-neutral-800 rounded-lg text-white text-sm"
+          })
+        ),
+
+        React.createElement(
+          "div",
+          { className: "flex gap-2" },
+          React.createElement(
+            "button",
+            { onClick: onAnnuler, className: "flex-1 py-3 bg-neutral-700 text-white rounded-lg" },
+            "Annuler"
+          ),
+          React.createElement(
+            "button",
+            { onClick: confirmer, className: "flex-1 py-3 bg-emerald-600 text-white rounded-lg font-medium" },
+            "Enregistrer"
+          )
+        )
+      )
+    );
+  }
+
+  /* =========================================================================
+     SECTION 14ter — ÉCRAN DE SAISIE DES VENTES (module 3B-1)
+     Tableau bar × créneau du jour actif. Chaque case montre l'état et le
+     total. Cliquer une case ouvre la fenêtre de saisie.
+  ========================================================================= */
+  function EcranVentes({ prenom, role, jourActuel, bars, creneaux, casesVentes, onFermer }) {
+    const [saisieEnCours, setSaisieEnCours] = useState(null);
+
+    const peutSaisir = Droits.peutSaisirVentes(role);
+
+    /* Liste des créneaux du jour, en tableau. */
+    const listeCreneaux = Object.keys(creneaux || {}).map(function (id) {
+      return { id: id, libelle: creneaux[id].libelle };
+    });
+
+    /* Récupère la case de vente pour un bar + créneau donné (ou null). */
+    function getCase(idBar, idCreneau) {
+      if (!casesVentes || !casesVentes[idBar]) return null;
+      return casesVentes[idBar][idCreneau] || null;
+    }
+
+    /* Couleur de fond d'une case selon son état. */
+    function couleurCase(uneCase) {
+      const etat = etatCase(uneCase);
+      if (etat === "cloturee") return "bg-neutral-700";
+      if (etat === "saisie") return "bg-emerald-800";
+      return "bg-neutral-900 border border-neutral-700";
+    }
+
+    /* Enregistre une saisie. */
+    function enregistrerSaisie(donnees) {
+      const s = saisieEnCours;
+      ActionsVentes.saisir(jourActuel, s.bar.id, s.creneau.id, donnees, prenom)
+        .then(function () { setSaisieEnCours(null); })
+        .catch(function (e) { alert(e.message); });
+    }
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black z-40 flex flex-col" },
+
+      /* En-tête. */
+      React.createElement(
+        "div",
+        { className: "p-4 border-b border-neutral-800 flex items-center justify-between" },
+        React.createElement(
+          "div",
+          null,
+          React.createElement("h2", { className: "text-lg font-bold text-emerald-400" }, "Saisie des ventes"),
+          React.createElement("p", { className: "text-xs text-neutral-500" }, "Jour " + jourActuel)
+        ),
+        React.createElement(
+          "button",
+          { onClick: onFermer, className: "text-xs px-3 py-1.5 bg-neutral-800 text-neutral-300 rounded-lg" },
+          "Fermer"
+        )
+      ),
+
+      /* Corps : tableau bar × créneau. */
+      React.createElement(
+        "div",
+        { className: "flex-1 overflow-auto p-3" },
+
+        listeCreneaux.length === 0
+          ? React.createElement("p", { className: "text-amber-400 text-sm text-center py-8" },
+              "Aucun créneau défini pour le jour " + jourActuel +
+              ". Le super admin doit les configurer avant de saisir des ventes.")
+          : bars.length === 0
+            ? React.createElement("p", { className: "text-neutral-500 text-sm text-center py-8" },
+                "Aucun bar. Un administrateur doit en créer.")
+            : React.createElement(
+                "div",
+                { className: "space-y-4" },
+                /* Un bloc par bar, contenant ses créneaux. */
+                bars.map(function (bar) {
+                  return React.createElement(
+                    "div",
+                    { key: bar.id, className: "rounded-xl border border-neutral-800 overflow-hidden" },
+                    React.createElement(
+                      "div",
+                      { className: "px-3 py-2 bg-neutral-900 font-bold text-white" },
+                      bar.nom +
+                        " (" + (bar.type === TYPE_BAR.BIERE ? "bière" : "cidre") + ")"
+                    ),
+                    React.createElement(
+                      "div",
+                      { className: "p-2 grid grid-cols-2 gap-2" },
+                      listeCreneaux.map(function (creneau) {
+                        const uneCase = getCase(bar.id, creneau.id);
+                        const info = calculerTotalCase(uneCase);
+                        const etat = etatCase(uneCase);
+
+                        return React.createElement(
+                          "button",
+                          {
+                            key: creneau.id,
+                            onClick: function () {
+                              if (!peutSaisir) return;
+                              if (etat === "cloturee") {
+                                alert("Ce créneau est clôturé.");
+                                return;
+                              }
+                              setSaisieEnCours({ bar: bar, creneau: creneau });
+                            },
+                            className: "text-left rounded-lg p-2 " + couleurCase(uneCase) +
+                              (peutSaisir && etat !== "cloturee" ? " active:opacity-80" : " cursor-default")
+                          },
+                          React.createElement("div", { className: "text-xs text-neutral-300" }, creneau.libelle),
+                          React.createElement("div", { className: "text-sm font-bold text-white mt-1" },
+                            info.total.toFixed(2) + " €"),
+                          React.createElement("div", { className: "text-xs mt-0.5 " +
+                              (etat === "cloturee" ? "text-neutral-400"
+                                : etat === "saisie" ? "text-emerald-200"
+                                : "text-neutral-500") },
+                            etat === "cloturee" ? "Clôturé"
+                              : etat === "saisie" ? (info.nbSaisies + " saisie(s)")
+                              : "À saisir")
+                        );
+                      })
+                    )
+                  );
+                })
+              )
+      ),
+
+      /* Fenêtre de saisie. */
+      saisieEnCours
+        ? React.createElement(FenetreSaisieVente, {
+            bar: saisieEnCours.bar,
+            creneau: saisieEnCours.creneau,
+            onConfirmer: enregistrerSaisie,
+            onAnnuler: function () { setSaisieEnCours(null); }
+          })
+        : null
+    );
+  }
+
+  /* =========================================================================
      SECTION 15 — ÉCRAN PRINCIPAL
   ========================================================================= */
   function EcranPrincipal({ prenom, role, onDeconnexion }) {
@@ -895,6 +1256,8 @@
     const [fenetreAjoutBar, setFenetreAjoutBar] = useState(false);
     const [retourEnCours, setRetourEnCours] = useState(null);
     const [fenetreCreneaux, setFenetreCreneaux] = useState(false);
+    const [casesVentes, setCasesVentes] = useState({});
+    const [ecranVentes, setEcranVentes] = useState(false);
 
     const peutGererBars = Droits.peutGererBars(role);
 
@@ -947,6 +1310,18 @@
       refCreneaux.on("value", surCreneaux);
       return function () {
         refCreneaux.off("value", surCreneaux);
+      };
+    }, [jourActuel]);
+
+    /* Abonnement aux cases de ventes du jour actif (module 3B). */
+    useEffect(function () {
+      const refVentes = Base.casesVentesDuJour(jourActuel);
+      function surVentes(s) {
+        setCasesVentes(s.val() || {});
+      }
+      refVentes.on("value", surVentes);
+      return function () {
+        refVentes.off("value", surVentes);
       };
     }, [jourActuel]);
 
@@ -1069,6 +1444,22 @@
           )
         : null,
 
+      /* Bouton Saisie des ventes (secrétaire et plus). */
+      Droits.peutSaisirVentes(role)
+        ? React.createElement(
+            "div",
+            { className: "px-3 pb-2" },
+            React.createElement(
+              "button",
+              {
+                onClick: function () { setEcranVentes(true); },
+                className: "w-full py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium"
+              },
+              "Saisie des ventes"
+            )
+          )
+        : null,
+
       /* Liste des bars. */
       React.createElement(
         "div",
@@ -1124,6 +1515,19 @@
             nombreJours: params.nombreJours,
             creneaux: creneaux,
             onFermer: function () { setFenetreCreneaux(false); }
+          })
+        : null,
+
+      /* Écran de saisie des ventes (plein écran). */
+      ecranVentes
+        ? React.createElement(EcranVentes, {
+            prenom: prenom,
+            role: role,
+            jourActuel: jourActuel,
+            bars: bars,
+            creneaux: creneaux,
+            casesVentes: casesVentes,
+            onFermer: function () { setEcranVentes(false); }
           })
         : null
     );
