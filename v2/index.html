@@ -4,17 +4,18 @@
   GESTION DES FÛTS - BARS NOMADES - HELLFEST
   Application reconstruite proprement (remplace la version V16-V23 minifiée).
 
-  ÉTAT : MODULES 1 + 2 + 3A + 3B-1
+  ÉTAT : MODULES 1 + 2 + 3A + 3B (complet)
   Contenu actuel :
     - démarrage, Firebase, authentification anonyme             (module 1)
     - écran d'accueil (prénom), connexion utilisateur           (module 1)
     - gestion des BARS : créer, renommer, supprimer             (module 2)
     - gestion des FÛTS : attribuer, retourner, stock            (module 2)
     - gestion des JOURS et des CRÉNEAUX horaires                (module 3A)
-    - SAISIE DES VENTES cas simple + tableau bar x créneau      (module 3B-1)
+    - SAISIE DES VENTES : tableau bar x créneau, saisie,
+      PAD en panne, succession de PAD, clôture, annulation      (module 3B)
 
-  Pas encore inclus : PAD en panne / succession de PAD / clôture / annulation
-  (module 3B-2), planning, dashboard, exports.
+  Pas encore inclus : planning bénévoles, dashboard, exports, plan,
+  règles Firebase définitives.
 
   PRINCIPE D'ARCHITECTURE
     - Un seul fichier HTML. Code lisible, commenté en français, non minifié.
@@ -403,74 +404,120 @@
   };
 
   /* =========================================================================
-     SECTION 8bis — ACTIONS SUR LES VENTES (module 3B-1)
+     SECTION 8bis — ACTIONS SUR LES VENTES (modules 3B-1 et 3B-2)
 
-     RAPPEL DU MODÈLE (décision gelée)
+     RAPPEL DU MODÈLE (décisions gelées)
        Une "case de vente" = bar + créneau + jour.
        Elle contient :
          - cloturee : drapeau de clôture (option A). false par défaut.
          - saisies  : liste de saisies PAD (clés uniques).
        Chaque saisie PAD contient :
          - montant, nbPintes, nbPichets, nbGobelets, commentaire
-         - padEnDefaut : true/false   (en 3B-1, toujours false)
-         - numeroPad, donneesPartielles : utilisés en 3B-2
+         - padEnDefaut : true si le PAD était en panne
+         - numeroPad : obligatoire SI padEnDefaut (sinon vide)
+         - donneesPartielles : true si PAD en panne mais données récupérées
+                               en partie ; false = données totalement perdues
          - par, date : qui a saisi et quand (traçabilité)
-       Le TOTAL d'une case = somme des montants de toutes ses saisies.
+         - annulee, annuleePar, annuleeLe : renseignés si la saisie est
+           annulée par un admin. La saisie n'est jamais effacée : on la
+           barre. Son montant ne compte plus dans le total.
 
-     3B-1 ne gère que le CAS SIMPLE : PAD OK, une saisie par case.
-     PAD en panne, succession de PAD, clôture, annulation : module 3B-2.
+     RÈGLES MÉTIER (gelées)
+       - PAD en panne sans données partielles -> montant = 0, données perdues.
+       - Clôture : secrétaire et plus. Réouverture : admin et plus.
+       - Annulation : saisie par saisie (pas toute la case). Si on annule une
+         saisie dans une case clôturée, la case se déclôture automatiquement.
   ========================================================================= */
   const ActionsVentes = {
 
     /* Enregistre une saisie de vente dans une case bar+créneau.
-       En 3B-1 : padEnDefaut est toujours false. */
+       donneesSaisie peut contenir : montant, nbPintes, nbPichets,
+       nbGobelets, commentaire, padEnDefaut, numeroPad, donneesPartielles. */
     saisir: function (numeroJour, idBar, idCreneau, donneesSaisie, prenomUtilisateur) {
-      const refCase = Base.caseVente(numeroJour, idBar, idCreneau);
-      /* On ajoute une saisie comme enfant unique sous "saisies". */
-      const refSaisies = refCase.child("saisies");
+      const refSaisies = Base.caseVente(numeroJour, idBar, idCreneau).child("saisies");
       const nouvelleSaisie = {
-        montant: donneesSaisie.montant,
-        nbPintes: donneesSaisie.nbPintes,
-        nbPichets: donneesSaisie.nbPichets,
-        nbGobelets: donneesSaisie.nbGobelets,
+        montant: donneesSaisie.montant || 0,
+        nbPintes: donneesSaisie.nbPintes || 0,
+        nbPichets: donneesSaisie.nbPichets || 0,
+        nbGobelets: donneesSaisie.nbGobelets || 0,
         commentaire: (donneesSaisie.commentaire || "").trim(),
-        padEnDefaut: false,
+        padEnDefaut: donneesSaisie.padEnDefaut === true,
+        numeroPad: (donneesSaisie.numeroPad || "").trim(),
+        donneesPartielles: donneesSaisie.donneesPartielles === true,
         par: prenomUtilisateur,
         date: Date.now()
       };
       return refSaisies.push(nouvelleSaisie);
+    },
+
+    /* Clôture une case (drapeau cloturee = true). */
+    cloturer: function (numeroJour, idBar, idCreneau) {
+      return Base.caseVente(numeroJour, idBar, idCreneau).child("cloturee").set(true);
+    },
+
+    /* Rouvre une case clôturée (drapeau cloturee = false). */
+    rouvrir: function (numeroJour, idBar, idCreneau) {
+      return Base.caseVente(numeroJour, idBar, idCreneau).child("cloturee").set(false);
+    },
+
+    /* Annule UNE saisie précise. La saisie n'est pas effacée : on la marque
+       annulée. Si la case était clôturée, on la déclôture pour permettre
+       la correction. */
+    annulerSaisie: function (numeroJour, idBar, idCreneau, idSaisie, prenomUtilisateur) {
+      const refCase = Base.caseVente(numeroJour, idBar, idCreneau);
+      return refCase.child("saisies/" + idSaisie).update({
+        annulee: true,
+        annuleePar: prenomUtilisateur,
+        annuleeLe: Date.now()
+      }).then(function () {
+        /* Déclôture automatique : la correction doit être possible. */
+        return refCase.child("cloturee").set(false);
+      });
     }
   };
 
-  /* Calcule le total (en euros) et le nombre de saisies d'une case de vente.
+  /* Calcule le total (en euros), le nombre de saisies actives, etc.
+     Les saisies ANNULÉES ne comptent pas dans le total ni dans nbSaisies.
      "uneCase" est l'objet stocké en base (ou null si rien saisi). */
   function calculerTotalCase(uneCase) {
     if (!uneCase || !uneCase.saisies) {
-      return { total: 0, nbSaisies: 0, cloturee: false };
+      return { total: 0, nbSaisies: 0, nbAnnulees: 0, aIncident: false, cloturee: false };
     }
     let total = 0;
     let nb = 0;
+    let nbAnnulees = 0;
+    let aIncident = false;
     Object.keys(uneCase.saisies).forEach(function (cle) {
       const s = uneCase.saisies[cle];
+      if (s.annulee === true) {
+        nbAnnulees = nbAnnulees + 1;
+        return;          /* une saisie annulée ne compte pas */
+      }
       total = total + (s.montant || 0);
       nb = nb + 1;
+      /* "incident" = au moins une saisie active avec PAD en panne. */
+      if (s.padEnDefaut === true) aIncident = true;
     });
     return {
       total: total,
       nbSaisies: nb,
+      nbAnnulees: nbAnnulees,
+      aIncident: aIncident,
       cloturee: uneCase.cloturee === true
     };
   }
 
   /* Détermine l'état d'affichage d'une case (pour la couleur du tableau).
-       "vide"     : rien saisi
-       "saisie"   : au moins une saisie, pas encore clôturée
+       "vide"     : aucune saisie active
+       "incident" : au moins une saisie active avec PAD en panne, non clôturée
+       "saisie"   : au moins une saisie active, sans incident, non clôturée
        "cloturee" : case clôturée */
   function etatCase(uneCase) {
     const info = calculerTotalCase(uneCase);
     if (info.cloturee) return "cloturee";
-    if (info.nbSaisies > 0) return "saisie";
-    return "vide";
+    if (info.nbSaisies === 0) return "vide";
+    if (info.aIncident) return "incident";
+    return "saisie";
   }
 
   /* =========================================================================
@@ -979,15 +1026,18 @@
      En 3B-1 : cas simple uniquement (PAD OK). On saisit montant + quantités.
   ========================================================================= */
   function FenetreSaisieVente({ bar, creneau, onConfirmer, onAnnuler }) {
-    /* Champs de saisie. On les garde en texte puis on convertit à la
-       validation : ça évite les soucis de champ vide. */
+    /* Champs de saisie. Gardés en texte, convertis à la validation. */
     const [montant, setMontant] = useState("");
     const [pintes, setPintes] = useState("");
     const [pichets, setPichets] = useState("");
     const [gobelets, setGobelets] = useState("");
     const [commentaire, setCommentaire] = useState("");
 
-    /* Convertit un texte en nombre. Vide ou invalide => 0. */
+    /* État PAD (module 3B-2). */
+    const [padEnDefaut, setPadEnDefaut] = useState(false);
+    const [numeroPad, setNumeroPad] = useState("");
+    const [donneesPartielles, setDonneesPartielles] = useState(false);
+
     function versNombre(texte) {
       const n = parseFloat((texte || "").replace(",", "."));
       return isNaN(n) ? 0 : n;
@@ -1003,27 +1053,57 @@
       const pi = versEntier(pichets);
       const g = versEntier(gobelets);
 
-      /* Garde-fou : on refuse une saisie totalement vide. */
-      if (m <= 0 && p <= 0 && pi <= 0 && g <= 0) {
-        alert("Saisissez au moins un montant ou une quantité.");
-        return;
-      }
-      /* Garde-fou : pas de nombres négatifs. */
+      /* Pas de nombres négatifs. */
       if (m < 0 || p < 0 || pi < 0 || g < 0) {
         alert("Les valeurs ne peuvent pas être négatives.");
         return;
       }
 
+      if (padEnDefaut) {
+        /* PAD en panne : le numéro de PAD est obligatoire. */
+        if (!numeroPad.trim()) {
+          alert("Indiquez le numéro du PAD en panne.");
+          return;
+        }
+        /* Si données partielles : il faut au moins une valeur récupérée. */
+        if (donneesPartielles && m <= 0 && p <= 0 && pi <= 0 && g <= 0) {
+          alert("Données partielles : saisissez au moins une valeur récupérée.");
+          return;
+        }
+        /* Si données NON partielles (perdues) : on force tout à zéro,
+           on ne garde que le numéro de PAD et le commentaire. */
+        const donneesPerdues = !donneesPartielles;
+        onConfirmer({
+          montant: donneesPerdues ? 0 : m,
+          nbPintes: donneesPerdues ? 0 : p,
+          nbPichets: donneesPerdues ? 0 : pi,
+          nbGobelets: donneesPerdues ? 0 : g,
+          commentaire: commentaire,
+          padEnDefaut: true,
+          numeroPad: numeroPad,
+          donneesPartielles: donneesPartielles
+        });
+        return;
+      }
+
+      /* Cas normal (PAD OK) : au moins une valeur. */
+      if (m <= 0 && p <= 0 && pi <= 0 && g <= 0) {
+        alert("Saisissez au moins un montant ou une quantité.");
+        return;
+      }
       onConfirmer({
         montant: m,
         nbPintes: p,
         nbPichets: pi,
         nbGobelets: g,
-        commentaire: commentaire
+        commentaire: commentaire,
+        padEnDefaut: false,
+        numeroPad: "",
+        donneesPartielles: false
       });
     }
 
-    /* Petit champ numérique réutilisable. */
+    /* Champ numérique réutilisable. */
     function champNombre(libelle, valeur, onChange) {
       return React.createElement(
         "div",
@@ -1040,6 +1120,12 @@
       );
     }
 
+    /* Faut-il afficher les champs montant/quantités ?
+       - Cas normal : oui.
+       - PAD en panne + données partielles : oui (on saisit ce qu'on a).
+       - PAD en panne + données perdues : non (rien à saisir). */
+    const afficherChampsChiffres = !padEnDefaut || donneesPartielles;
+
     return React.createElement(
       "div",
       { className: "fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" },
@@ -1051,30 +1137,77 @@
         React.createElement("p", { className: "text-neutral-400 text-sm mb-4" },
           bar.nom + " — " + creneau.libelle),
 
-        /* Montant en euros. */
+        /* Case PAD en panne. */
         React.createElement(
-          "div",
-          { className: "mb-3" },
-          React.createElement("label", { className: "block text-xs text-neutral-400 mb-1" }, "Montant total (€)"),
+          "label",
+          { className: "flex items-center gap-2 mb-3 p-2 bg-neutral-800 rounded-lg cursor-pointer" },
           React.createElement("input", {
-            type: "number",
-            inputMode: "decimal",
-            value: montant,
-            onChange: function (e) { setMontant(e.target.value); },
-            className: "w-full px-3 py-2 bg-neutral-800 rounded-lg text-white",
-            placeholder: "0.00",
-            autoFocus: true
-          })
+            type: "checkbox",
+            checked: padEnDefaut,
+            onChange: function (e) { setPadEnDefaut(e.target.checked); }
+          }),
+          React.createElement("span", { className: "text-sm text-amber-300" }, "Le PAD était en panne")
         ),
 
-        /* Quantités. */
-        React.createElement(
-          "div",
-          { className: "grid grid-cols-3 gap-2 mb-3" },
-          champNombre("Pintes", pintes, setPintes),
-          champNombre("Pichets", pichets, setPichets),
-          champNombre("Gobelets", gobelets, setGobelets)
-        ),
+        /* Champs spécifiques au PAD en panne. */
+        padEnDefaut
+          ? React.createElement(
+              "div",
+              { className: "mb-3 p-3 bg-amber-950/40 border border-amber-800 rounded-lg" },
+              React.createElement("label", { className: "block text-xs text-amber-300 mb-1" },
+                "Numéro du PAD en panne (obligatoire)"),
+              React.createElement("input", {
+                type: "text",
+                value: numeroPad,
+                onChange: function (e) { setNumeroPad(e.target.value); },
+                className: "w-full px-3 py-2 bg-neutral-800 rounded-lg text-white text-sm mb-2",
+                placeholder: "Ex : PAD 4"
+              }),
+              React.createElement(
+                "label",
+                { className: "flex items-center gap-2 cursor-pointer" },
+                React.createElement("input", {
+                  type: "checkbox",
+                  checked: donneesPartielles,
+                  onChange: function (e) { setDonneesPartielles(e.target.checked); }
+                }),
+                React.createElement("span", { className: "text-xs text-amber-200" },
+                  "J'ai pu récupérer une partie des données")
+              ),
+              !donneesPartielles
+                ? React.createElement("p", { className: "text-xs text-amber-400 mt-2" },
+                    "Données perdues : aucun montant ne sera enregistré pour ce PAD.")
+                : null
+            )
+          : null,
+
+        /* Montant + quantités : affichés selon le cas. */
+        afficherChampsChiffres
+          ? React.createElement(
+              "div",
+              null,
+              React.createElement(
+                "div",
+                { className: "mb-3" },
+                React.createElement("label", { className: "block text-xs text-neutral-400 mb-1" }, "Montant total (€)"),
+                React.createElement("input", {
+                  type: "number",
+                  inputMode: "decimal",
+                  value: montant,
+                  onChange: function (e) { setMontant(e.target.value); },
+                  className: "w-full px-3 py-2 bg-neutral-800 rounded-lg text-white",
+                  placeholder: "0.00"
+                })
+              ),
+              React.createElement(
+                "div",
+                { className: "grid grid-cols-3 gap-2 mb-3" },
+                champNombre("Pintes", pintes, setPintes),
+                champNombre("Pichets", pichets, setPichets),
+                champNombre("Gobelets", gobelets, setGobelets)
+              )
+            )
+          : null,
 
         /* Commentaire. */
         React.createElement(
@@ -1112,17 +1245,185 @@
      Tableau bar × créneau du jour actif. Chaque case montre l'état et le
      total. Cliquer une case ouvre la fenêtre de saisie.
   ========================================================================= */
+  /* ---- Fenêtre de DÉTAIL d'une case (module 3B-2) ----
+     S'ouvre quand on clique une case du tableau. Montre toutes les saisies
+     de la case, et propose : ajouter une saisie, clôturer/rouvrir,
+     annuler une saisie. */
+  function FenetreDetailCase({ bar, creneau, uneCase, role, jourActuel, prenom, onDemanderSaisie, onFermer }) {
+    const info = calculerTotalCase(uneCase);
+    const peutSaisir = Droits.peutSaisirVentes(role);
+    /* Réouverture et annulation : admin et plus (décision gelée). */
+    const peutAdministrer = role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
+
+    /* Liste des saisies de la case, en tableau. */
+    const saisies = (uneCase && uneCase.saisies) ? uneCase.saisies : {};
+    const listeSaisies = Object.keys(saisies).map(function (id) {
+      return Object.assign({ id: id }, saisies[id]);
+    });
+
+    function cloturer() {
+      if (!confirm("Clôturer ce créneau ? Plus aucune saisie ne sera possible.")) return;
+      ActionsVentes.cloturer(jourActuel, bar.id, creneau.id)
+        .catch(function (e) { alert(e.message); });
+    }
+    function rouvrir() {
+      ActionsVentes.rouvrir(jourActuel, bar.id, creneau.id)
+        .catch(function (e) { alert(e.message); });
+    }
+    function annuler(idSaisie) {
+      if (!confirm("Annuler cette saisie ? Elle restera visible, barrée.")) return;
+      ActionsVentes.annulerSaisie(jourActuel, bar.id, creneau.id, idSaisie, prenom)
+        .catch(function (e) { alert(e.message); });
+    }
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" },
+      React.createElement(
+        "div",
+        { className: "bg-neutral-900 rounded-2xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto" },
+
+        React.createElement("h3", { className: "text-xl font-bold text-white mb-1" },
+          bar.nom + " — " + creneau.libelle),
+        React.createElement("p", { className: "text-emerald-300 text-sm mb-1" },
+          "Total : " + info.total.toFixed(2) + " €"),
+        info.cloturee
+          ? React.createElement("p", { className: "text-neutral-400 text-xs mb-3" }, "Créneau clôturé")
+          : React.createElement("p", { className: "text-neutral-500 text-xs mb-3" }, "Créneau ouvert"),
+
+        /* Liste des saisies. */
+        listeSaisies.length === 0
+          ? React.createElement("p", { className: "text-neutral-500 text-sm mb-4" }, "Aucune saisie pour ce créneau.")
+          : React.createElement(
+              "div",
+              { className: "space-y-2 mb-4" },
+              listeSaisies.map(function (s) {
+                const estAnnulee = s.annulee === true;
+                return React.createElement(
+                  "div",
+                  {
+                    key: s.id,
+                    className: "rounded-lg p-2 text-sm " +
+                      (estAnnulee ? "bg-red-950/40 border border-red-900" : "bg-neutral-800")
+                  },
+                  React.createElement(
+                    "div",
+                    { className: "flex items-center justify-between" },
+                    React.createElement(
+                      "span",
+                      { className: (estAnnulee ? "line-through text-neutral-500" : "text-white") + " font-bold" },
+                      (s.montant || 0).toFixed(2) + " €"
+                    ),
+                    /* Bouton annuler : admin et plus, et seulement si pas
+                       déjà annulée. */
+                    (peutAdministrer && !estAnnulee)
+                      ? React.createElement(
+                          "button",
+                          {
+                            onClick: function () { annuler(s.id); },
+                            className: "text-xs px-2 py-1 bg-red-900 text-white rounded"
+                          },
+                          "Annuler"
+                        )
+                      : null
+                  ),
+                  React.createElement(
+                    "div",
+                    { className: "text-xs text-neutral-400 mt-0.5 " + (estAnnulee ? "line-through" : "") },
+                    (s.nbPintes || 0) + " pintes, " + (s.nbPichets || 0) + " pichets, " +
+                      (s.nbGobelets || 0) + " gobelets"
+                  ),
+                  /* Mention PAD en panne. */
+                  s.padEnDefaut
+                    ? React.createElement(
+                        "div",
+                        { className: "text-xs text-amber-400 mt-0.5" },
+                        "PAD en panne : " + (s.numeroPad || "?") +
+                          (s.donneesPartielles ? " — données partielles" : " — données perdues")
+                      )
+                    : null,
+                  s.commentaire
+                    ? React.createElement("div", { className: "text-xs text-neutral-500 mt-0.5 italic" },
+                        "« " + s.commentaire + " »")
+                    : null,
+                  React.createElement("div", { className: "text-xs text-neutral-600 mt-0.5" },
+                    "Saisi par " + (s.par || "?")),
+                  estAnnulee
+                    ? React.createElement("div", { className: "text-xs text-red-400 mt-0.5" },
+                        "Annulée par " + (s.annuleePar || "?"))
+                    : null
+                );
+              })
+            ),
+
+        /* Boutons d'action. */
+        React.createElement(
+          "div",
+          { className: "space-y-2" },
+
+          /* Ajouter une saisie : possible si la case n'est pas clôturée. */
+          (peutSaisir && !info.cloturee)
+            ? React.createElement(
+                "button",
+                {
+                  onClick: function () { onDemanderSaisie(bar, creneau); },
+                  className: "w-full py-3 bg-emerald-600 text-white rounded-lg font-medium"
+                },
+                "+ Ajouter une saisie"
+              )
+            : null,
+
+          /* Clôturer : si pas clôturée, secrétaire et plus. */
+          (peutSaisir && !info.cloturee && listeSaisies.length > 0)
+            ? React.createElement(
+                "button",
+                {
+                  onClick: cloturer,
+                  className: "w-full py-3 bg-neutral-700 text-white rounded-lg font-medium"
+                },
+                "Clôturer ce créneau"
+              )
+            : null,
+
+          /* Rouvrir : si clôturée, admin et plus seulement. */
+          (info.cloturee && peutAdministrer)
+            ? React.createElement(
+                "button",
+                {
+                  onClick: rouvrir,
+                  className: "w-full py-3 bg-amber-800 text-white rounded-lg font-medium"
+                },
+                "Rouvrir ce créneau"
+              )
+            : null,
+
+          /* Message si clôturé et pas le droit de rouvrir. */
+          (info.cloturee && !peutAdministrer)
+            ? React.createElement("p", { className: "text-xs text-neutral-500 text-center" },
+                "Créneau clôturé. Seul un administrateur peut le rouvrir.")
+            : null,
+
+          React.createElement(
+            "button",
+            { onClick: onFermer, className: "w-full py-3 bg-neutral-800 text-neutral-300 rounded-lg" },
+            "Fermer"
+          )
+        )
+      )
+    );
+  }
+
   function EcranVentes({ prenom, role, jourActuel, bars, creneaux, casesVentes, onFermer }) {
+    /* Quelle case est ouverte en détail, et quelle saisie est en cours. */
+    const [detailCase, setDetailCase] = useState(null);
     const [saisieEnCours, setSaisieEnCours] = useState(null);
 
     const peutSaisir = Droits.peutSaisirVentes(role);
 
-    /* Liste des créneaux du jour, en tableau. */
     const listeCreneaux = Object.keys(creneaux || {}).map(function (id) {
       return { id: id, libelle: creneaux[id].libelle };
     });
 
-    /* Récupère la case de vente pour un bar + créneau donné (ou null). */
     function getCase(idBar, idCreneau) {
       if (!casesVentes || !casesVentes[idBar]) return null;
       return casesVentes[idBar][idCreneau] || null;
@@ -1132,17 +1433,24 @@
     function couleurCase(uneCase) {
       const etat = etatCase(uneCase);
       if (etat === "cloturee") return "bg-neutral-700";
+      if (etat === "incident") return "bg-amber-800";
       if (etat === "saisie") return "bg-emerald-800";
       return "bg-neutral-900 border border-neutral-700";
     }
 
-    /* Enregistre une saisie. */
+    /* Enregistre une saisie (appelée depuis la fenêtre de saisie). */
     function enregistrerSaisie(donnees) {
       const s = saisieEnCours;
       ActionsVentes.saisir(jourActuel, s.bar.id, s.creneau.id, donnees, prenom)
         .then(function () { setSaisieEnCours(null); })
         .catch(function (e) { alert(e.message); });
     }
+
+    /* La case actuellement affichée en détail, recalculée à chaque rendu
+       pour rester à jour avec la base. */
+    const caseDetailActuelle = detailCase
+      ? getCase(detailCase.bar.id, detailCase.creneau.id)
+      : null;
 
     return React.createElement(
       "div",
@@ -1165,6 +1473,16 @@
         )
       ),
 
+      /* Légende des couleurs. */
+      React.createElement(
+        "div",
+        { className: "px-3 py-2 flex flex-wrap gap-3 text-xs text-neutral-400 border-b border-neutral-800" },
+        React.createElement("span", null, "Gris foncé = à saisir"),
+        React.createElement("span", { className: "text-emerald-300" }, "Vert = saisi"),
+        React.createElement("span", { className: "text-amber-300" }, "Orange = incident PAD"),
+        React.createElement("span", { className: "text-neutral-300" }, "Gris clair = clôturé")
+      ),
+
       /* Corps : tableau bar × créneau. */
       React.createElement(
         "div",
@@ -1180,7 +1498,6 @@
             : React.createElement(
                 "div",
                 { className: "space-y-4" },
-                /* Un bloc par bar, contenant ses créneaux. */
                 bars.map(function (bar) {
                   return React.createElement(
                     "div",
@@ -1188,8 +1505,7 @@
                     React.createElement(
                       "div",
                       { className: "px-3 py-2 bg-neutral-900 font-bold text-white" },
-                      bar.nom +
-                        " (" + (bar.type === TYPE_BAR.BIERE ? "bière" : "cidre") + ")"
+                      bar.nom + " (" + (bar.type === TYPE_BAR.BIERE ? "bière" : "cidre") + ")"
                     ),
                     React.createElement(
                       "div",
@@ -1204,24 +1520,21 @@
                           {
                             key: creneau.id,
                             onClick: function () {
-                              if (!peutSaisir) return;
-                              if (etat === "cloturee") {
-                                alert("Ce créneau est clôturé.");
-                                return;
-                              }
-                              setSaisieEnCours({ bar: bar, creneau: creneau });
+                              /* Cliquer une case ouvre son DÉTAIL. */
+                              setDetailCase({ bar: bar, creneau: creneau });
                             },
-                            className: "text-left rounded-lg p-2 " + couleurCase(uneCase) +
-                              (peutSaisir && etat !== "cloturee" ? " active:opacity-80" : " cursor-default")
+                            className: "text-left rounded-lg p-2 active:opacity-80 " + couleurCase(uneCase)
                           },
                           React.createElement("div", { className: "text-xs text-neutral-300" }, creneau.libelle),
                           React.createElement("div", { className: "text-sm font-bold text-white mt-1" },
                             info.total.toFixed(2) + " €"),
                           React.createElement("div", { className: "text-xs mt-0.5 " +
                               (etat === "cloturee" ? "text-neutral-400"
+                                : etat === "incident" ? "text-amber-200"
                                 : etat === "saisie" ? "text-emerald-200"
                                 : "text-neutral-500") },
                             etat === "cloturee" ? "Clôturé"
+                              : etat === "incident" ? ("Incident PAD (" + info.nbSaisies + ")")
                               : etat === "saisie" ? (info.nbSaisies + " saisie(s)")
                               : "À saisir")
                         );
@@ -1232,7 +1545,23 @@
               )
       ),
 
-      /* Fenêtre de saisie. */
+      /* Fenêtre de détail de case. */
+      detailCase
+        ? React.createElement(FenetreDetailCase, {
+            bar: detailCase.bar,
+            creneau: detailCase.creneau,
+            uneCase: caseDetailActuelle,
+            role: role,
+            jourActuel: jourActuel,
+            prenom: prenom,
+            onDemanderSaisie: function (bar, creneau) {
+              setSaisieEnCours({ bar: bar, creneau: creneau });
+            },
+            onFermer: function () { setDetailCase(null); }
+          })
+        : null,
+
+      /* Fenêtre de saisie d'une vente. */
       saisieEnCours
         ? React.createElement(FenetreSaisieVente, {
             bar: saisieEnCours.bar,
