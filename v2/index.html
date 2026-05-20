@@ -4,7 +4,7 @@
   GESTION DES FÛTS - BARS NOMADES - HELLFEST
   Application reconstruite proprement (remplace la version V16-V23 minifiée).
 
-  ÉTAT : MODULES 1 + 2 + 3A + 3B (complet) + PARAMÈTRES + PLANNING + DASHBOARD-1
+  ÉTAT : MODULES 1 + 2 + 3A + 3B (complet) + PARAMÈTRES + PLANNING + DASHBOARD (complet)
   Contenu actuel :
     - démarrage, Firebase, authentification anonyme             (module 1)
     - écran d'accueil (prénom), connexion utilisateur           (module 1)
@@ -20,12 +20,12 @@
     - PLANNING BÉNÉVOLES : tableau bar x créneau, 3 postes
       (vendeur, serveur, runner), saisie texte libre, détection
       bloquante des conflits d'affectation. Secrétaire et plus. (module planning)
-    - DASHBOARD : onglets Vue d'ensemble + Par bar, bascule de
-      granularité (Tout/Jour/Comparatif), contrôle de cohérence.
-      Admin et plus.                                            (dashboard-1)
+    - DASHBOARD : onglets Vue d'ensemble / Par bar / Par bénévole /
+      Anomalies, bascule de granularité, contrôle de cohérence,
+      export Excel (.xlsx) à la demande. Admin et plus.         (module dashboard)
 
-  Pas encore inclus : onglets Par bénévole + Anomalies, export Excel
-  (dashboard-2), plan, règles Firebase définitives.
+  Pas encore inclus : gestion des utilisateurs et promotions de rôle,
+  plan du festival, règles Firebase définitives, doc technique.
 
   PRINCIPE D'ARCHITECTURE
     - Un seul fichier HTML. Code lisible, commenté en français, non minifié.
@@ -56,6 +56,8 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <!-- SheetJS pour l'export Excel (module dashboard). -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
   <style>
     * { -webkit-tap-highlight-color: transparent; }
@@ -891,6 +893,131 @@
       });
     });
     return n;
+  }
+
+  /* Agrège les shifts par bénévole, sur TOUT le festival.
+     "planningTousJours" = { jour1: { idBar: { idCreneau: shift } }, ... }
+     Renvoie un tableau d'objets { nom, nbVendeur, nbServeur, nbRunner,
+     nbTotal }, trié par nbTotal décroissant.
+     Les noms sont comparés en TEXTE EXACT (cf. décision champ libre). */
+  function agregerBenevoles(planningTousJours) {
+    /* compteur[nom] = { nbVendeur, nbServeur, nbRunner } */
+    const compteur = {};
+    function ajouter(nom, poste) {
+      const cle = (nom || "").trim();
+      if (!cle) return;
+      if (!compteur[cle]) compteur[cle] = { nbVendeur: 0, nbServeur: 0, nbRunner: 0 };
+      compteur[cle][poste] = compteur[cle][poste] + 1;
+    }
+    Object.keys(planningTousJours || {}).forEach(function (cleJour) {
+      if (!cleJour.match(/^jour\d+$/)) return;
+      const barresDuJour = planningTousJours[cleJour] || {};
+      Object.keys(barresDuJour).forEach(function (idBar) {
+        const creneauxDuBar = barresDuJour[idBar] || {};
+        Object.keys(creneauxDuBar).forEach(function (idCreneau) {
+          const shift = creneauxDuBar[idCreneau];
+          if (!shift) return;
+          ajouter(shift.vendeur, "nbVendeur");
+          ajouter(shift.serveur, "nbServeur");
+          ajouter(shift.runner, "nbRunner");
+        });
+      });
+    });
+    /* Transformation en tableau trié. */
+    return Object.keys(compteur).map(function (nom) {
+      const c = compteur[nom];
+      return {
+        nom: nom,
+        nbVendeur: c.nbVendeur,
+        nbServeur: c.nbServeur,
+        nbRunner: c.nbRunner,
+        nbTotal: c.nbVendeur + c.nbServeur + c.nbRunner
+      };
+    }).sort(function (a, b) { return b.nbTotal - a.nbTotal; });
+  }
+
+  /* Liste les saisies "données perdues" (PAD en panne sans données
+     partielles, montant=0). Renvoie un tableau d'objets
+     { jour, idBar, idCreneau, numeroPad, commentaire, par, date }. */
+  function listerDonneesPerdues(casesVentesTousJours) {
+    const liste = [];
+    Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
+      const nj = numeroDepuisCleJour(cleJour);
+      if (nj === null) return;
+      const barresDuJour = casesVentesTousJours[cleJour] || {};
+      Object.keys(barresDuJour).forEach(function (idBar) {
+        const creneauxDuBar = barresDuJour[idBar] || {};
+        Object.keys(creneauxDuBar).forEach(function (idCreneau) {
+          const uneCase = creneauxDuBar[idCreneau];
+          if (!uneCase || !uneCase.saisies) return;
+          Object.keys(uneCase.saisies).forEach(function (idS) {
+            const s = uneCase.saisies[idS];
+            if (!s || s.annulee === true) return;
+            if (s.padEnDefaut === true && s.donneesPartielles !== true) {
+              liste.push({
+                jour: nj, idBar: idBar, idCreneau: idCreneau,
+                numeroPad: s.numeroPad || "?",
+                commentaire: s.commentaire || "",
+                par: s.par || "?", date: s.date || 0
+              });
+            }
+          });
+        });
+      });
+    });
+    return liste;
+  }
+
+  /* Liste les cases avec saisies actives non clôturées.
+     Renvoie un tableau { jour, idBar, idCreneau, nbSaisies, total }. */
+  function listerCasesNonCloturees(casesVentesTousJours) {
+    const liste = [];
+    Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
+      const nj = numeroDepuisCleJour(cleJour);
+      if (nj === null) return;
+      const barresDuJour = casesVentesTousJours[cleJour] || {};
+      Object.keys(barresDuJour).forEach(function (idBar) {
+        const creneauxDuBar = barresDuJour[idBar] || {};
+        Object.keys(creneauxDuBar).forEach(function (idCreneau) {
+          const uneCase = creneauxDuBar[idCreneau];
+          if (!uneCase || !uneCase.saisies) return;
+          if (uneCase.cloturee === true) return;
+          let nb = 0, total = 0;
+          Object.keys(uneCase.saisies).forEach(function (idS) {
+            const s = uneCase.saisies[idS];
+            if (!s || s.annulee === true) return;
+            nb++;
+            total += (s.montant || 0);
+          });
+          if (nb > 0) {
+            liste.push({ jour: nj, idBar: idBar, idCreneau: idCreneau,
+              nbSaisies: nb, total: total });
+          }
+        });
+      });
+    });
+    return liste;
+  }
+
+  /* Liste les fûts ENCORE attribués à des bars (non retournés).
+     "bars" = tableau des bars actuels (avec leur sous-arbre futs).
+     Renvoie un tableau { idBar, nomBar, idFut, type, dateAttribution,
+     attribuePar }. */
+  function listerFutsNonRetournes(bars) {
+    const liste = [];
+    (bars || []).forEach(function (bar) {
+      const futs = bar.futs || {};
+      Object.keys(futs).forEach(function (idFut) {
+        const f = futs[idFut];
+        liste.push({
+          idBar: bar.id, nomBar: bar.nom,
+          idFut: idFut, type: f.type,
+          dateAttribution: f.dateAttribution || 0,
+          attribuePar: f.attribuePar || "?"
+        });
+      });
+    });
+    return liste;
   }
 
   /* =========================================================================
@@ -2451,10 +2578,25 @@
      Dashboard-2 ajoutera : Par bénévole, Anomalies, Export Excel.
   ========================================================================= */
   function EcranDashboard({ jourActuel, bars, historique, casesVentesTousJours, params, onFermer }) {
-    /* Onglet actif : "vue" ou "bar". (3B-2 ajoutera "benevole" et "anomalies".) */
+    /* Onglet actif : "vue" / "bar" / "benevole" / "anomalies". */
     const [onglet, setOnglet] = useState("vue");
-    /* Bascule de granularité : "tout" / "jour" / "comparatif". */
+    /* Bascule de granularité : "tout" / "jour" / "comparatif".
+       NB : ne s'applique PAS aux onglets "benevole" et "anomalies"
+       (décision validée : toujours total festival pour ces deux-là). */
     const [granularite, setGranularite] = useState("tout");
+
+    /* Planning de TOUS les jours du festival, chargé pour l'onglet Bénévole.
+       Lecture unique au montage (ce n'est pas critique d'avoir le temps réel
+       sur cet écran ; ça évite un abonnement supplémentaire global). */
+    const [planningTousJours, setPlanningTousJours] = useState({});
+    useEffect(function () {
+      const ref = db.ref("sessions/" + ID_SESSION + "/planning");
+      function surPlanning(s) {
+        setPlanningTousJours(s.val() || {});
+      }
+      ref.on("value", surPlanning);
+      return function () { ref.off("value", surPlanning); };
+    }, []);
 
     /* Pour "jour", on filtre sur jourActuel. Pour "tout" et "comparatif",
        pas de filtre jour. */
@@ -2465,6 +2607,29 @@
     const futsGlobal = agregerFuts(historique, null);
     const coherenceGlobal = calculerCoherence(historique, casesVentesTousJours, params, null);
     const stockGlobal = calculerStock(historique, params);
+
+    /* ----- DONNÉES POUR L'ONGLET BÉNÉVOLE (toujours tout festival) ----- */
+    const lignesBenevoles = agregerBenevoles(planningTousJours);
+
+    /* ----- DONNÉES POUR L'ONGLET ANOMALIES ----- */
+    /* Bars dépassant le seuil (filtré sur tout festival). */
+    const barsHorsSeuil = (bars || []).filter(function (bar) {
+      const c = calculerCoherence(historique, casesVentesTousJours, params, bar.id);
+      return !c.dansSeuil && c.volumeSortiL > 0;
+    }).map(function (bar) {
+      const c = calculerCoherence(historique, casesVentesTousJours, params, bar.id);
+      return { id: bar.id, nom: bar.nom, ecartPct: c.ecartPct };
+    });
+    const listeDonneesPerdues = listerDonneesPerdues(casesVentesTousJours);
+    const listeNonCloturees = listerCasesNonCloturees(casesVentesTousJours);
+    const listeFutsNonRetournes = listerFutsNonRetournes(bars);
+
+    /* Helper : retrouve le nom d'un bar et le libellé d'un créneau à
+       partir d'un idBar / idCreneau (utilisé pour afficher les anomalies). */
+    function nomBar(idBar) {
+      const b = (bars || []).find(function (x) { return x.id === idBar; });
+      return b ? b.nom : "(bar inconnu)";
+    }
 
     /* ----- DONNÉES POUR L'ONGLET PAR BAR ----- */
     const lignesParBar = (bars || []).map(function (bar) {
@@ -2723,6 +2888,273 @@
       );
     }
 
+    /* ----- RENDU ONGLET "PAR BÉNÉVOLE" (toujours total festival) ----- */
+    function rendreBenevole() {
+      if (lignesBenevoles.length === 0) {
+        return React.createElement("p", { className: "text-neutral-500 text-sm text-center py-8" },
+          "Aucun bénévole saisi dans le planning pour l'instant.");
+      }
+      return React.createElement(
+        "div",
+        null,
+        React.createElement("p", { className: "text-xs text-neutral-500 mb-2" },
+          "Total festival, trié par nombre de shifts décroissant. " +
+          lignesBenevoles.length + " bénévole(s) identifié(s)."),
+        React.createElement(
+          "div",
+          { className: "rounded-xl border border-neutral-800 overflow-hidden" },
+          React.createElement(
+            "table",
+            { className: "w-full text-sm" },
+            React.createElement(
+              "thead",
+              { className: "bg-neutral-900 text-neutral-400 text-xs" },
+              React.createElement(
+                "tr",
+                null,
+                React.createElement("th", { className: "text-left p-2" }, "Bénévole"),
+                React.createElement("th", { className: "text-right p-2" }, "V"),
+                React.createElement("th", { className: "text-right p-2" }, "S"),
+                React.createElement("th", { className: "text-right p-2" }, "R"),
+                React.createElement("th", { className: "text-right p-2 font-bold" }, "Total")
+              )
+            ),
+            React.createElement(
+              "tbody",
+              null,
+              lignesBenevoles.map(function (b, i) {
+                return React.createElement(
+                  "tr",
+                  { key: i, className: "border-t border-neutral-800" },
+                  React.createElement("td", { className: "p-2 text-white" }, b.nom),
+                  React.createElement("td", { className: "p-2 text-right text-neutral-300" }, b.nbVendeur),
+                  React.createElement("td", { className: "p-2 text-right text-neutral-300" }, b.nbServeur),
+                  React.createElement("td", { className: "p-2 text-right text-neutral-300" }, b.nbRunner),
+                  React.createElement("td", { className: "p-2 text-right text-white font-bold" }, b.nbTotal)
+                );
+              })
+            )
+          )
+        ),
+        React.createElement("p", { className: "text-xs text-neutral-600 italic mt-2" },
+          "V = vendeur, S = serveur, R = runner. Les noms sont comparés en " +
+          "texte exact : « Kevin » et « kevin » sont vus comme deux personnes différentes.")
+      );
+    }
+
+    /* ----- RENDU ONGLET "ANOMALIES" (toujours total festival) ----- */
+    function rendreAnomalies() {
+      const blocs = [];
+
+      /* Section 1 : bars hors seuil. */
+      blocs.push(React.createElement(
+        "div",
+        { key: "bars", className: "mb-4" },
+        React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+          "Bars dépassant le seuil (" + (params.seuilTolerancePerte || 0) + " %)"),
+        barsHorsSeuil.length === 0
+          ? React.createElement("p", { className: "text-xs text-neutral-600 italic" },
+              "Aucun bar hors seuil.")
+          : React.createElement(
+              "div",
+              { className: "space-y-1" },
+              barsHorsSeuil.map(function (b) {
+                return React.createElement(
+                  "div",
+                  { key: b.id, className: "flex justify-between items-center bg-red-950/40 border border-red-900 rounded-lg p-2 text-sm" },
+                  React.createElement("span", { className: "text-white" }, b.nom),
+                  React.createElement("span", { className: "text-red-300 font-bold" },
+                    b.ecartPct.toFixed(1) + " %")
+                );
+              })
+            )
+      ));
+
+      /* Section 2 : données perdues. */
+      blocs.push(React.createElement(
+        "div",
+        { key: "perdues", className: "mb-4" },
+        React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+          "Saisies « données perdues » (PAD en panne sans récupération)"),
+        listeDonneesPerdues.length === 0
+          ? React.createElement("p", { className: "text-xs text-neutral-600 italic" },
+              "Aucune.")
+          : React.createElement(
+              "div",
+              { className: "space-y-1" },
+              listeDonneesPerdues.map(function (p, i) {
+                return React.createElement(
+                  "div",
+                  { key: i, className: "bg-amber-950/40 border border-amber-900 rounded-lg p-2 text-sm" },
+                  React.createElement("div", { className: "flex justify-between" },
+                    React.createElement("span", { className: "text-white" },
+                      "J" + p.jour + " — " + nomBar(p.idBar)),
+                    React.createElement("span", { className: "text-amber-300" }, "PAD " + p.numeroPad)
+                  ),
+                  p.commentaire
+                    ? React.createElement("p", { className: "text-xs text-neutral-400 italic mt-1" },
+                        "« " + p.commentaire + " »")
+                    : null,
+                  React.createElement("p", { className: "text-xs text-neutral-600 mt-1" },
+                    "Saisi par " + p.par)
+                );
+              })
+            )
+      ));
+
+      /* Section 3 : cases non clôturées. */
+      blocs.push(React.createElement(
+        "div",
+        { key: "noncloturees", className: "mb-4" },
+        React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+          "Créneaux saisis mais non clôturés"),
+        listeNonCloturees.length === 0
+          ? React.createElement("p", { className: "text-xs text-neutral-600 italic" },
+              "Tous les créneaux saisis sont clôturés.")
+          : React.createElement(
+              "div",
+              { className: "space-y-1" },
+              listeNonCloturees.map(function (c, i) {
+                return React.createElement(
+                  "div",
+                  { key: i, className: "flex justify-between items-center bg-neutral-900 border border-neutral-700 rounded-lg p-2 text-sm" },
+                  React.createElement("span", { className: "text-white" },
+                    "J" + c.jour + " — " + nomBar(c.idBar)),
+                  React.createElement("span", { className: "text-neutral-400" },
+                    c.nbSaisies + " saisie(s) — " + c.total.toFixed(2) + " €")
+                );
+              })
+            )
+      ));
+
+      /* Section 4 : fûts attribués non retournés. */
+      blocs.push(React.createElement(
+        "div",
+        { key: "futs", className: "mb-4" },
+        React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+          "Fûts encore attribués (non retournés)"),
+        listeFutsNonRetournes.length === 0
+          ? React.createElement("p", { className: "text-xs text-neutral-600 italic" },
+              "Aucun fût en cours.")
+          : React.createElement(
+              "div",
+              { className: "space-y-1" },
+              listeFutsNonRetournes.map(function (f, i) {
+                return React.createElement(
+                  "div",
+                  { key: i, className: "flex justify-between items-center bg-neutral-900 border border-neutral-700 rounded-lg p-2 text-sm" },
+                  React.createElement("span", { className: "text-white" },
+                    f.nomBar + " — " + (f.type === TYPE_BAR.BIERE ? "bière" : "cidre")),
+                  React.createElement("span", { className: "text-xs text-neutral-500" },
+                    "par " + f.attribuePar)
+                );
+              })
+            )
+      ));
+
+      return React.createElement("div", null, blocs);
+    }
+
+    /* ----- EXPORT EXCEL -----
+       Génère un fichier .xlsx avec 4 feuilles (Vue, Par bar, Par bénévole,
+       Anomalies) et déclenche le téléchargement. Utilise SheetJS (XLSX). */
+    function telechargerExcel() {
+      if (typeof XLSX === "undefined") {
+        alert("La bibliothèque Excel n'est pas chargée. Vérifiez votre connexion internet.");
+        return;
+      }
+      const wb = XLSX.utils.book_new();
+
+      /* Feuille 1 : Vue d'ensemble (chiffres globaux). */
+      const v = ventesGlobal;
+      const f = futsGlobal;
+      const c = coherenceGlobal;
+      const dataVue = [
+        ["Récapitulatif", "Valeur"],
+        ["CA total (€)", v.ca],
+        ["Nombre de pintes", v.nbPintes],
+        ["Nombre de pichets", v.nbPichets],
+        ["Nombre de gobelets", v.nbGobelets],
+        ["Nombre de saisies actives", v.nbSaisies],
+        ["Saisies annulées", v.nbAnnulees],
+        ["Saisies PAD en panne", v.nbPadEnPanne],
+        ["Dont données perdues", v.nbDonneesPerdues],
+        [],
+        ["Fûts bière sortis", f.nbBiereSortis],
+        ["Fûts cidre sortis", f.nbCidreSortis],
+        ["Fûts cassés", f.nbCasses],
+        ["Fûts pleins rendus", f.nbPleinsRendus],
+        [],
+        ["Stock restant bière (fûts)", stockGlobal.biere],
+        ["Stock restant cidre (fûts)", stockGlobal.cidre],
+        [],
+        ["Volume sorti (L)", c.volumeSortiL.toFixed(1)],
+        ["Volume vendu (L)", c.volumeVenduL.toFixed(1)],
+        ["Écart (L)", c.ecartL.toFixed(1)],
+        ["Écart (%)", c.ecartPct.toFixed(1)],
+        ["Seuil de tolérance (%)", params.seuilTolerancePerte || 0],
+        ["Dans la tolérance ?", c.dansSeuil ? "Oui" : "NON"]
+      ];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataVue), "Vue d'ensemble");
+
+      /* Feuille 2 : Par bar. */
+      const dataBar = [
+        ["Bar", "Type", "CA (€)", "Pintes", "Pichets", "Gobelets",
+         "Fûts sortis", "Fûts cassés", "Volume sorti (L)", "Volume vendu (L)",
+         "Écart (%)", "Dans seuil"]
+      ];
+      lignesParBar.forEach(function (l) {
+        dataBar.push([
+          l.nom,
+          l.type === TYPE_BAR.BIERE ? "bière" : "cidre",
+          l.ventes.ca,
+          l.ventes.nbPintes, l.ventes.nbPichets, l.ventes.nbGobelets,
+          l.futs.nbBiereSortis + l.futs.nbCidreSortis,
+          l.futs.nbCasses,
+          parseFloat(l.coherence.volumeSortiL.toFixed(1)),
+          parseFloat(l.coherence.volumeVenduL.toFixed(1)),
+          parseFloat(l.coherence.ecartPct.toFixed(1)),
+          l.coherence.dansSeuil ? "Oui" : "NON"
+        ]);
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataBar), "Par bar");
+
+      /* Feuille 3 : Par bénévole. */
+      const dataBenevole = [["Bénévole", "Vendeur", "Serveur", "Runner", "Total"]];
+      lignesBenevoles.forEach(function (b) {
+        dataBenevole.push([b.nom, b.nbVendeur, b.nbServeur, b.nbRunner, b.nbTotal]);
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataBenevole), "Par bénévole");
+
+      /* Feuille 4 : Anomalies. */
+      const dataAnomalies = [["Type", "Détail 1", "Détail 2", "Détail 3"]];
+      barsHorsSeuil.forEach(function (b) {
+        dataAnomalies.push(["Bar hors seuil", b.nom, b.ecartPct.toFixed(1) + " %", ""]);
+      });
+      listeDonneesPerdues.forEach(function (p) {
+        dataAnomalies.push(["Données perdues", "J" + p.jour + " — " + nomBar(p.idBar),
+          "PAD " + p.numeroPad, p.par]);
+      });
+      listeNonCloturees.forEach(function (c2) {
+        dataAnomalies.push(["Créneau non clôturé", "J" + c2.jour + " — " + nomBar(c2.idBar),
+          c2.nbSaisies + " saisie(s)", c2.total.toFixed(2) + " €"]);
+      });
+      listeFutsNonRetournes.forEach(function (ft) {
+        dataAnomalies.push(["Fût non retourné", ft.nomBar,
+          ft.type === TYPE_BAR.BIERE ? "bière" : "cidre", "par " + ft.attribuePar]);
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataAnomalies), "Anomalies");
+
+      /* Nom de fichier avec la date du jour. */
+      const d = new Date();
+      const pad2 = function (n) { return n < 10 ? "0" + n : "" + n; };
+      const nomFichier = "bars-nomades-recap-" +
+        d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) +
+        "-" + pad2(d.getHours()) + pad2(d.getMinutes()) + ".xlsx";
+
+      XLSX.writeFile(wb, nomFichier);
+    }
+
     /* Bouton onglet réutilisable. */
     function ongletBtn(cle, libelle) {
       const actif = onglet === cle;
@@ -2777,23 +3209,46 @@
         "div",
         { className: "px-3 py-2 flex gap-2 border-b border-neutral-800 overflow-x-auto" },
         ongletBtn("vue", "Vue d'ensemble"),
-        ongletBtn("bar", "Par bar")
+        ongletBtn("bar", "Par bar"),
+        ongletBtn("benevole", "Par bénévole"),
+        ongletBtn("anomalies", "Anomalies")
       ),
 
-      /* Bascule de granularité. */
-      React.createElement(
-        "div",
-        { className: "px-3 py-2 flex gap-1 border-b border-neutral-800" },
-        granBtn("tout", "Tout le festival"),
-        granBtn("jour", "Jour " + jourActuel),
-        granBtn("comparatif", "Comparatif jours")
-      ),
+      /* Bascule de granularité — affichée uniquement pour les onglets
+         vue/bar (les onglets benevole/anomalies sont toujours sur tout
+         le festival, décision validée). */
+      (onglet === "vue" || onglet === "bar")
+        ? React.createElement(
+            "div",
+            { className: "px-3 py-2 flex gap-1 border-b border-neutral-800" },
+            granBtn("tout", "Tout le festival"),
+            granBtn("jour", "Jour " + jourActuel),
+            granBtn("comparatif", "Comparatif jours")
+          )
+        : null,
 
-      /* Corps. */
+      /* Corps : un onglet à la fois. */
       React.createElement(
         "div",
         { className: "flex-1 overflow-auto p-3" },
-        onglet === "vue" ? rendreVue() : rendreParBar()
+        onglet === "vue" ? rendreVue()
+          : onglet === "bar" ? rendreParBar()
+          : onglet === "benevole" ? rendreBenevole()
+          : rendreAnomalies()
+      ),
+
+      /* Pied : bouton d'export Excel. */
+      React.createElement(
+        "div",
+        { className: "px-3 py-2 border-t border-neutral-800" },
+        React.createElement(
+          "button",
+          {
+            onClick: telechargerExcel,
+            className: "w-full py-2.5 bg-purple-700 hover:bg-purple-600 text-white rounded-lg text-sm font-medium"
+          },
+          "Télécharger le récapitulatif Excel"
+        )
       )
     );
   }
