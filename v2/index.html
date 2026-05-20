@@ -4,7 +4,7 @@
   GESTION DES FÛTS - BARS NOMADES - HELLFEST
   Application reconstruite proprement (remplace la version V16-V23 minifiée).
 
-  ÉTAT : MODULES 1 + 2 + 3A + 3B (complet) + PARAMÈTRES
+  ÉTAT : MODULES 1 + 2 + 3A + 3B (complet) + PARAMÈTRES + PLANNING
   Contenu actuel :
     - démarrage, Firebase, authentification anonyme             (module 1)
     - écran d'accueil (prénom), connexion utilisateur           (module 1)
@@ -17,8 +17,11 @@
       prix pinte/pichet/gobelet, volumes fûts bière/cidre,
       volumes pinte/pichet (cl), seuil de tolérance de perte (%),
       stock initial bière/cidre. Admin et plus.                 (module params)
+    - PLANNING BÉNÉVOLES : tableau bar x créneau, 3 postes
+      (vendeur, serveur, runner), saisie texte libre, détection
+      bloquante des conflits d'affectation. Secrétaire et plus. (module planning)
 
-  Pas encore inclus : planning bénévoles, dashboard, exports, plan,
+  Pas encore inclus : dashboard, exports, plan,
   règles Firebase définitives.
 
   PRINCIPE D'ARCHITECTURE
@@ -190,6 +193,21 @@
     caseVente: function (numeroJour, idBar, idCreneau) {
       return db.ref("sessions/" + ID_SESSION + "/ventes/jour" + numeroJour +
         "/" + idBar + "/" + idCreneau);
+    },
+    /* ----- PLANNING BÉNÉVOLES (module planning) -----
+       Un "shift" = un bar + un créneau + un jour. Il contient 3 postes :
+         - vendeur (au PAD)
+         - serveur (sert la bière)
+         - runner (approvisionnement, peut couvrir plusieurs bars)
+       Rangé sous planning/jour<N>/<idBar>/<idCreneau>.
+       Format : { vendeur: "Kevin", serveur: "Marie", runner: "Paul" }
+       Un poste vide = pas affecté (shift incomplet autorisé). */
+    planningDuJour: function (numeroJour) {
+      return db.ref("sessions/" + ID_SESSION + "/planning/jour" + numeroJour);
+    },
+    shiftPlanning: function (numeroJour, idBar, idCreneau) {
+      return db.ref("sessions/" + ID_SESSION + "/planning/jour" + numeroJour +
+        "/" + idBar + "/" + idCreneau);
     }
   };
 
@@ -301,6 +319,11 @@
     /* Modifier les paramètres : admin et plus (conforme au tableau gelé). */
     peutGererParams: function (role) {
       return role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
+    },
+    /* Gérer le planning bénévoles : secrétaire et plus
+       (conforme au tableau gelé). */
+    peutGererPlanning: function (role) {
+      return role === ROLES.SECRETAIRE || role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
     }
   };
 
@@ -459,6 +482,108 @@
       return Base.params().update(nouveauxParams);
     }
   };
+
+  /* =========================================================================
+     SECTION 8quater — ACTIONS SUR LE PLANNING BÉNÉVOLES (module planning)
+     Réservé secrétaire et plus (conforme au tableau gelé).
+
+     RÈGLES MÉTIER (gelées)
+       - Un shift = bar + créneau + jour ; 3 postes : vendeur, serveur, runner.
+       - Saisie nom/prénom en TEXTE LIBRE (pas de référentiel pour l'instant).
+       - Shifts INCOMPLETS autorisés (un poste vide = pas affecté).
+       - Vendeur et serveur sont UNIQUES par créneau (un bénévole ne peut
+         pas occuper l'un de ces postes sur deux bars différents au même
+         créneau du même jour).
+       - Runner peut être runner sur PLUSIEURS bars au même créneau.
+       - Mais un runner reste runner UNIQUEMENT : pas de cumul avec
+         vendeur ou serveur ailleurs au même créneau.
+       - L'alerte de conflit est BLOQUANTE (refuse l'enregistrement).
+       - Détection par égalité TEXTE EXACT : "Kevin" et "kevin" ne
+         déclencheront pas l'alerte. C'est connu, c'est la conséquence du
+         choix "champ libre" (cf. décision validée).
+  ========================================================================= */
+  const ActionsPlanning = {
+
+    /* Enregistre (ou met à jour) un shift complet.
+       "shift" = { vendeur, serveur, runner } — chaque valeur peut être
+       une chaîne vide si le poste n'est pas pourvu. */
+    enregistrerShift: function (numeroJour, idBar, idCreneau, shift) {
+      const ref = Base.shiftPlanning(numeroJour, idBar, idCreneau);
+      return ref.set({
+        vendeur: (shift.vendeur || "").trim(),
+        serveur: (shift.serveur || "").trim(),
+        runner: (shift.runner || "").trim()
+      });
+    },
+
+    /* Supprime un shift entier (vide les 3 postes). */
+    supprimerShift: function (numeroJour, idBar, idCreneau) {
+      return Base.shiftPlanning(numeroJour, idBar, idCreneau).remove();
+    }
+  };
+
+  /* Détecte les conflits d'affectation pour un shift en cours d'édition.
+     "planningDuJour" = tous les shifts du jour, format Firebase
+                        { idBar: { idCreneau: { vendeur, serveur, runner } } }
+     "idBar" / "idCreneau" = le shift qu'on est en train de modifier
+                              (ses propres affectations ne sont pas un conflit)
+     "shift" = nouveau contenu { vendeur, serveur, runner }
+
+     Renvoie un tableau de messages de conflit, vide si tout va bien. */
+  function detecterConflitsShift(planningDuJour, idBar, idCreneau, shift) {
+    const conflits = [];
+    const vendeurNew = (shift.vendeur || "").trim();
+    const serveurNew = (shift.serveur || "").trim();
+    const runnerNew = (shift.runner || "").trim();
+
+    /* Parcourt tous les autres shifts du même créneau (= mêmes barres,
+       même idCreneau) pour chercher des collisions. */
+    Object.keys(planningDuJour || {}).forEach(function (idBarAutre) {
+      if (idBarAutre === idBar) return;       /* on s'auto-ignore */
+      const shiftsAutreBar = planningDuJour[idBarAutre] || {};
+      const autre = shiftsAutreBar[idCreneau];
+      if (!autre) return;
+      const vendeurAutre = (autre.vendeur || "").trim();
+      const serveurAutre = (autre.serveur || "").trim();
+      const runnerAutre = (autre.runner || "").trim();
+
+      /* --- Règle : vendeur unique par créneau. --- */
+      if (vendeurNew && (vendeurAutre === vendeurNew || serveurAutre === vendeurNew)) {
+        conflits.push("« " + vendeurNew + " » est déjà " +
+          (vendeurAutre === vendeurNew ? "vendeur" : "serveur") +
+          " sur un autre bar à ce créneau.");
+      }
+      if (vendeurNew && runnerAutre === vendeurNew) {
+        conflits.push("« " + vendeurNew + " » est déjà runner sur un autre bar " +
+          "à ce créneau (un runner ne peut pas cumuler vendeur ailleurs).");
+      }
+
+      /* --- Règle : serveur unique par créneau. --- */
+      if (serveurNew && (vendeurAutre === serveurNew || serveurAutre === serveurNew)) {
+        conflits.push("« " + serveurNew + " » est déjà " +
+          (vendeurAutre === serveurNew ? "vendeur" : "serveur") +
+          " sur un autre bar à ce créneau.");
+      }
+      if (serveurNew && runnerAutre === serveurNew) {
+        conflits.push("« " + serveurNew + " » est déjà runner sur un autre bar " +
+          "à ce créneau (un runner ne peut pas cumuler serveur ailleurs).");
+      }
+
+      /* --- Règle : runner accepte plusieurs bars (PAS de conflit avec
+            un autre runner), mais ne peut pas cumuler avec vendeur/serveur
+            ailleurs. --- */
+      if (runnerNew && vendeurAutre === runnerNew) {
+        conflits.push("« " + runnerNew + " » est déjà vendeur sur un autre bar " +
+          "à ce créneau (un runner ne peut pas aussi être vendeur ailleurs).");
+      }
+      if (runnerNew && serveurAutre === runnerNew) {
+        conflits.push("« " + runnerNew + " » est déjà serveur sur un autre bar " +
+          "à ce créneau (un runner ne peut pas aussi être serveur ailleurs).");
+      }
+    });
+
+    return conflits;
+  }
 
   /* =========================================================================
      SECTION 8bis — ACTIONS SUR LES VENTES (modules 3B-1 et 3B-2)
@@ -1893,6 +2018,255 @@
   }
 
   /* =========================================================================
+     SECTION 14quinquies — FENÊTRE D'ÉDITION D'UN SHIFT (module planning)
+     S'ouvre quand on clique sur une case bar+créneau du planning.
+     Permet de saisir/modifier les 3 postes (vendeur, serveur, runner).
+  ========================================================================= */
+  function FenetreEditionShift({ bar, creneau, shiftActuel, planningDuJour, jourActuel, onFermer }) {
+    const [vendeur, setVendeur] = useState((shiftActuel && shiftActuel.vendeur) || "");
+    const [serveur, setServeur] = useState((shiftActuel && shiftActuel.serveur) || "");
+    const [runner, setRunner] = useState((shiftActuel && shiftActuel.runner) || "");
+
+    function enregistrer() {
+      const nouveauShift = { vendeur: vendeur, serveur: serveur, runner: runner };
+      /* Détection des conflits AVANT enregistrement (alerte bloquante). */
+      const conflits = detecterConflitsShift(planningDuJour, bar.id, creneau.id, nouveauShift);
+      if (conflits.length > 0) {
+        alert("Conflit d'affectation détecté :\n\n• " + conflits.join("\n• ") +
+          "\n\nL'enregistrement est refusé.");
+        return;
+      }
+      ActionsPlanning.enregistrerShift(jourActuel, bar.id, creneau.id, nouveauShift)
+        .then(onFermer)
+        .catch(function (e) { alert("Erreur : " + e.message); });
+    }
+
+    function supprimer() {
+      if (!confirm("Effacer ce shift complet (les 3 postes) ?")) return;
+      ActionsPlanning.supprimerShift(jourActuel, bar.id, creneau.id)
+        .then(onFermer)
+        .catch(function (e) { alert("Erreur : " + e.message); });
+    }
+
+    function champ(libelle, valeur, onChange, placeholder) {
+      return React.createElement(
+        "div",
+        { className: "mb-3" },
+        React.createElement("label", { className: "block text-xs text-neutral-400 mb-1" }, libelle),
+        React.createElement("input", {
+          type: "text",
+          value: valeur,
+          onChange: function (e) { onChange(e.target.value); },
+          placeholder: placeholder,
+          className: "w-full px-3 py-2 bg-neutral-800 rounded-lg text-white text-sm"
+        })
+      );
+    }
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" },
+      React.createElement(
+        "div",
+        { className: "bg-neutral-900 rounded-2xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto" },
+        React.createElement("h3", { className: "text-xl font-bold text-white mb-1" }, "Shift bénévoles"),
+        React.createElement("p", { className: "text-neutral-400 text-sm mb-4" },
+          bar.nom + " — " + creneau.libelle),
+
+        champ("Vendeur (au PAD)", vendeur, setVendeur, "Prénom Nom"),
+        champ("Serveur", serveur, setServeur, "Prénom Nom"),
+        champ("Runner (approvisionnement)", runner, setRunner, "Prénom Nom"),
+
+        React.createElement("p", { className: "text-xs text-neutral-600 italic mb-4" },
+          "Postes vides autorisés. Un runner peut être affecté sur plusieurs bars " +
+          "au même créneau ; vendeur et serveur doivent être uniques."),
+
+        React.createElement(
+          "div",
+          { className: "flex gap-2" },
+          React.createElement(
+            "button",
+            { onClick: onFermer, className: "flex-1 py-3 bg-neutral-700 text-white rounded-lg" },
+            "Annuler"
+          ),
+          React.createElement(
+            "button",
+            { onClick: enregistrer, className: "flex-1 py-3 bg-emerald-600 text-white rounded-lg font-medium" },
+            "Enregistrer"
+          )
+        ),
+        /* Bouton supprimer affiché seulement si un shift existe déjà. */
+        shiftActuel
+          ? React.createElement(
+              "button",
+              {
+                onClick: supprimer,
+                className: "w-full mt-2 py-2 bg-red-900 hover:bg-red-800 text-white rounded-lg text-sm"
+              },
+              "Effacer ce shift"
+            )
+          : null
+      )
+    );
+  }
+
+  /* =========================================================================
+     SECTION 14sexies — ÉCRAN PLANNING BÉNÉVOLES (module planning)
+     Tableau bar × créneau du jour actif, affichant pour chaque case les
+     3 postes (V/S/R). Cliquer une case ouvre la fenêtre d'édition.
+  ========================================================================= */
+  function EcranPlanning({ prenom, role, jourActuel, bars, creneaux, planningDuJour, onFermer }) {
+    const [shiftEnEdition, setShiftEnEdition] = useState(null);
+    const peutGerer = Droits.peutGererPlanning(role);
+
+    const listeCreneaux = Object.keys(creneaux || {}).map(function (id) {
+      return { id: id, libelle: creneaux[id].libelle };
+    });
+
+    /* Récupère le shift d'un bar+créneau, ou null. */
+    function getShift(idBar, idCreneau) {
+      if (!planningDuJour || !planningDuJour[idBar]) return null;
+      return planningDuJour[idBar][idCreneau] || null;
+    }
+
+    /* Compte le nombre de postes remplis (0 à 3) pour un shift. */
+    function nbPostesRemplis(shift) {
+      if (!shift) return 0;
+      let n = 0;
+      if ((shift.vendeur || "").trim()) n++;
+      if ((shift.serveur || "").trim()) n++;
+      if ((shift.runner || "").trim()) n++;
+      return n;
+    }
+
+    /* Le shift en cours d'édition, recalculé à chaque rendu pour
+       refléter les changements en base. */
+    const shiftActuelEnEdition = shiftEnEdition
+      ? getShift(shiftEnEdition.bar.id, shiftEnEdition.creneau.id)
+      : null;
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black z-40 flex flex-col" },
+
+      /* En-tête. */
+      React.createElement(
+        "div",
+        { className: "p-4 border-b border-neutral-800 flex items-center justify-between" },
+        React.createElement(
+          "div",
+          null,
+          React.createElement("h2", { className: "text-lg font-bold text-blue-400" }, "Planning bénévoles"),
+          React.createElement("p", { className: "text-xs text-neutral-500" }, "Jour " + jourActuel)
+        ),
+        React.createElement(
+          "button",
+          { onClick: onFermer, className: "text-xs px-3 py-1.5 bg-neutral-800 text-neutral-300 rounded-lg" },
+          "Fermer"
+        )
+      ),
+
+      /* Légende. */
+      React.createElement(
+        "div",
+        { className: "px-3 py-2 flex flex-wrap gap-3 text-xs text-neutral-400 border-b border-neutral-800" },
+        React.createElement("span", null, "V = Vendeur"),
+        React.createElement("span", null, "S = Serveur"),
+        React.createElement("span", null, "R = Runner"),
+        React.createElement("span", { className: "text-amber-300" }, "Orange = shift incomplet"),
+        React.createElement("span", { className: "text-emerald-300" }, "Vert = complet")
+      ),
+
+      /* Corps. */
+      React.createElement(
+        "div",
+        { className: "flex-1 overflow-auto p-3" },
+        listeCreneaux.length === 0
+          ? React.createElement("p", { className: "text-amber-400 text-sm text-center py-8" },
+              "Aucun créneau défini pour le jour " + jourActuel + ".")
+          : bars.length === 0
+            ? React.createElement("p", { className: "text-neutral-500 text-sm text-center py-8" },
+                "Aucun bar. Un administrateur doit en créer.")
+            : React.createElement(
+                "div",
+                { className: "space-y-4" },
+                bars.map(function (bar) {
+                  return React.createElement(
+                    "div",
+                    { key: bar.id, className: "rounded-xl border border-neutral-800 overflow-hidden" },
+                    React.createElement(
+                      "div",
+                      { className: "px-3 py-2 bg-neutral-900 font-bold text-white" },
+                      bar.nom + " (" + (bar.type === TYPE_BAR.BIERE ? "bière" : "cidre") + ")"
+                    ),
+                    React.createElement(
+                      "div",
+                      { className: "p-2 grid grid-cols-1 gap-2" },
+                      listeCreneaux.map(function (creneau) {
+                        const shift = getShift(bar.id, creneau.id);
+                        const nb = nbPostesRemplis(shift);
+                        const couleur = nb === 0
+                          ? "bg-neutral-900 border border-neutral-700"
+                          : nb === 3
+                            ? "bg-emerald-900/40 border border-emerald-800"
+                            : "bg-amber-900/40 border border-amber-800";
+
+                        return React.createElement(
+                          "button",
+                          {
+                            key: creneau.id,
+                            onClick: function () {
+                              if (!peutGerer) return;
+                              setShiftEnEdition({ bar: bar, creneau: creneau });
+                            },
+                            className: "text-left rounded-lg p-2 " + couleur +
+                              (peutGerer ? " active:opacity-80" : " cursor-default")
+                          },
+                          React.createElement("div", { className: "flex items-center justify-between mb-1" },
+                            React.createElement("span", { className: "text-xs text-neutral-300 font-medium" }, creneau.libelle),
+                            React.createElement("span", { className: "text-xs text-neutral-500" }, nb + "/3")
+                          ),
+                          /* Détail des 3 postes. */
+                          React.createElement("div", { className: "grid grid-cols-3 gap-1 text-xs" },
+                            React.createElement("div", null,
+                              React.createElement("span", { className: "text-neutral-500" }, "V: "),
+                              React.createElement("span", { className: shift && shift.vendeur ? "text-white" : "text-neutral-600 italic" },
+                                shift && shift.vendeur ? shift.vendeur : "—")
+                            ),
+                            React.createElement("div", null,
+                              React.createElement("span", { className: "text-neutral-500" }, "S: "),
+                              React.createElement("span", { className: shift && shift.serveur ? "text-white" : "text-neutral-600 italic" },
+                                shift && shift.serveur ? shift.serveur : "—")
+                            ),
+                            React.createElement("div", null,
+                              React.createElement("span", { className: "text-neutral-500" }, "R: "),
+                              React.createElement("span", { className: shift && shift.runner ? "text-white" : "text-neutral-600 italic" },
+                                shift && shift.runner ? shift.runner : "—")
+                            )
+                          )
+                        );
+                      })
+                    )
+                  );
+                })
+              )
+      ),
+
+      /* Fenêtre d'édition. */
+      shiftEnEdition
+        ? React.createElement(FenetreEditionShift, {
+            bar: shiftEnEdition.bar,
+            creneau: shiftEnEdition.creneau,
+            shiftActuel: shiftActuelEnEdition,
+            planningDuJour: planningDuJour,
+            jourActuel: jourActuel,
+            onFermer: function () { setShiftEnEdition(null); }
+          })
+        : null
+    );
+  }
+
+  /* =========================================================================
      SECTION 15 — ÉCRAN PRINCIPAL
   ========================================================================= */
   function EcranPrincipal({ prenom, role, onDeconnexion }) {
@@ -1912,9 +2286,13 @@
        qui contiennent déjà des données (alerte avant réduction du
        nombre de jours). */
     const [casesVentesTousJours, setCasesVentesTousJours] = useState({});
+    /* Planning bénévoles du jour actif (module planning). */
+    const [planningDuJour, setPlanningDuJour] = useState({});
+    const [ecranPlanning, setEcranPlanning] = useState(false);
 
     const peutGererBars = Droits.peutGererBars(role);
     const peutGererParams = Droits.peutGererParams(role);
+    const peutGererPlanning = Droits.peutGererPlanning(role);
 
     /* Abonnement temps réel : bars, historique, params, jour actif. */
     useEffect(function () {
@@ -1977,6 +2355,18 @@
       refVentes.on("value", surVentes);
       return function () {
         refVentes.off("value", surVentes);
+      };
+    }, [jourActuel]);
+
+    /* Abonnement au planning bénévoles du jour actif (module planning). */
+    useEffect(function () {
+      const refPlanning = Base.planningDuJour(jourActuel);
+      function surPlanning(s) {
+        setPlanningDuJour(s.val() || {});
+      }
+      refPlanning.on("value", surPlanning);
+      return function () {
+        refPlanning.off("value", surPlanning);
       };
     }, [jourActuel]);
 
@@ -2130,6 +2520,22 @@
           )
         : null,
 
+      /* Bouton Planning bénévoles (secrétaire et plus). */
+      peutGererPlanning
+        ? React.createElement(
+            "div",
+            { className: "px-3 pb-2" },
+            React.createElement(
+              "button",
+              {
+                onClick: function () { setEcranPlanning(true); },
+                className: "w-full py-2.5 bg-blue-800 hover:bg-blue-700 text-white rounded-lg text-sm font-medium"
+              },
+              "Planning bénévoles"
+            )
+          )
+        : null,
+
       /* Liste des bars. */
       React.createElement(
         "div",
@@ -2209,6 +2615,19 @@
             historique: historique,
             casesVentesTousJours: casesVentesTousJours,
             onFermer: function () { setFenetreParams(false); }
+          })
+        : null,
+
+      /* Écran planning bénévoles (plein écran). */
+      ecranPlanning
+        ? React.createElement(EcranPlanning, {
+            prenom: prenom,
+            role: role,
+            jourActuel: jourActuel,
+            bars: bars,
+            creneaux: creneaux,
+            planningDuJour: planningDuJour,
+            onFermer: function () { setEcranPlanning(false); }
           })
         : null
     );
