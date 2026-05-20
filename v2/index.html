@@ -4,7 +4,7 @@
   GESTION DES FÛTS - BARS NOMADES - HELLFEST
   Application reconstruite proprement (remplace la version V16-V23 minifiée).
 
-  ÉTAT : MODULES 1 + 2 + 3A + 3B (complet) + PARAMÈTRES + PLANNING
+  ÉTAT : MODULES 1 + 2 + 3A + 3B (complet) + PARAMÈTRES + PLANNING + DASHBOARD-1
   Contenu actuel :
     - démarrage, Firebase, authentification anonyme             (module 1)
     - écran d'accueil (prénom), connexion utilisateur           (module 1)
@@ -20,9 +20,12 @@
     - PLANNING BÉNÉVOLES : tableau bar x créneau, 3 postes
       (vendeur, serveur, runner), saisie texte libre, détection
       bloquante des conflits d'affectation. Secrétaire et plus. (module planning)
+    - DASHBOARD : onglets Vue d'ensemble + Par bar, bascule de
+      granularité (Tout/Jour/Comparatif), contrôle de cohérence.
+      Admin et plus.                                            (dashboard-1)
 
-  Pas encore inclus : dashboard, exports, plan,
-  règles Firebase définitives.
+  Pas encore inclus : onglets Par bénévole + Anomalies, export Excel
+  (dashboard-2), plan, règles Firebase définitives.
 
   PRINCIPE D'ARCHITECTURE
     - Un seul fichier HTML. Code lisible, commenté en français, non minifié.
@@ -324,6 +327,11 @@
        (conforme au tableau gelé). */
     peutGererPlanning: function (role) {
       return role === ROLES.SECRETAIRE || role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
+    },
+    /* Voir le dashboard / stats / historiques : admin et plus
+       (conforme au tableau gelé). */
+    peutVoirDashboard: function (role) {
+      return role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
     }
   };
 
@@ -718,6 +726,171 @@
       }
     });
     return { biere: stockBiere, cidre: stockCidre };
+  }
+
+  /* =========================================================================
+     SECTION 9bis — AGRÉGATIONS POUR LE DASHBOARD (module dashboard-1)
+
+     PHILOSOPHIE
+       Ces fonctions ne lisent PAS Firebase : elles calculent à partir
+       des données déjà chargées en mémoire dans l'écran principal
+       (historique, casesVentesTousJours, planning, params).
+       Pures fonctions, faciles à tester et à transmettre.
+
+     ATTENTION SUR LES VENTES
+       casesVentesTousJours est rangé sous { jour1: {...}, jour2: {...} }
+       Pour parcourir : Object.keys(casesVentesTousJours).filter(/^jour\d+$/)
+       Chaque jour contient { idBar: { idCreneau: { cloturee, saisies } } }
+       Chaque saisie contient montant, nbPintes, nbPichets, nbGobelets,
+       padEnDefaut, donneesPartielles, annulee, etc.
+       Les saisies ANNULÉES sont systématiquement ignorées.
+  ========================================================================= */
+
+  /* Extrait le numéro de jour d'une clé "jour3" -> 3, ou null si invalide. */
+  function numeroDepuisCleJour(cle) {
+    const m = (cle || "").match(/^jour(\d+)$/);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  /* Indique si une vente doit être prise en compte dans les agrégations.
+     Une vente est COMPTÉE si elle n'est pas annulée.
+     Les "données perdues" (PAD en panne sans données partielles) ont
+     un montant = 0 mais comptent quand même : zéro est une information. */
+  function saisieEstActive(saisie) {
+    return saisie && saisie.annulee !== true;
+  }
+
+  /* Agrège les ventes : renvoie { ca, nbPintes, nbPichets, nbGobelets,
+     nbSaisies, nbAnnulees, nbPadEnPanne, nbDonneesPerdues }.
+     "filtreJour" : si donné (nombre), ne compte que ce jour-là.
+     "filtreBar" : si donné (idBar), ne compte que ce bar. */
+  function agregerVentes(casesVentesTousJours, filtreJour, filtreBar) {
+    let ca = 0, nbP = 0, nbPi = 0, nbG = 0;
+    let nbSaisies = 0, nbAnnulees = 0;
+    let nbPadEnPanne = 0, nbDonneesPerdues = 0;
+
+    Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
+      const nj = numeroDepuisCleJour(cleJour);
+      if (nj === null) return;
+      if (filtreJour != null && nj !== filtreJour) return;
+      const barresDuJour = casesVentesTousJours[cleJour] || {};
+      Object.keys(barresDuJour).forEach(function (idBar) {
+        if (filtreBar != null && idBar !== filtreBar) return;
+        const creneauxDuBar = barresDuJour[idBar] || {};
+        Object.keys(creneauxDuBar).forEach(function (idCreneau) {
+          const uneCase = creneauxDuBar[idCreneau];
+          if (!uneCase || !uneCase.saisies) return;
+          Object.keys(uneCase.saisies).forEach(function (idSaisie) {
+            const s = uneCase.saisies[idSaisie];
+            if (!s) return;
+            if (s.annulee === true) { nbAnnulees++; return; }
+            nbSaisies++;
+            ca += (s.montant || 0);
+            nbP += (s.nbPintes || 0);
+            nbPi += (s.nbPichets || 0);
+            nbG += (s.nbGobelets || 0);
+            if (s.padEnDefaut === true) {
+              nbPadEnPanne++;
+              if (s.donneesPartielles !== true) nbDonneesPerdues++;
+            }
+          });
+        });
+      });
+    });
+    return {
+      ca: ca, nbPintes: nbP, nbPichets: nbPi, nbGobelets: nbG,
+      nbSaisies: nbSaisies, nbAnnulees: nbAnnulees,
+      nbPadEnPanne: nbPadEnPanne, nbDonneesPerdues: nbDonneesPerdues
+    };
+  }
+
+  /* Agrège les mouvements de fûts : renvoie { nbBiereSortis, nbCidreSortis,
+     nbCasses, nbPleinsRendus, nbFutsEnCours }.
+     "filtreBar" : si donné, ne compte que ce bar.
+     NB : "filtreJour" ne s'applique PAS aux fûts. Les fûts sortent à
+     l'heure réelle, pas par jour de festival. L'agrégation se fait sur
+     tout l'historique disponible. */
+  function agregerFuts(historique, filtreBar) {
+    let nbBiereSortis = 0, nbCidreSortis = 0;
+    let nbCasses = 0, nbPleinsRendus = 0;
+    (historique || []).forEach(function (mvt) {
+      if (filtreBar != null && mvt.idBar !== filtreBar) return;
+      if (mvt.mouvement === "attribution") {
+        if (mvt.typeFut === TYPE_BAR.BIERE) nbBiereSortis++;
+        if (mvt.typeFut === TYPE_BAR.CIDRE) nbCidreSortis++;
+      } else if (mvt.mouvement === "retour") {
+        if (mvt.motifRetour === RETOUR.CASSE) nbCasses++;
+        if (mvt.motifRetour === RETOUR.PLEIN) nbPleinsRendus++;
+      }
+    });
+    return {
+      nbBiereSortis: nbBiereSortis, nbCidreSortis: nbCidreSortis,
+      nbCasses: nbCasses, nbPleinsRendus: nbPleinsRendus
+    };
+  }
+
+  /* Calcul de cohérence volume : volume sorti (via fûts) vs volume vendu
+     (via pintes + pichets, le gobelet n'a pas de volume).
+     Renvoie { volumeSortiL, volumeVenduL, ecartL, ecartPct, dansSeuil }.
+     "filtreBar" optionnel. */
+  function calculerCoherence(historique, casesVentesTousJours, params, filtreBar) {
+    const futs = agregerFuts(historique, filtreBar);
+    const ventes = agregerVentes(casesVentesTousJours, null, filtreBar);
+    /* Volume sorti = (nb fûts bière * volumeFutBiere) + (nb fûts cidre *
+       volumeFutCidre). Un fût plein rendu reste compté comme sorti car
+       l'attribution est aussi comptée — pour ne pas le compter, on
+       soustrait son volume. */
+    const volumeSortiL =
+      (futs.nbBiereSortis * (params.volumeFutBiere || 0))
+      + (futs.nbCidreSortis * (params.volumeFutCidre || 0))
+      - (futs.nbPleinsRendus * (params.volumeFutBiere || 0));
+      /* Hypothèse simplificatrice ci-dessus : on suppose les fûts rendus
+         pleins sont des fûts bière (car volumeFutCidre peut différer).
+         En pratique le nombre de pleins rendus est faible. À affiner si
+         besoin dans une version future. */
+    /* Volume vendu = pintes * volumePinte + pichets * volumePichet, en cl,
+       converti en litres. */
+    const volumeVenduCl =
+      (ventes.nbPintes * (params.volumePinte || 0))
+      + (ventes.nbPichets * (params.volumePichet || 0));
+    const volumeVenduL = volumeVenduCl / 100;
+
+    const ecartL = volumeSortiL - volumeVenduL;
+    const ecartPct = (volumeSortiL > 0) ? (ecartL / volumeSortiL) * 100 : 0;
+    const dansSeuil = Math.abs(ecartPct) <= (params.seuilTolerancePerte || 0);
+    return {
+      volumeSortiL: volumeSortiL,
+      volumeVenduL: volumeVenduL,
+      ecartL: ecartL,
+      ecartPct: ecartPct,
+      dansSeuil: dansSeuil
+    };
+  }
+
+  /* Compte les cases NON clôturées (= cases avec au moins une saisie active
+     mais cloturee != true), sur un filtre jour optionnel. */
+  function compterCasesNonCloturees(casesVentesTousJours, filtreJour) {
+    let n = 0;
+    Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
+      const nj = numeroDepuisCleJour(cleJour);
+      if (nj === null) return;
+      if (filtreJour != null && nj !== filtreJour) return;
+      const barresDuJour = casesVentesTousJours[cleJour] || {};
+      Object.keys(barresDuJour).forEach(function (idBar) {
+        const creneauxDuBar = barresDuJour[idBar] || {};
+        Object.keys(creneauxDuBar).forEach(function (idCreneau) {
+          const uneCase = creneauxDuBar[idCreneau];
+          if (!uneCase || !uneCase.saisies) return;
+          if (uneCase.cloturee === true) return;
+          /* Au moins une saisie active dans la case ? */
+          const aSaisieActive = Object.keys(uneCase.saisies).some(function (idS) {
+            return uneCase.saisies[idS] && uneCase.saisies[idS].annulee !== true;
+          });
+          if (aSaisieActive) n++;
+        });
+      });
+    });
+    return n;
   }
 
   /* =========================================================================
@@ -2267,6 +2440,365 @@
   }
 
   /* =========================================================================
+     SECTION 14septies — ÉCRAN DASHBOARD (module dashboard-1)
+     Réservé admin et plus. Plusieurs onglets, bascule de granularité
+     (Tout / Jour actif / Comparatif par jour).
+
+     Dashboard-1 inclut :
+       - Vue d'ensemble (chiffres globaux, cohérence, stock)
+       - Par bar (CA, volumes, écart, fûts)
+
+     Dashboard-2 ajoutera : Par bénévole, Anomalies, Export Excel.
+  ========================================================================= */
+  function EcranDashboard({ jourActuel, bars, historique, casesVentesTousJours, params, onFermer }) {
+    /* Onglet actif : "vue" ou "bar". (3B-2 ajoutera "benevole" et "anomalies".) */
+    const [onglet, setOnglet] = useState("vue");
+    /* Bascule de granularité : "tout" / "jour" / "comparatif". */
+    const [granularite, setGranularite] = useState("tout");
+
+    /* Pour "jour", on filtre sur jourActuel. Pour "tout" et "comparatif",
+       pas de filtre jour. */
+    const filtreJourPourVentes = (granularite === "jour") ? jourActuel : null;
+
+    /* ----- CALCULS POUR L'ONGLET VUE D'ENSEMBLE ----- */
+    const ventesGlobal = agregerVentes(casesVentesTousJours, filtreJourPourVentes, null);
+    const futsGlobal = agregerFuts(historique, null);
+    const coherenceGlobal = calculerCoherence(historique, casesVentesTousJours, params, null);
+    const stockGlobal = calculerStock(historique, params);
+
+    /* ----- DONNÉES POUR L'ONGLET PAR BAR ----- */
+    const lignesParBar = (bars || []).map(function (bar) {
+      const ventesBar = agregerVentes(casesVentesTousJours, filtreJourPourVentes, bar.id);
+      const futsBar = agregerFuts(historique, bar.id);
+      const cohBar = calculerCoherence(historique, casesVentesTousJours, params, bar.id);
+      return {
+        id: bar.id, nom: bar.nom, type: bar.type,
+        ventes: ventesBar, futs: futsBar, coherence: cohBar
+      };
+    });
+
+    /* ----- DONNÉES POUR COMPARATIF PAR JOUR ----- */
+    /* Liste de jours présents : on prend tous les jours de 1 à
+       params.nombreJours pour avoir une ligne par jour même vide. */
+    const joursPourComparatif = [];
+    for (let j = 1; j <= (params.nombreJours || 1); j++) {
+      const v = agregerVentes(casesVentesTousJours, j, null);
+      joursPourComparatif.push({ numero: j, ventes: v });
+    }
+
+    /* ----- HELPERS D'AFFICHAGE ----- */
+    function fmtEuros(n) { return (n || 0).toFixed(2) + " €"; }
+    function fmtLitres(n) { return (n || 0).toFixed(1) + " L"; }
+    function fmtPct(n) { return (n || 0).toFixed(1) + " %"; }
+
+    /* Carte indicateur (titre + valeur + sous-titre optionnel). */
+    function carte(titre, valeur, sousTitre, couleur) {
+      return React.createElement(
+        "div",
+        { className: "rounded-xl p-3 " + (couleur || "bg-neutral-900 border border-neutral-800") },
+        React.createElement("p", { className: "text-xs text-neutral-400 uppercase" }, titre),
+        React.createElement("p", { className: "text-xl font-bold text-white mt-1" }, valeur),
+        sousTitre
+          ? React.createElement("p", { className: "text-xs text-neutral-500 mt-0.5" }, sousTitre)
+          : null
+      );
+    }
+
+    /* ----- RENDU ONGLET "VUE D'ENSEMBLE" ----- */
+    function rendreVue() {
+      const blocs = [];
+
+      /* Chiffres globaux des ventes. */
+      blocs.push(React.createElement(
+        "div",
+        { key: "ventes", className: "mb-4" },
+        React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+          "Ventes" + (granularite === "jour" ? " — jour " + jourActuel : " — total festival")),
+        React.createElement(
+          "div",
+          { className: "grid grid-cols-2 gap-2" },
+          carte("CA total", fmtEuros(ventesGlobal.ca),
+            ventesGlobal.nbSaisies + " saisie(s)", "bg-emerald-950/40 border border-emerald-800"),
+          carte("Pintes", ventesGlobal.nbPintes,
+            ventesGlobal.nbPichets + " pichets · " + ventesGlobal.nbGobelets + " gobelets"),
+          carte("PAD en panne", ventesGlobal.nbPadEnPanne,
+            ventesGlobal.nbDonneesPerdues + " donnée(s) perdue(s)",
+            ventesGlobal.nbPadEnPanne > 0 ? "bg-amber-950/40 border border-amber-800" : null),
+          carte("Saisies annulées", ventesGlobal.nbAnnulees, null,
+            ventesGlobal.nbAnnulees > 0 ? "bg-red-950/40 border border-red-900" : null)
+        )
+      ));
+
+      /* Fûts (toujours sur tout le festival — pas de filtre jour). */
+      blocs.push(React.createElement(
+        "div",
+        { key: "futs", className: "mb-4" },
+        React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+          "Fûts (total festival)"),
+        React.createElement(
+          "div",
+          { className: "grid grid-cols-2 gap-2" },
+          carte("Bière sortis", futsGlobal.nbBiereSortis, null,
+            "bg-amber-950/40 border border-amber-800"),
+          carte("Cidre sortis", futsGlobal.nbCidreSortis, null,
+            "bg-green-950/40 border border-green-800"),
+          carte("Cassés", futsGlobal.nbCasses, null,
+            futsGlobal.nbCasses > 0 ? "bg-red-950/40 border border-red-900" : null),
+          carte("Pleins rendus", futsGlobal.nbPleinsRendus, "réintégrés au stock")
+        )
+      ));
+
+      /* Stock restant. */
+      blocs.push(React.createElement(
+        "div",
+        { key: "stock", className: "mb-4" },
+        React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" }, "Stock restant"),
+        React.createElement(
+          "div",
+          { className: "grid grid-cols-2 gap-2" },
+          carte("Bière", stockGlobal.biere + " fûts", null,
+            stockGlobal.biere <= 0 ? "bg-red-950/40 border border-red-900" : null),
+          carte("Cidre", stockGlobal.cidre + " fûts", null,
+            stockGlobal.cidre <= 0 ? "bg-red-950/40 border border-red-900" : null)
+        )
+      ));
+
+      /* Cohérence (toujours sur tout le festival). */
+      const couleurCoh = coherenceGlobal.dansSeuil
+        ? "bg-emerald-950/40 border border-emerald-800"
+        : "bg-red-950/40 border border-red-900";
+      blocs.push(React.createElement(
+        "div",
+        { key: "coh", className: "mb-4" },
+        React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+          "Cohérence volumes (total festival)"),
+        React.createElement(
+          "div",
+          { className: "rounded-xl p-3 " + couleurCoh },
+          React.createElement(
+            "div",
+            { className: "grid grid-cols-3 gap-2 text-center" },
+            React.createElement(
+              "div",
+              null,
+              React.createElement("p", { className: "text-xs text-neutral-400" }, "Sorti"),
+              React.createElement("p", { className: "text-lg font-bold text-white" }, fmtLitres(coherenceGlobal.volumeSortiL))
+            ),
+            React.createElement(
+              "div",
+              null,
+              React.createElement("p", { className: "text-xs text-neutral-400" }, "Vendu"),
+              React.createElement("p", { className: "text-lg font-bold text-white" }, fmtLitres(coherenceGlobal.volumeVenduL))
+            ),
+            React.createElement(
+              "div",
+              null,
+              React.createElement("p", { className: "text-xs text-neutral-400" }, "Écart"),
+              React.createElement("p", { className: "text-lg font-bold " +
+                  (coherenceGlobal.dansSeuil ? "text-emerald-300" : "text-red-300") },
+                fmtPct(coherenceGlobal.ecartPct))
+            )
+          ),
+          React.createElement("p", { className: "text-xs text-neutral-500 mt-2 text-center" },
+            "Seuil : ±" + (params.seuilTolerancePerte || 0) + " % — " +
+              (coherenceGlobal.dansSeuil ? "dans la tolérance" : "DÉPASSE la tolérance"))
+        )
+      ));
+
+      /* Comparatif par jour (seulement si granularité = "comparatif"). */
+      if (granularite === "comparatif") {
+        blocs.push(React.createElement(
+          "div",
+          { key: "cmp", className: "mb-4" },
+          React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+            "Comparatif par jour"),
+          React.createElement(
+            "div",
+            { className: "rounded-xl border border-neutral-800 overflow-hidden" },
+            React.createElement(
+              "table",
+              { className: "w-full text-sm" },
+              React.createElement(
+                "thead",
+                { className: "bg-neutral-900 text-neutral-400 text-xs" },
+                React.createElement(
+                  "tr",
+                  null,
+                  React.createElement("th", { className: "text-left p-2" }, "Jour"),
+                  React.createElement("th", { className: "text-right p-2" }, "CA"),
+                  React.createElement("th", { className: "text-right p-2" }, "Pintes"),
+                  React.createElement("th", { className: "text-right p-2" }, "Pichets"),
+                  React.createElement("th", { className: "text-right p-2" }, "Gobelets")
+                )
+              ),
+              React.createElement(
+                "tbody",
+                null,
+                joursPourComparatif.map(function (j) {
+                  return React.createElement(
+                    "tr",
+                    { key: j.numero, className: "border-t border-neutral-800" },
+                    React.createElement("td", { className: "p-2 text-white font-bold" }, "J" + j.numero),
+                    React.createElement("td", { className: "p-2 text-right text-emerald-300" }, fmtEuros(j.ventes.ca)),
+                    React.createElement("td", { className: "p-2 text-right text-neutral-300" }, j.ventes.nbPintes),
+                    React.createElement("td", { className: "p-2 text-right text-neutral-300" }, j.ventes.nbPichets),
+                    React.createElement("td", { className: "p-2 text-right text-neutral-300" }, j.ventes.nbGobelets)
+                  );
+                })
+              )
+            )
+          )
+        ));
+      }
+
+      return React.createElement("div", null, blocs);
+    }
+
+    /* ----- RENDU ONGLET "PAR BAR" ----- */
+    function rendreParBar() {
+      if ((bars || []).length === 0) {
+        return React.createElement("p", { className: "text-neutral-500 text-sm text-center py-8" },
+          "Aucun bar pour l'instant.");
+      }
+      return React.createElement(
+        "div",
+        { className: "space-y-3" },
+        lignesParBar.map(function (l) {
+          const seuilOk = l.coherence.dansSeuil;
+          const couleurBordure = seuilOk ? "border-neutral-800" : "border-red-800";
+          return React.createElement(
+            "div",
+            { key: l.id, className: "rounded-xl border p-3 " + couleurBordure +
+                (seuilOk ? " bg-neutral-900" : " bg-red-950/30") },
+            React.createElement(
+              "div",
+              { className: "flex items-center justify-between mb-2" },
+              React.createElement("span", { className: "font-bold text-white" }, l.nom),
+              React.createElement("span", { className: "text-xs text-neutral-400" },
+                l.type === TYPE_BAR.BIERE ? "Bière" : "Cidre")
+            ),
+            React.createElement(
+              "div",
+              { className: "grid grid-cols-2 gap-2 text-sm mb-2" },
+              React.createElement(
+                "div",
+                null,
+                React.createElement("p", { className: "text-xs text-neutral-500" }, "CA"),
+                React.createElement("p", { className: "font-bold text-emerald-300" }, fmtEuros(l.ventes.ca))
+              ),
+              React.createElement(
+                "div",
+                null,
+                React.createElement("p", { className: "text-xs text-neutral-500" }, "Pintes / Pichets / Gobelets"),
+                React.createElement("p", { className: "font-bold text-white" },
+                  l.ventes.nbPintes + " / " + l.ventes.nbPichets + " / " + l.ventes.nbGobelets)
+              ),
+              React.createElement(
+                "div",
+                null,
+                React.createElement("p", { className: "text-xs text-neutral-500" }, "Fûts sortis"),
+                React.createElement("p", { className: "font-bold text-white" },
+                  (l.futs.nbBiereSortis + l.futs.nbCidreSortis) +
+                    " (" + l.futs.nbCasses + " cassés)")
+              ),
+              React.createElement(
+                "div",
+                null,
+                React.createElement("p", { className: "text-xs text-neutral-500" }, "Écart cohérence"),
+                React.createElement("p", { className: "font-bold " + (seuilOk ? "text-emerald-300" : "text-red-300") },
+                  fmtPct(l.coherence.ecartPct))
+              )
+            ),
+            !seuilOk
+              ? React.createElement("p", { className: "text-xs text-red-300" },
+                  "⚠ Dépasse le seuil de " + (params.seuilTolerancePerte || 0) + " %")
+              : null,
+            l.ventes.nbPadEnPanne > 0
+              ? React.createElement("p", { className: "text-xs text-amber-300 mt-1" },
+                  l.ventes.nbPadEnPanne + " saisie(s) avec PAD en panne (" +
+                    l.ventes.nbDonneesPerdues + " donnée(s) perdue(s))")
+              : null
+          );
+        })
+      );
+    }
+
+    /* Bouton onglet réutilisable. */
+    function ongletBtn(cle, libelle) {
+      const actif = onglet === cle;
+      return React.createElement(
+        "button",
+        {
+          onClick: function () { setOnglet(cle); },
+          className: "px-3 py-2 text-sm font-medium rounded-lg " +
+            (actif ? "bg-purple-700 text-white" : "bg-neutral-800 text-neutral-400")
+        },
+        libelle
+      );
+    }
+
+    /* Bouton granularité réutilisable. */
+    function granBtn(cle, libelle) {
+      const actif = granularite === cle;
+      return React.createElement(
+        "button",
+        {
+          onClick: function () { setGranularite(cle); },
+          className: "flex-1 px-2 py-1.5 text-xs font-medium rounded " +
+            (actif ? "bg-neutral-700 text-white" : "bg-neutral-900 text-neutral-500")
+        },
+        libelle
+      );
+    }
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black z-40 flex flex-col" },
+
+      /* En-tête. */
+      React.createElement(
+        "div",
+        { className: "p-4 border-b border-neutral-800 flex items-center justify-between" },
+        React.createElement(
+          "div",
+          null,
+          React.createElement("h2", { className: "text-lg font-bold text-purple-400" }, "Dashboard"),
+          React.createElement("p", { className: "text-xs text-neutral-500" }, "Vue d'ensemble du festival")
+        ),
+        React.createElement(
+          "button",
+          { onClick: onFermer, className: "text-xs px-3 py-1.5 bg-neutral-800 text-neutral-300 rounded-lg" },
+          "Fermer"
+        )
+      ),
+
+      /* Barre d'onglets. */
+      React.createElement(
+        "div",
+        { className: "px-3 py-2 flex gap-2 border-b border-neutral-800 overflow-x-auto" },
+        ongletBtn("vue", "Vue d'ensemble"),
+        ongletBtn("bar", "Par bar")
+      ),
+
+      /* Bascule de granularité. */
+      React.createElement(
+        "div",
+        { className: "px-3 py-2 flex gap-1 border-b border-neutral-800" },
+        granBtn("tout", "Tout le festival"),
+        granBtn("jour", "Jour " + jourActuel),
+        granBtn("comparatif", "Comparatif jours")
+      ),
+
+      /* Corps. */
+      React.createElement(
+        "div",
+        { className: "flex-1 overflow-auto p-3" },
+        onglet === "vue" ? rendreVue() : rendreParBar()
+      )
+    );
+  }
+
+  /* =========================================================================
      SECTION 15 — ÉCRAN PRINCIPAL
   ========================================================================= */
   function EcranPrincipal({ prenom, role, onDeconnexion }) {
@@ -2289,10 +2821,13 @@
     /* Planning bénévoles du jour actif (module planning). */
     const [planningDuJour, setPlanningDuJour] = useState({});
     const [ecranPlanning, setEcranPlanning] = useState(false);
+    /* Écran dashboard (module dashboard). */
+    const [ecranDashboard, setEcranDashboard] = useState(false);
 
     const peutGererBars = Droits.peutGererBars(role);
     const peutGererParams = Droits.peutGererParams(role);
     const peutGererPlanning = Droits.peutGererPlanning(role);
+    const peutVoirDashboard = Droits.peutVoirDashboard(role);
 
     /* Abonnement temps réel : bars, historique, params, jour actif. */
     useEffect(function () {
@@ -2510,7 +3045,7 @@
          ligne automatique si la largeur écran est trop petite ou si on
          dépasse 3-4 boutons. Chaque bouton garde sa couleur identitaire
          (vert = ventes, bleu = planning, etc.). */
-      (Droits.peutSaisirVentes(role) || peutGererPlanning)
+      (Droits.peutSaisirVentes(role) || peutGererPlanning || peutVoirDashboard)
         ? React.createElement(
             "div",
             { className: "px-3 pb-2 flex flex-wrap gap-2" },
@@ -2536,6 +3071,18 @@
                     className: "flex-1 min-w-[140px] py-2.5 bg-blue-800 hover:bg-blue-700 text-white rounded-lg text-sm font-medium"
                   },
                   "Planning bénévoles"
+                )
+              : null,
+
+            /* Dashboard — violet (admin et plus). */
+            peutVoirDashboard
+              ? React.createElement(
+                  "button",
+                  {
+                    onClick: function () { setEcranDashboard(true); },
+                    className: "flex-1 min-w-[140px] py-2.5 bg-purple-800 hover:bg-purple-700 text-white rounded-lg text-sm font-medium"
+                  },
+                  "Dashboard"
                 )
               : null
           )
@@ -2633,6 +3180,18 @@
             creneaux: creneaux,
             planningDuJour: planningDuJour,
             onFermer: function () { setEcranPlanning(false); }
+          })
+        : null,
+
+      /* Écran dashboard (plein écran, admin et plus). */
+      ecranDashboard
+        ? React.createElement(EcranDashboard, {
+            jourActuel: jourActuel,
+            bars: bars,
+            historique: historique,
+            casesVentesTousJours: casesVentesTousJours,
+            params: params,
+            onFermer: function () { setEcranDashboard(false); }
           })
         : null
     );
