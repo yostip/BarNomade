@@ -4438,6 +4438,9 @@
     const [erreur, setErreur] = useState("");
     const [prenom, setPrenom] = useState("");
     const [role, setRole] = useState(ROLES.VISITEUR);
+    /* Drapeau d'éjection : passe à true si l'entrée utilisateur disparaît
+       de la base alors qu'on est connecté. Déclenche la popup bloquante. */
+    const [ejecte, setEjecte] = useState(false);
 
     useEffect(function () {
       obtenirBadgeAnonyme()
@@ -4447,6 +4450,38 @@
           setEtape("erreur");
         });
     }, []);
+
+    /* ABONNEMENT TEMPS RÉEL au rôle de l'utilisateur connecté.
+       Dès qu'un admin change le rôle dans la console (ou via l'écran
+       Utilisateurs), l'app récupère la nouvelle valeur et met à jour
+       l'interface en silence — les boutons disponibles changent
+       immédiatement.
+       Si l'entrée utilisateur disparaît (éjection), on déclenche la
+       popup bloquante. */
+    useEffect(function () {
+      /* Cet effet ne s'active QUE quand on est en étape "pret" et qu'on a
+         un prénom. Sinon il n'y a rien à écouter. */
+      if (etape !== "pret" || !prenom) return;
+
+      const ref = Base.utilisateur(prenom);
+      function surChangement(snap) {
+        const u = snap.val();
+        if (!u) {
+          /* L'entrée a disparu de la base = l'utilisateur a été éjecté
+             par un admin. On affiche une popup et on force la
+             déconnexion à la validation. */
+          setEjecte(true);
+          return;
+        }
+        /* Sinon, on met à jour silencieusement le rôle si nécessaire. */
+        const nouveauRole = u.role || ROLES.VISITEUR;
+        setRole(function (ancien) {
+          return nouveauRole !== ancien ? nouveauRole : ancien;
+        });
+      }
+      ref.on("value", surChangement);
+      return function () { ref.off("value", surChangement); };
+    }, [etape, prenom]);
 
     function entrerDansApp(prenomSaisi) {
       setPrenom(prenomSaisi);
@@ -4461,6 +4496,7 @@
           role: roleConserve
         }).then(function () {
           setRole(roleConserve);
+          setEjecte(false);
           setEtape("pret");
         });
       }).catch(function (e) {
@@ -4472,7 +4508,14 @@
     function seDeconnecter() {
       setPrenom("");
       setRole(ROLES.VISITEUR);
+      setEjecte(false);
       setEtape("accueil");
+    }
+
+    /* Confirmation de l'éjection : on déconnecte et on revient à l'accueil. */
+    function validerEjection() {
+      setEjecte(false);
+      seDeconnecter();
     }
 
     if (etape === "erreur") return React.createElement(EcranErreur, { details: erreur });
@@ -4480,11 +4523,41 @@
     if (etape === "connexion") return React.createElement(EcranChargement, { message: "Enregistrement…" });
     if (etape === "accueil") return React.createElement(EcranAccueil, { onEntrer: entrerDansApp });
 
-    return React.createElement(EcranPrincipal, {
-      prenom: prenom,
-      role: role,
-      onDeconnexion: seDeconnecter
-    });
+    /* Écran principal + popup d'éjection si nécessaire. */
+    return React.createElement(
+      React.Fragment,
+      null,
+      React.createElement(EcranPrincipal, {
+        prenom: prenom,
+        role: role,
+        onDeconnexion: seDeconnecter
+      }),
+      /* Popup bloquante d'éjection : superposée à tout, validation
+         obligatoire pour revenir à l'accueil. */
+      ejecte
+        ? React.createElement(
+            "div",
+            { className: "fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-[100]" },
+            React.createElement(
+              "div",
+              { className: "bg-neutral-900 rounded-2xl w-full max-w-sm p-6 border border-red-900 text-center" },
+              React.createElement("h3", { className: "text-xl font-bold text-red-400 mb-3" },
+                "Vous avez été éjecté"),
+              React.createElement("p", { className: "text-sm text-neutral-300 mb-5" },
+                "Un administrateur a retiré votre compte de la session. " +
+                "Vous allez être ramené à l'écran d'accueil."),
+              React.createElement(
+                "button",
+                {
+                  onClick: validerEjection,
+                  className: "w-full py-3 bg-red-700 hover:bg-red-600 text-white rounded-lg font-medium"
+                },
+                "OK"
+              )
+            )
+          )
+        : null
+    );
   }
 
   /* =========================================================================
