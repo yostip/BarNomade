@@ -4,7 +4,7 @@
   GESTION DES FÛTS - BARS NOMADES - HELLFEST
   Application reconstruite proprement (remplace la version V16-V23 minifiée).
 
-  ÉTAT : MODULES 1 + 2 + 3A + 3B (complet) + PARAMÈTRES + PLANNING + DASHBOARD (complet)
+  ÉTAT : MODULES 1 + 2 + 3A + 3B (complet) + PARAMÈTRES + PLANNING + DASHBOARD + UTILISATEURS
   Contenu actuel :
     - démarrage, Firebase, authentification anonyme             (module 1)
     - écran d'accueil (prénom), connexion utilisateur           (module 1)
@@ -13,20 +13,15 @@
     - gestion des JOURS et des CRÉNEAUX horaires                (module 3A)
     - SAISIE DES VENTES : tableau bar x créneau, saisie,
       PAD en panne, succession de PAD, clôture, annulation      (module 3B)
-    - écran PARAMÈTRES : nombre de jours, max fûts par bar,
-      prix pinte/pichet/gobelet, volumes fûts bière/cidre,
-      volumes pinte/pichet (cl), seuil de tolérance de perte (%),
-      stock initial bière/cidre. Admin et plus.                 (module params)
-    - PLANNING BÉNÉVOLES : tableau bar x créneau, 3 postes
-      (vendeur, serveur, runner), saisie texte libre, détection
-      bloquante des conflits d'affectation. Secrétaire et plus. (module planning)
-    - DASHBOARD : onglets Vue d'ensemble / Par bar / Par bénévole /
-      Anomalies, bascule de granularité, contrôle de cohérence,
-      export Excel récapitulatif + export Excel journal brut
-      (mouvements de fûts + ventes détaillées). Admin et plus.  (module dashboard)
+    - écran PARAMÈTRES                                          (module params)
+    - PLANNING BÉNÉVOLES                                        (module planning)
+    - DASHBOARD : 4 onglets, exports Excel récap + journal      (module dashboard)
+    - UTILISATEURS : liste des inscrits, promotion/rétrogradation
+      visiteur<->secrétaire, éjection douce. Admin et plus.
+      Remise à zéro de la session (super admin only) avec
+      export Excel obligatoire et double confirmation par mot-clé. (module users)
 
-  Pas encore inclus : gestion des utilisateurs et promotions de rôle,
-  plan du festival, règles Firebase définitives, doc technique.
+  Pas encore inclus : règles Firebase définitives, plan, doc technique.
 
   PRINCIPE D'ARCHITECTURE
     - Un seul fichier HTML. Code lisible, commenté en français, non minifié.
@@ -335,6 +330,16 @@
        (conforme au tableau gelé). */
     peutVoirDashboard: function (role) {
       return role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
+    },
+    /* Gérer les utilisateurs (promotion/rétrogradation visiteur<->secrétaire,
+       éjection) : admin et plus, conforme au tableau gelé. */
+    peutGererUtilisateurs: function (role) {
+      return role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
+    },
+    /* Remise à zéro de la session : super admin uniquement,
+       conforme au tableau gelé. */
+    peutRemettreAZero: function (role) {
+      return role === ROLES.SUPERADMIN;
     }
   };
 
@@ -530,6 +535,77 @@
     /* Supprime un shift entier (vide les 3 postes). */
     supprimerShift: function (numeroJour, idBar, idCreneau) {
       return Base.shiftPlanning(numeroJour, idBar, idCreneau).remove();
+    }
+  };
+
+  /* =========================================================================
+     SECTION 8quinquies — ACTIONS UTILISATEURS (module utilisateurs)
+     Réservé admin et plus.
+
+     RÈGLES MÉTIER (gelées)
+       - Promotion/rétrogradation : UNIQUEMENT visiteur <-> secrétaire.
+         La promotion en admin n'existe PAS dans l'app : les 3 admins sont
+         passés en "admin" manuellement via la console Firebase, une fois
+         pour toutes. Décision validée par Yoann.
+       - Éjection : suppression DOUCE de l'entrée utilisateur (option A).
+         L'utilisateur peut revenir en se reconnectant ; il sera alors
+         recréé en "visiteur".
+       - Auto-protection : un utilisateur ne peut pas s'éjecter lui-même
+         ni changer son propre rôle. Le super admin ne peut être éjecté
+         par personne (il est unique et créateur de la session).
+  ========================================================================= */
+  const ActionsUtilisateurs = {
+
+    /* Change le rôle d'un utilisateur. */
+    changerRole: function (prenom, nouveauRole) {
+      return Base.utilisateur(prenom).child("role").set(nouveauRole);
+    },
+
+    /* Supprime l'entrée d'un utilisateur (suppression douce). */
+    ejecter: function (prenom) {
+      return Base.utilisateur(prenom).remove();
+    }
+  };
+
+  /* =========================================================================
+     SECTION 8sexies — ACTIONS SESSION (remise à zéro)
+     Réservé super admin uniquement.
+
+     COMPORTEMENT (gelé)
+       Efface : bars, historique fûts, ventes (tous jours), créneaux (tous
+       jours), planning bénévoles (tous jours), utilisateurs SAUF le super
+       admin connecté, jour actuel.
+       PRÉSERVE : paramètres (prix, volumes, seuil, etc. — pour ne pas les
+       ressaisir l'an prochain), l'entrée utilisateur du super admin.
+  ========================================================================= */
+  const ActionsSession = {
+
+    /* Efface tous les sous-noeuds de la session SAUF "params" et l'entrée
+       du super admin sous "users". On utilise un update() avec des null
+       pour effacer plusieurs noeuds en une seule opération atomique. */
+    remettreAZero: function (prenomSuperAdmin) {
+      /* Lecture préalable : on doit garder l'entrée du super admin. */
+      const refSession = db.ref("sessions/" + ID_SESSION);
+      return refSession.child("users/" + prenomSuperAdmin).once("value")
+        .then(function (snap) {
+          const donneesSuperAdmin = snap.val();
+          /* Effacement par "set null" sur les noeuds visés. */
+          const maj = {
+            bars: null,
+            historiqueFuts: null,
+            ventes: null,
+            creneaux: null,
+            planning: null,
+            jourActuel: null,
+            users: null               /* on efface tous les users... */
+          };
+          return refSession.update(maj).then(function () {
+            /* ...puis on remet uniquement le super admin. */
+            if (donneesSuperAdmin) {
+              return refSession.child("users/" + prenomSuperAdmin).set(donneesSuperAdmin);
+            }
+          });
+        });
     }
   };
 
@@ -3393,6 +3469,515 @@
   }
 
   /* =========================================================================
+     SECTION 14octies — ÉCRAN UTILISATEURS (module utilisateurs)
+
+     Accessible aux admin et plus. Affiche tous les utilisateurs inscrits
+     (option A) avec leur prénom, rôle, et dernière connexion.
+     Actions :
+       - Promotion visiteur -> secrétaire
+       - Rétrogradation secrétaire -> visiteur
+       - Éjection (suppression douce)
+     Le super admin peut en plus déclencher la REMISE À ZÉRO de la session
+     (export Excel obligatoire puis double confirmation par mot-clé).
+  ========================================================================= */
+  function EcranUtilisateurs({ prenom, role, onFermer, onDemanderRemiseAZero }) {
+    const [utilisateurs, setUtilisateurs] = useState({});
+
+    const peutGererUtilisateurs = Droits.peutGererUtilisateurs(role);
+    const peutRemettreAZero = Droits.peutRemettreAZero(role);
+
+    /* Abonnement Firebase à la liste des utilisateurs. */
+    useEffect(function () {
+      const ref = db.ref("sessions/" + ID_SESSION + "/users");
+      function surUsers(s) {
+        setUtilisateurs(s.val() || {});
+      }
+      ref.on("value", surUsers);
+      return function () { ref.off("value", surUsers); };
+    }, []);
+
+    /* Liste triée : super admin en haut, puis admins, puis secrétaires,
+       puis visiteurs ; alphabétique au sein de chaque groupe. */
+    const ordreRoles = {
+      superadmin: 0, admin: 1, secretaire: 2, visiteur: 3
+    };
+    const liste = Object.keys(utilisateurs || {}).map(function (cle) {
+      const u = utilisateurs[cle];
+      return {
+        prenom: u.prenom || cle,
+        role: u.role || ROLES.VISITEUR,
+        derniereConnexion: u.derniereConnexion || 0
+      };
+    }).sort(function (a, b) {
+      const oa = ordreRoles[a.role] != null ? ordreRoles[a.role] : 4;
+      const ob = ordreRoles[b.role] != null ? ordreRoles[b.role] : 4;
+      if (oa !== ob) return oa - ob;
+      return (a.prenom || "").localeCompare(b.prenom || "");
+    });
+
+    /* Format date court pour la dernière connexion. */
+    function fmtDate(ts) {
+      if (!ts) return "—";
+      const d = new Date(ts);
+      const pad = function (n) { return n < 10 ? "0" + n : "" + n; };
+      return pad(d.getDate()) + "/" + pad(d.getMonth() + 1) +
+        " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+    }
+
+    /* Couleur de pastille selon le rôle. */
+    function couleurRole(r) {
+      if (r === ROLES.SUPERADMIN) return "bg-purple-700 text-white";
+      if (r === ROLES.ADMIN) return "bg-red-700 text-white";
+      if (r === ROLES.SECRETAIRE) return "bg-blue-700 text-white";
+      return "bg-neutral-700 text-neutral-200";
+    }
+    function libelleRole(r) {
+      if (r === ROLES.SUPERADMIN) return "Super admin";
+      if (r === ROLES.ADMIN) return "Admin";
+      if (r === ROLES.SECRETAIRE) return "Secrétaire";
+      return "Visiteur";
+    }
+
+    function promouvoirEnSecretaire(p) {
+      ActionsUtilisateurs.changerRole(p, ROLES.SECRETAIRE)
+        .catch(function (e) { alert("Erreur : " + e.message); });
+    }
+    function retrograderEnVisiteur(p) {
+      ActionsUtilisateurs.changerRole(p, ROLES.VISITEUR)
+        .catch(function (e) { alert("Erreur : " + e.message); });
+    }
+    function ejecter(p) {
+      if (!confirm("Éjecter « " + p + " » ? Il pourra revenir en se " +
+          "reconnectant (mais redeviendra visiteur).")) return;
+      ActionsUtilisateurs.ejecter(p)
+        .catch(function (e) { alert("Erreur : " + e.message); });
+    }
+
+    /* Boutons d'action sur une ligne utilisateur. */
+    function boutonsLigne(u) {
+      /* Auto-protection : on ne peut rien faire sur soi-même. */
+      const cestMoi = u.prenom === prenom;
+      /* Auto-protection : on ne touche jamais au super admin. */
+      const estSuperAdmin = u.role === ROLES.SUPERADMIN;
+      /* Auto-protection : un admin ne peut pas être rétrogradé ni éjecté
+         depuis cet écran (les 3 admins sont gérés via console Firebase). */
+      const estAdmin = u.role === ROLES.ADMIN;
+
+      if (!peutGererUtilisateurs) return null;
+      if (cestMoi) {
+        return React.createElement("span", { className: "text-xs text-neutral-500 italic" }, "(vous-même)");
+      }
+      if (estSuperAdmin) {
+        return React.createElement("span", { className: "text-xs text-neutral-500 italic" }, "(protégé)");
+      }
+      if (estAdmin) {
+        return React.createElement("span", { className: "text-xs text-neutral-500 italic" },
+          "(géré via console Firebase)");
+      }
+
+      const boutons = [];
+      if (u.role === ROLES.VISITEUR) {
+        boutons.push(React.createElement(
+          "button",
+          {
+            key: "promo",
+            onClick: function () { promouvoirEnSecretaire(u.prenom); },
+            className: "text-xs px-2 py-1 bg-blue-700 hover:bg-blue-600 text-white rounded"
+          },
+          "→ Secrétaire"
+        ));
+      } else if (u.role === ROLES.SECRETAIRE) {
+        boutons.push(React.createElement(
+          "button",
+          {
+            key: "retro",
+            onClick: function () { retrograderEnVisiteur(u.prenom); },
+            className: "text-xs px-2 py-1 bg-neutral-700 hover:bg-neutral-600 text-white rounded"
+          },
+          "→ Visiteur"
+        ));
+      }
+      boutons.push(React.createElement(
+        "button",
+        {
+          key: "eject",
+          onClick: function () { ejecter(u.prenom); },
+          className: "text-xs px-2 py-1 bg-red-900 hover:bg-red-800 text-white rounded"
+        },
+        "Éjecter"
+      ));
+      return React.createElement("div", { className: "flex gap-1" }, boutons);
+    }
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black z-40 flex flex-col" },
+
+      /* En-tête. */
+      React.createElement(
+        "div",
+        { className: "p-4 border-b border-neutral-800 flex items-center justify-between" },
+        React.createElement(
+          "div",
+          null,
+          React.createElement("h2", { className: "text-lg font-bold text-orange-400" }, "Utilisateurs"),
+          React.createElement("p", { className: "text-xs text-neutral-500" },
+            liste.length + " utilisateur(s) inscrit(s)")
+        ),
+        React.createElement(
+          "button",
+          { onClick: onFermer, className: "text-xs px-3 py-1.5 bg-neutral-800 text-neutral-300 rounded-lg" },
+          "Fermer"
+        )
+      ),
+
+      /* Liste. */
+      React.createElement(
+        "div",
+        { className: "flex-1 overflow-auto p-3" },
+        liste.length === 0
+          ? React.createElement("p", { className: "text-neutral-500 text-sm text-center py-8" },
+              "Aucun utilisateur inscrit pour l'instant.")
+          : React.createElement(
+              "div",
+              { className: "space-y-2" },
+              liste.map(function (u) {
+                return React.createElement(
+                  "div",
+                  {
+                    key: u.prenom,
+                    className: "flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-lg p-3"
+                  },
+                  React.createElement(
+                    "div",
+                    { className: "flex-1 min-w-0" },
+                    React.createElement(
+                      "div",
+                      { className: "flex items-center gap-2" },
+                      React.createElement("span", { className: "font-bold text-white" }, u.prenom),
+                      React.createElement("span", {
+                        className: "text-xs px-2 py-0.5 rounded " + couleurRole(u.role)
+                      }, libelleRole(u.role))
+                    ),
+                    React.createElement("p", { className: "text-xs text-neutral-500 mt-1" },
+                      "Dernière connexion : " + fmtDate(u.derniereConnexion))
+                  ),
+                  React.createElement("div", { className: "ml-2" }, boutonsLigne(u))
+                );
+              })
+            )
+      ),
+
+      /* Pied : bouton remise à zéro (super admin only). */
+      peutRemettreAZero
+        ? React.createElement(
+            "div",
+            { className: "px-3 py-3 border-t border-neutral-800" },
+            React.createElement("p", { className: "text-xs text-neutral-500 mb-2 text-center" },
+              "Action irréversible — à utiliser uniquement après le festival"),
+            React.createElement(
+              "button",
+              {
+                onClick: onDemanderRemiseAZero,
+                className: "w-full py-2.5 bg-red-900 hover:bg-red-800 text-white rounded-lg text-sm font-medium"
+              },
+              "Remise à zéro de la session"
+            )
+          )
+        : null
+    );
+  }
+
+  /* =========================================================================
+     SECTION 14nonies — REMISE À ZÉRO DE LA SESSION (workflow)
+
+     ÉTAPES (gelées) :
+       1. Cliquer le bouton "Remise à zéro" -> ouvre cette fenêtre.
+       2. L'utilisateur clique "Exporter et continuer" : on génère les
+          DEUX fichiers Excel (récap + journal brut). Si l'un des deux
+          échoue, on bloque tout (pas d'effacement possible).
+       3. Une fois l'export confirmé, un champ de saisie apparaît.
+          L'utilisateur doit taper "EFFACER" en majuscules.
+       4. Au clic final, l'effacement est exécuté.
+  ========================================================================= */
+  function FenetreRemiseAZero({ params, bars, historique, casesVentesTousJours,
+                                planningTousJoursPourExport, prenom, onFermer }) {
+    /* Étape : "init" -> "exportFait" -> (saisie clé) -> "effacement". */
+    const [etape, setEtape] = useState("init");
+    const [cleSaisie, setCleSaisie] = useState("");
+    const [enCours, setEnCours] = useState(false);
+    const [messageErreur, setMessageErreur] = useState("");
+
+    /* Lance les DEUX exports Excel l'un après l'autre.
+       Renvoie une promesse qui réussit si les deux ont fonctionné. */
+    function exporterTout() {
+      if (typeof XLSX === "undefined") {
+        return Promise.reject(new Error("Bibliothèque Excel indisponible"));
+      }
+      return new Promise(function (resolve, reject) {
+        try {
+          /* ----- 1. Récapitulatif ----- */
+          /* On reproduit ici la logique de telechargerExcel pour ne pas
+             dépendre du dashboard (la fenêtre est appelable depuis
+             l'écran utilisateurs). Code dupliqué volontairement : si la
+             logique du dashboard évolue, attention à la garder synchro. */
+          const wbRecap = XLSX.utils.book_new();
+          const v = agregerVentes(casesVentesTousJours, null, null);
+          const f = agregerFuts(historique, null);
+          const c = calculerCoherence(historique, casesVentesTousJours, params, null);
+          const sk = calculerStock(historique, params);
+          const dataVue = [
+            ["Récapitulatif", "Valeur"],
+            ["CA total (€)", v.ca],
+            ["Pintes", v.nbPintes], ["Pichets", v.nbPichets], ["Gobelets", v.nbGobelets],
+            ["Saisies actives", v.nbSaisies], ["Annulées", v.nbAnnulees],
+            ["PAD en panne", v.nbPadEnPanne], ["Dont données perdues", v.nbDonneesPerdues],
+            [], ["Fûts bière sortis", f.nbBiereSortis], ["Fûts cidre sortis", f.nbCidreSortis],
+            ["Cassés", f.nbCasses], ["Pleins rendus", f.nbPleinsRendus],
+            [], ["Stock bière (fûts)", sk.biere], ["Stock cidre (fûts)", sk.cidre],
+            [], ["Volume sorti (L)", c.volumeSortiL.toFixed(1)],
+            ["Volume vendu (L)", c.volumeVenduL.toFixed(1)],
+            ["Écart (%)", c.ecartPct.toFixed(1)],
+            ["Seuil (%)", params.seuilTolerancePerte || 0],
+            ["Dans tolérance ?", c.dansSeuil ? "Oui" : "NON"]
+          ];
+          XLSX.utils.book_append_sheet(wbRecap, XLSX.utils.aoa_to_sheet(dataVue), "Vue d'ensemble");
+
+          /* Par bar. */
+          const dataBar = [["Bar", "Type", "CA (€)", "Pintes", "Pichets", "Gobelets",
+            "Fûts sortis", "Cassés", "Vol sorti L", "Vol vendu L", "Écart %", "Dans seuil"]];
+          (bars || []).forEach(function (bar) {
+            const vb = agregerVentes(casesVentesTousJours, null, bar.id);
+            const fb = agregerFuts(historique, bar.id);
+            const cb = calculerCoherence(historique, casesVentesTousJours, params, bar.id);
+            dataBar.push([
+              bar.nom, bar.type === TYPE_BAR.BIERE ? "bière" : "cidre", vb.ca,
+              vb.nbPintes, vb.nbPichets, vb.nbGobelets,
+              fb.nbBiereSortis + fb.nbCidreSortis, fb.nbCasses,
+              parseFloat(cb.volumeSortiL.toFixed(1)),
+              parseFloat(cb.volumeVenduL.toFixed(1)),
+              parseFloat(cb.ecartPct.toFixed(1)),
+              cb.dansSeuil ? "Oui" : "NON"
+            ]);
+          });
+          XLSX.utils.book_append_sheet(wbRecap, XLSX.utils.aoa_to_sheet(dataBar), "Par bar");
+
+          /* Par bénévole. */
+          const dataBen = [["Bénévole", "Vendeur", "Serveur", "Runner", "Total"]];
+          agregerBenevoles(planningTousJoursPourExport || {}).forEach(function (b) {
+            dataBen.push([b.nom, b.nbVendeur, b.nbServeur, b.nbRunner, b.nbTotal]);
+          });
+          XLSX.utils.book_append_sheet(wbRecap, XLSX.utils.aoa_to_sheet(dataBen), "Par bénévole");
+
+          /* Nom de fichier. */
+          const d1 = new Date();
+          const pad2 = function (n) { return n < 10 ? "0" + n : "" + n; };
+          const horodatage = d1.getFullYear() + pad2(d1.getMonth() + 1) + pad2(d1.getDate()) +
+            "-" + pad2(d1.getHours()) + pad2(d1.getMinutes());
+          XLSX.writeFile(wbRecap, "bars-nomades-final-recap-" + horodatage + ".xlsx");
+
+          /* ----- 2. Journal brut ----- */
+          /* Charger les créneaux puis générer. */
+          db.ref("sessions/" + ID_SESSION + "/creneaux").once("value").then(function (snap) {
+            const creneauxTousJours = snap.val() || {};
+            function libCreneau(nj, idCreneau) {
+              const cle = "jour" + nj;
+              const c = creneauxTousJours[cle];
+              return (c && c[idCreneau]) ? (c[idCreneau].libelle || idCreneau) : idCreneau;
+            }
+            function fmtDH(ts) {
+              if (!ts) return "";
+              const d2 = new Date(ts);
+              return d2.getFullYear() + "-" + pad2(d2.getMonth() + 1) + "-" + pad2(d2.getDate()) +
+                " " + pad2(d2.getHours()) + ":" + pad2(d2.getMinutes()) + ":" + pad2(d2.getSeconds());
+            }
+            const wbJ = XLSX.utils.book_new();
+            const dataMvt = [["Date/heure", "Mouvement", "Type fût", "Bar",
+              "Motif retour", "Commentaire", "Par"]];
+            (historique || []).slice().sort(function (a, b) {
+              return (a.date || 0) - (b.date || 0);
+            }).forEach(function (m) {
+              dataMvt.push([fmtDH(m.date), m.mouvement || "", m.typeFut || "",
+                m.nomBar || "", m.motifRetour || "", m.commentaire || "", m.par || ""]);
+            });
+            XLSX.utils.book_append_sheet(wbJ, XLSX.utils.aoa_to_sheet(dataMvt), "Mouvements de fûts");
+
+            /* Ventes détaillées. */
+            const dataV = [["Jour", "Bar", "Créneau", "Date/heure saisie",
+              "Montant (€)", "Pintes", "Pichets", "Gobelets",
+              "PAD en panne", "N° PAD", "Données partielles",
+              "Commentaire", "Saisi par", "Annulée", "Annulée par"]];
+            const lignes = [];
+            function nomBar(idBar) {
+              const b = (bars || []).find(function (x) { return x.id === idBar; });
+              return b ? b.nom : "(?)";
+            }
+            Object.keys(casesVentesTousJours || {}).forEach(function (cleJ) {
+              const nj = numeroDepuisCleJour(cleJ);
+              if (nj === null) return;
+              const barresJ = casesVentesTousJours[cleJ] || {};
+              Object.keys(barresJ).forEach(function (idBar) {
+                const creneauxBar = barresJ[idBar] || {};
+                Object.keys(creneauxBar).forEach(function (idCr) {
+                  const ca = creneauxBar[idCr];
+                  if (!ca || !ca.saisies) return;
+                  Object.keys(ca.saisies).forEach(function (idS) {
+                    const s = ca.saisies[idS];
+                    if (!s) return;
+                    lignes.push({ nj: nj, idBar: idBar, idCr: idCr, s: s });
+                  });
+                });
+              });
+            });
+            lignes.sort(function (a, b) { return (a.s.date || 0) - (b.s.date || 0); });
+            lignes.forEach(function (l) {
+              const s = l.s;
+              dataV.push([
+                "J" + l.nj, nomBar(l.idBar), libCreneau(l.nj, l.idCr),
+                fmtDH(s.date), s.montant || 0,
+                s.nbPintes || 0, s.nbPichets || 0, s.nbGobelets || 0,
+                s.padEnDefaut === true ? "oui" : "non",
+                s.numeroPad || "",
+                s.padEnDefaut === true ? (s.donneesPartielles === true ? "oui" : "non") : "",
+                s.commentaire || "", s.par || "",
+                s.annulee === true ? "oui" : "non",
+                s.annulee === true ? (s.annuleePar || "") : ""
+              ]);
+            });
+            XLSX.utils.book_append_sheet(wbJ, XLSX.utils.aoa_to_sheet(dataV), "Ventes détaillées");
+            XLSX.writeFile(wbJ, "bars-nomades-final-journal-" + horodatage + ".xlsx");
+
+            resolve();
+          }).catch(reject);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }
+
+    function lancerExport() {
+      setEnCours(true);
+      setMessageErreur("");
+      exporterTout().then(function () {
+        setEnCours(false);
+        setEtape("exportFait");
+      }).catch(function (e) {
+        setEnCours(false);
+        setMessageErreur("Échec de l'export : " + e.message + ". " +
+          "L'effacement est bloqué tant que l'export n'a pas réussi.");
+      });
+    }
+
+    function effacer() {
+      if (cleSaisie !== "EFFACER") {
+        setMessageErreur("Vous devez taper EFFACER en majuscules pour confirmer.");
+        return;
+      }
+      setEnCours(true);
+      ActionsSession.remettreAZero(prenom).then(function () {
+        setEnCours(false);
+        alert("La session a été remise à zéro. Vous restez connecté.");
+        onFermer();
+      }).catch(function (e) {
+        setEnCours(false);
+        setMessageErreur("Erreur lors de l'effacement : " + e.message);
+      });
+    }
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50" },
+      React.createElement(
+        "div",
+        { className: "bg-neutral-900 rounded-2xl w-full max-w-md p-6 border border-red-900" },
+
+        React.createElement("h3", { className: "text-xl font-bold text-red-400 mb-2" },
+          "Remise à zéro de la session"),
+        React.createElement("p", { className: "text-sm text-neutral-300 mb-4" },
+          "Cette action est IRRÉVERSIBLE. Elle effacera :"),
+        React.createElement(
+          "ul",
+          { className: "text-sm text-neutral-400 list-disc list-inside space-y-1 mb-4" },
+          React.createElement("li", null, "Tous les bars et leurs fûts en cours"),
+          React.createElement("li", null, "L'historique complet des mouvements de fûts"),
+          React.createElement("li", null, "Toutes les ventes saisies (tous les jours)"),
+          React.createElement("li", null, "Tous les créneaux horaires"),
+          React.createElement("li", null, "Tout le planning bénévoles"),
+          React.createElement("li", null, "Tous les utilisateurs sauf vous")
+        ),
+        React.createElement("p", { className: "text-sm text-emerald-300 mb-4" },
+          "✓ Les paramètres (prix, volumes, seuil...) seront PRÉSERVÉS."),
+
+        /* Étape 1 : déclencher l'export. */
+        etape === "init"
+          ? React.createElement(
+              "div",
+              null,
+              React.createElement("p", { className: "text-sm text-amber-300 mb-3" },
+                "Étape 1/2 — Téléchargement des deux fichiers Excel obligatoire " +
+                "avant l'effacement."),
+              React.createElement(
+                "button",
+                {
+                  onClick: lancerExport,
+                  disabled: enCours,
+                  className: "w-full py-3 bg-purple-700 hover:bg-purple-600 disabled:bg-neutral-700 text-white rounded-lg font-medium"
+                },
+                enCours ? "Export en cours…" : "Exporter et continuer"
+              )
+            )
+          : null,
+
+        /* Étape 2 : saisir la clé. */
+        etape === "exportFait"
+          ? React.createElement(
+              "div",
+              null,
+              React.createElement("p", { className: "text-sm text-emerald-300 mb-2" },
+                "✓ Étape 1/2 — Exports terminés."),
+              React.createElement("p", { className: "text-sm text-amber-300 mb-2" },
+                "Étape 2/2 — Pour confirmer l'effacement, tapez le mot EFFACER " +
+                "(en majuscules) dans le champ ci-dessous :"),
+              React.createElement("input", {
+                type: "text",
+                value: cleSaisie,
+                onChange: function (e) { setCleSaisie(e.target.value); },
+                className: "w-full px-3 py-2 bg-neutral-800 rounded-lg text-white text-center text-lg font-bold tracking-widest mb-3",
+                placeholder: "EFFACER",
+                autoFocus: true
+              }),
+              React.createElement(
+                "button",
+                {
+                  onClick: effacer,
+                  disabled: enCours || cleSaisie !== "EFFACER",
+                  className: "w-full py-3 bg-red-700 hover:bg-red-600 disabled:bg-neutral-700 text-white rounded-lg font-medium"
+                },
+                enCours ? "Effacement…" : "Confirmer l'effacement"
+              )
+            )
+          : null,
+
+        /* Message d'erreur. */
+        messageErreur
+          ? React.createElement("p", { className: "text-xs text-red-300 mt-3 text-center" }, messageErreur)
+          : null,
+
+        /* Bouton annuler. */
+        React.createElement(
+          "button",
+          {
+            onClick: onFermer,
+            disabled: enCours,
+            className: "w-full mt-3 py-2 bg-neutral-700 hover:bg-neutral-600 text-neutral-300 rounded-lg text-sm"
+          },
+          "Annuler"
+        )
+      )
+    );
+  }
+
+  /* =========================================================================
      SECTION 15 — ÉCRAN PRINCIPAL
   ========================================================================= */
   function EcranPrincipal({ prenom, role, onDeconnexion }) {
@@ -3417,11 +4002,19 @@
     const [ecranPlanning, setEcranPlanning] = useState(false);
     /* Écran dashboard (module dashboard). */
     const [ecranDashboard, setEcranDashboard] = useState(false);
+    /* Écran utilisateurs et fenêtre de remise à zéro (module utilisateurs). */
+    const [ecranUtilisateurs, setEcranUtilisateurs] = useState(false);
+    const [fenetreRemiseAZero, setFenetreRemiseAZero] = useState(false);
+    /* Planning de TOUS les jours, nécessaire au moment d'un export depuis
+       la fenêtre de remise à zéro (qui n'est pas l'écran Dashboard).
+       Chargé une seule fois à l'ouverture de l'écran principal. */
+    const [planningTousJours, setPlanningTousJours] = useState({});
 
     const peutGererBars = Droits.peutGererBars(role);
     const peutGererParams = Droits.peutGererParams(role);
     const peutGererPlanning = Droits.peutGererPlanning(role);
     const peutVoirDashboard = Droits.peutVoirDashboard(role);
+    const peutGererUtilisateurs = Droits.peutGererUtilisateurs(role);
 
     /* Abonnement temps réel : bars, historique, params, jour actif. */
     useEffect(function () {
@@ -3498,6 +4091,17 @@
         refPlanning.off("value", surPlanning);
       };
     }, [jourActuel]);
+
+    /* Abonnement au planning TOUS JOURS confondus.
+       Utilisé par la fenêtre de remise à zéro pour générer l'export. */
+    useEffect(function () {
+      const ref = db.ref("sessions/" + ID_SESSION + "/planning");
+      function surTout(s) {
+        setPlanningTousJours(s.val() || {});
+      }
+      ref.on("value", surTout);
+      return function () { ref.off("value", surTout); };
+    }, []);
 
     /* Abonnement aux ventes TOUS JOURS confondus.
        Utilisé uniquement par la fenêtre paramètres pour détecter les jours
@@ -3639,7 +4243,7 @@
          ligne automatique si la largeur écran est trop petite ou si on
          dépasse 3-4 boutons. Chaque bouton garde sa couleur identitaire
          (vert = ventes, bleu = planning, etc.). */
-      (Droits.peutSaisirVentes(role) || peutGererPlanning || peutVoirDashboard)
+      (Droits.peutSaisirVentes(role) || peutGererPlanning || peutVoirDashboard || peutGererUtilisateurs)
         ? React.createElement(
             "div",
             { className: "px-3 pb-2 flex flex-wrap gap-2" },
@@ -3677,6 +4281,18 @@
                     className: "flex-1 min-w-[140px] py-2.5 bg-purple-800 hover:bg-purple-700 text-white rounded-lg text-sm font-medium"
                   },
                   "Dashboard"
+                )
+              : null,
+
+            /* Utilisateurs — orange (admin et plus). */
+            peutGererUtilisateurs
+              ? React.createElement(
+                  "button",
+                  {
+                    onClick: function () { setEcranUtilisateurs(true); },
+                    className: "flex-1 min-w-[140px] py-2.5 bg-orange-800 hover:bg-orange-700 text-white rounded-lg text-sm font-medium"
+                  },
+                  "Utilisateurs"
                 )
               : null
           )
@@ -3786,6 +4402,29 @@
             casesVentesTousJours: casesVentesTousJours,
             params: params,
             onFermer: function () { setEcranDashboard(false); }
+          })
+        : null,
+
+      /* Écran utilisateurs (plein écran, admin et plus). */
+      ecranUtilisateurs
+        ? React.createElement(EcranUtilisateurs, {
+            prenom: prenom,
+            role: role,
+            onFermer: function () { setEcranUtilisateurs(false); },
+            onDemanderRemiseAZero: function () { setFenetreRemiseAZero(true); }
+          })
+        : null,
+
+      /* Fenêtre de remise à zéro (modal, super admin uniquement). */
+      fenetreRemiseAZero
+        ? React.createElement(FenetreRemiseAZero, {
+            params: params,
+            bars: bars,
+            historique: historique,
+            casesVentesTousJours: casesVentesTousJours,
+            planningTousJoursPourExport: planningTousJours,
+            prenom: prenom,
+            onFermer: function () { setFenetreRemiseAZero(false); }
           })
         : null
     );
