@@ -22,7 +22,8 @@
       bloquante des conflits d'affectation. Secrétaire et plus. (module planning)
     - DASHBOARD : onglets Vue d'ensemble / Par bar / Par bénévole /
       Anomalies, bascule de granularité, contrôle de cohérence,
-      export Excel (.xlsx) à la demande. Admin et plus.         (module dashboard)
+      export Excel récapitulatif + export Excel journal brut
+      (mouvements de fûts + ventes détaillées). Admin et plus.  (module dashboard)
 
   Pas encore inclus : gestion des utilisateurs et promotions de rôle,
   plan du festival, règles Firebase définitives, doc technique.
@@ -3155,6 +3156,136 @@
       XLSX.writeFile(wb, nomFichier);
     }
 
+    /* ----- EXPORT JOURNAL BRUT -----
+       Second fichier Excel séparé du récapitulatif. Contient 2 feuilles :
+         - "Mouvements de fûts" : option A (données brutes, sans créneau
+           ni équipe, l'heure exacte fait foi).
+         - "Ventes détaillées" : une ligne par saisie PAD, annulées
+           comprises (marquées comme telles).
+       Pour les libellés de créneaux dans la feuille Ventes, on charge les
+       créneaux de TOUS les jours ponctuellement au clic (pas d'abonnement
+       permanent, car cet export est occasionnel). */
+    function telechargerJournal() {
+      if (typeof XLSX === "undefined") {
+        alert("La bibliothèque Excel n'est pas chargée. Vérifiez votre connexion internet.");
+        return;
+      }
+
+      /* Helper de date : convertit un timestamp (ms) en "YYYY-MM-DD HH:MM:SS". */
+      function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+      function fmtDateHeure(ts) {
+        if (!ts) return "";
+        const d2 = new Date(ts);
+        return d2.getFullYear() + "-" + pad2(d2.getMonth() + 1) + "-" + pad2(d2.getDate()) +
+          " " + pad2(d2.getHours()) + ":" + pad2(d2.getMinutes()) + ":" + pad2(d2.getSeconds());
+      }
+
+      /* On charge les créneaux de tous les jours en une lecture Firebase
+         unique, puis on construit le fichier. */
+      db.ref("sessions/" + ID_SESSION + "/creneaux").once("value").then(function (snap) {
+        const creneauxTousJours = snap.val() || {};
+
+        /* Résout idCreneau -> libellé, sur un jour donné. */
+        function libCreneau(numeroJour, idCreneau) {
+          const cle = "jour" + numeroJour;
+          const c = creneauxTousJours[cle];
+          if (!c || !c[idCreneau]) return idCreneau;       /* fallback : on garde l'id */
+          return c[idCreneau].libelle || idCreneau;
+        }
+
+        const wb = XLSX.utils.book_new();
+
+        /* --- Feuille 1 : Mouvements de fûts (option A) --- */
+        /* On parcourt l'historique tel quel, sans déduction. */
+        const dataMvt = [[
+          "Date/heure", "Mouvement", "Type de fût", "Bar",
+          "Motif retour", "Commentaire", "Par"
+        ]];
+        /* Tri par date croissante pour faciliter la lecture chronologique. */
+        const histoTrie = (historique || []).slice().sort(function (a, b) {
+          return (a.date || 0) - (b.date || 0);
+        });
+        histoTrie.forEach(function (mvt) {
+          dataMvt.push([
+            fmtDateHeure(mvt.date),
+            mvt.mouvement || "",
+            mvt.typeFut || "",
+            mvt.nomBar || "",
+            mvt.motifRetour || "",
+            mvt.commentaire || "",
+            mvt.par || ""
+          ]);
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataMvt), "Mouvements de fûts");
+
+        /* --- Feuille 2 : Ventes détaillées --- */
+        const dataVentes = [[
+          "Jour", "Bar", "Créneau", "Date/heure saisie",
+          "Montant (€)", "Pintes", "Pichets", "Gobelets",
+          "PAD en panne", "N° PAD", "Données partielles",
+          "Commentaire", "Saisi par",
+          "Annulée", "Annulée par"
+        ]];
+        /* On parcourt toutes les cases de ventes, toutes les saisies. */
+        const lignesVentes = [];
+        Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
+          const nj = numeroDepuisCleJour(cleJour);
+          if (nj === null) return;
+          const barresDuJour = casesVentesTousJours[cleJour] || {};
+          Object.keys(barresDuJour).forEach(function (idBar) {
+            const creneauxDuBar = barresDuJour[idBar] || {};
+            Object.keys(creneauxDuBar).forEach(function (idCreneau) {
+              const uneCase = creneauxDuBar[idCreneau];
+              if (!uneCase || !uneCase.saisies) return;
+              Object.keys(uneCase.saisies).forEach(function (idS) {
+                const s = uneCase.saisies[idS];
+                if (!s) return;
+                lignesVentes.push({
+                  jour: nj,
+                  bar: nomBar(idBar),
+                  creneau: libCreneau(nj, idCreneau),
+                  date: s.date || 0,
+                  saisie: s
+                });
+              });
+            });
+          });
+        });
+        /* Tri chronologique. */
+        lignesVentes.sort(function (a, b) { return a.date - b.date; });
+        lignesVentes.forEach(function (l) {
+          const s = l.saisie;
+          dataVentes.push([
+            "J" + l.jour,
+            l.bar,
+            l.creneau,
+            fmtDateHeure(s.date),
+            s.montant || 0,
+            s.nbPintes || 0,
+            s.nbPichets || 0,
+            s.nbGobelets || 0,
+            s.padEnDefaut === true ? "oui" : "non",
+            s.numeroPad || "",
+            s.padEnDefaut === true ? (s.donneesPartielles === true ? "oui" : "non") : "",
+            s.commentaire || "",
+            s.par || "",
+            s.annulee === true ? "oui" : "non",
+            s.annulee === true ? (s.annuleePar || "") : ""
+          ]);
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataVentes), "Ventes détaillées");
+
+        /* Nom de fichier. */
+        const dnow = new Date();
+        const nomFichier = "bars-nomades-journal-" +
+          dnow.getFullYear() + pad2(dnow.getMonth() + 1) + pad2(dnow.getDate()) +
+          "-" + pad2(dnow.getHours()) + pad2(dnow.getMinutes()) + ".xlsx";
+        XLSX.writeFile(wb, nomFichier);
+      }).catch(function (e) {
+        alert("Erreur lors de la génération du journal : " + e.message);
+      });
+    }
+
     /* Bouton onglet réutilisable. */
     function ongletBtn(cle, libelle) {
       const actif = onglet === cle;
@@ -3237,17 +3368,25 @@
           : rendreAnomalies()
       ),
 
-      /* Pied : bouton d'export Excel. */
+      /* Pied : boutons d'export Excel (récap + journal). */
       React.createElement(
         "div",
-        { className: "px-3 py-2 border-t border-neutral-800" },
+        { className: "px-3 py-2 border-t border-neutral-800 flex flex-wrap gap-2" },
         React.createElement(
           "button",
           {
             onClick: telechargerExcel,
-            className: "w-full py-2.5 bg-purple-700 hover:bg-purple-600 text-white rounded-lg text-sm font-medium"
+            className: "flex-1 min-w-[140px] py-2.5 bg-purple-700 hover:bg-purple-600 text-white rounded-lg text-sm font-medium"
           },
-          "Télécharger le récapitulatif Excel"
+          "Récapitulatif Excel"
+        ),
+        React.createElement(
+          "button",
+          {
+            onClick: telechargerJournal,
+            className: "flex-1 min-w-[140px] py-2.5 bg-neutral-700 hover:bg-neutral-600 text-white rounded-lg text-sm font-medium"
+          },
+          "Journal brut Excel"
         )
       )
     );
