@@ -4,7 +4,7 @@
   GESTION DES FÛTS - BARS NOMADES - HELLFEST
   Application reconstruite proprement (remplace la version V16-V23 minifiée).
 
-  ÉTAT : MODULES 1 + 2 + 3A + 3B (complet)
+  ÉTAT : MODULES 1 + 2 + 3A + 3B (complet) + PARAMÈTRES
   Contenu actuel :
     - démarrage, Firebase, authentification anonyme             (module 1)
     - écran d'accueil (prénom), connexion utilisateur           (module 1)
@@ -13,6 +13,10 @@
     - gestion des JOURS et des CRÉNEAUX horaires                (module 3A)
     - SAISIE DES VENTES : tableau bar x créneau, saisie,
       PAD en panne, succession de PAD, clôture, annulation      (module 3B)
+    - écran PARAMÈTRES : nombre de jours, max fûts par bar,
+      prix pinte/pichet/gobelet, volumes fûts bière/cidre,
+      volumes pinte/pichet (cl), seuil de tolérance de perte (%),
+      stock initial bière/cidre. Admin et plus.                 (module params)
 
   Pas encore inclus : planning bénévoles, dashboard, exports, plan,
   règles Firebase définitives.
@@ -106,11 +110,32 @@
   };
 
   /* Réglages par défaut (le super admin les changera au module 4). */
+  /* Réglages par défaut, utilisés tant que l'admin n'a pas configuré
+     les paramètres depuis l'écran dédié. */
   const PARAMS_DEFAUT = {
     stockInitialBiere: 50,
     stockInitialCidre: 20,
     maxFutsParBar: 3,
-    nombreJours: 4
+    nombreJours: 4,
+    /* Prix unitaires en euros. Utilisés en module dashboard pour calculer
+       le CA théorique (volet "écarts"). */
+    prixPinte: 6,
+    prixPichet: 15,
+    prixGobelet: 2,
+    /* Volumes d'un fût en litres. */
+    volumeFutBiere: 30,
+    volumeFutCidre: 20,
+    /* Volumes d'un service en CL (centilitres).
+       Utilisés en module dashboard pour le contrôle de cohérence
+       (volume sorti via les fûts vs volume vendu via les saisies).
+       Pas de "volumeGobelet" : le gobelet est un consommable, pas une boisson. */
+    volumePinte: 50,
+    volumePichet: 100,
+    /* Seuil de tolérance de perte, en %. Sert uniquement au contrôle
+       cohérence volumes dans le dashboard (pas de contrôle sur les prix).
+       Typiquement entre 5 et 10 % selon la politique du festival.
+       Au-delà du seuil, le bar sera signalé dans le dashboard. */
+    seuilTolerancePerte: 7
   };
 
   const STOCKAGE = { PRENOM: "barnomade_prenom" };
@@ -272,6 +297,10 @@
     /* Saisir les ventes : secrétaire et plus (module 3B). */
     peutSaisirVentes: function (role) {
       return role === ROLES.SECRETAIRE || role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
+    },
+    /* Modifier les paramètres : admin et plus (conforme au tableau gelé). */
+    peutGererParams: function (role) {
+      return role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
     }
   };
 
@@ -400,6 +429,34 @@
         });
         return refDestination.set(nouveau);
       });
+    }
+  };
+
+  /* =========================================================================
+     SECTION 8ter — ACTIONS SUR LES PARAMÈTRES GÉNÉRAUX (module paramètres)
+     Réservé admin/super admin (conforme au tableau gelé).
+
+     NOTE DÉVELOPPEURS — PRIX ET CALCULS THÉORIQUES
+       Décision validée : les prix ne sont PAS stockés dans chaque saisie
+       de vente. Les calculs théoriques utiliseront toujours le prix
+       ACTUEL des paramètres, même pour les ventes saisies avant un
+       changement de prix. Donc : ne jamais modifier un prix en cours de
+       festival, sinon les calculs d'écart deviennent faux. C'est la
+       contrepartie assumée du choix de simplicité.
+  ========================================================================= */
+  const ActionsParams = {
+
+    /* Sauvegarde une nouvelle valeur pour un paramètre.
+       "nom" = clé du paramètre (ex: "prixPinte", "nombreJours").
+       "valeur" = la nouvelle valeur (nombre). */
+    definir: function (nom, valeur) {
+      return Base.params().child(nom).set(valeur);
+    },
+
+    /* Sauvegarde plusieurs paramètres d'un coup (utilisé par la fenêtre
+       de paramètres au clic sur "Enregistrer"). */
+    sauvegarderTout: function (nouveauxParams) {
+      return Base.params().update(nouveauxParams);
     }
   };
 
@@ -967,9 +1024,10 @@
      SECTION 14 — BANDEAU DU JOUR
      Affiche le jour actif et permet d'en changer (admin et plus).
   ========================================================================= */
-  function BandeauJour({ jourActuel, nombreJours, role, onChangerJour, onOuvrirCreneaux }) {
+  function BandeauJour({ jourActuel, nombreJours, role, onChangerJour, onOuvrirCreneaux, onOuvrirParams }) {
     const peutChangerJour = Droits.peutChangerJour(role);
     const peutGererCreneaux = Droits.peutGererCreneaux(role);
+    const peutGererParams = Droits.peutGererParams(role);
 
     return React.createElement(
       "div",
@@ -1006,17 +1064,31 @@
         React.createElement("span", { className: "text-xs text-neutral-500" }, "/ " + nombreJours)
       ),
 
-      /* Bouton créneaux (super admin seulement). */
-      peutGererCreneaux
-        ? React.createElement(
-            "button",
-            {
-              onClick: onOuvrirCreneaux,
-              className: "text-xs px-3 py-1.5 bg-neutral-800 text-neutral-200 rounded-lg"
-            },
-            "Créneaux du jour"
-          )
-        : null
+      /* Boutons à droite : Paramètres (admin+) et Créneaux (super admin). */
+      React.createElement(
+        "div",
+        { className: "flex items-center gap-2" },
+        peutGererParams
+          ? React.createElement(
+              "button",
+              {
+                onClick: onOuvrirParams,
+                className: "text-xs px-3 py-1.5 bg-neutral-800 text-neutral-200 rounded-lg"
+              },
+              "Paramètres"
+            )
+          : null,
+        peutGererCreneaux
+          ? React.createElement(
+              "button",
+              {
+                onClick: onOuvrirCreneaux,
+                className: "text-xs px-3 py-1.5 bg-neutral-800 text-neutral-200 rounded-lg"
+              },
+              "Créneaux"
+            )
+          : null
+      )
     );
   }
 
@@ -1574,6 +1646,253 @@
   }
 
   /* =========================================================================
+     SECTION 14quater — FENÊTRE DE PARAMÈTRES (module paramètres)
+     Réservée admin/super admin. Permet de régler :
+       - nombre de jours du festival
+       - max fûts par bar
+       - prix pinte, pichet, gobelet
+       - volume fût bière, volume fût cidre
+       - stock initial bière, stock initial cidre
+
+     ALERTES :
+       - modifier stock initial APRÈS attribution de fûts -> confirmation
+         demandée (impacte le stock affiché rétroactivement).
+       - modifier le nombre de jours en abaissant la valeur ALORS que des
+         données existent dans les jours qui seraient "perdus" -> alerte.
+  ========================================================================= */
+  function FenetreParametres({ params, bars, historique, casesVentesTousJours, onFermer }) {
+    /* Pour chaque paramètre, on garde une copie locale en texte (édition).
+       On ne sauvegarde dans la base qu'au clic sur "Enregistrer". */
+    const [nombreJours, setNombreJours] = useState(String(params.nombreJours));
+    const [maxFutsParBar, setMaxFutsParBar] = useState(String(params.maxFutsParBar));
+    const [prixPinte, setPrixPinte] = useState(String(params.prixPinte));
+    const [prixPichet, setPrixPichet] = useState(String(params.prixPichet));
+    const [prixGobelet, setPrixGobelet] = useState(String(params.prixGobelet));
+    const [volumeFutBiere, setVolumeFutBiere] = useState(String(params.volumeFutBiere));
+    const [volumeFutCidre, setVolumeFutCidre] = useState(String(params.volumeFutCidre));
+    const [stockInitialBiere, setStockInitialBiere] = useState(String(params.stockInitialBiere));
+    const [stockInitialCidre, setStockInitialCidre] = useState(String(params.stockInitialCidre));
+    /* Volumes de service et seuil de tolérance (ajoutés au module paramètres). */
+    const [volumePinte, setVolumePinte] = useState(String(params.volumePinte));
+    const [volumePichet, setVolumePichet] = useState(String(params.volumePichet));
+    const [seuilTolerancePerte, setSeuilTolerancePerte] = useState(String(params.seuilTolerancePerte));
+
+    function versNombre(texte) {
+      const n = parseFloat((texte || "").replace(",", "."));
+      return isNaN(n) ? 0 : n;
+    }
+    function versEntier(texte) {
+      const n = parseInt(texte, 10);
+      return isNaN(n) ? 0 : n;
+    }
+
+    /* Renvoie true si des fûts ont déjà été attribués (= il y a au moins un
+       mouvement d'attribution dans l'historique). Sert d'alerte pour les
+       changements de stock initial. */
+    function desFutsOntEteAttribues() {
+      return historique.some(function (mvt) {
+        return mvt.mouvement === "attribution";
+      });
+    }
+
+    /* Renvoie le numéro maximum de jour pour lequel des données existent
+       (ventes saisies ou créneaux définis). Sert d'alerte avant de réduire
+       le nombre de jours. */
+    function jourMaxAvecDonnees() {
+      let max = 0;
+      Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
+        /* Les clés sont du genre "jour3" -> on extrait le numéro. */
+        const m = cleJour.match(/^jour(\d+)$/);
+        if (m) {
+          const n = parseInt(m[1], 10);
+          if (n > max) max = n;
+        }
+      });
+      return max;
+    }
+
+    function enregistrer() {
+      const nj = versEntier(nombreJours);
+      const mfpb = versEntier(maxFutsParBar);
+      const pp = versNombre(prixPinte);
+      const ppi = versNombre(prixPichet);
+      const pg = versNombre(prixGobelet);
+      const vfb = versNombre(volumeFutBiere);
+      const vfc = versNombre(volumeFutCidre);
+      const sib = versEntier(stockInitialBiere);
+      const sic = versEntier(stockInitialCidre);
+      const vp = versNombre(volumePinte);
+      const vpi = versNombre(volumePichet);
+      const stp = versNombre(seuilTolerancePerte);
+
+      /* ----- Garde-fous numériques ----- */
+      if (nj < 1) { alert("Le nombre de jours doit être au moins 1."); return; }
+      if (mfpb < 1) { alert("Le maximum de fûts par bar doit être au moins 1."); return; }
+      if (pp < 0 || ppi < 0 || pg < 0) { alert("Les prix ne peuvent pas être négatifs."); return; }
+      if (vfb <= 0 || vfc <= 0) { alert("Les volumes de fûts doivent être supérieurs à 0."); return; }
+      if (vp <= 0 || vpi <= 0) { alert("Les volumes pinte et pichet doivent être supérieurs à 0."); return; }
+      if (stp < 0 || stp > 100) { alert("Le seuil de tolérance doit être compris entre 0 et 100 %."); return; }
+      if (sib < 0 || sic < 0) { alert("Le stock initial ne peut pas être négatif."); return; }
+
+      /* ----- Alerte rétroactive : changement de stock initial ----- */
+      const stockBiereChange = sib !== params.stockInitialBiere;
+      const stockCidreChange = sic !== params.stockInitialCidre;
+      if ((stockBiereChange || stockCidreChange) && desFutsOntEteAttribues()) {
+        const message = "Attention : des fûts ont déjà été attribués.\n\n" +
+          "Modifier le stock initial va recalculer le stock affiché de façon " +
+          "rétroactive (le stock restant changera).\n\n" +
+          "Confirmer la modification ?";
+        if (!confirm(message)) return;
+      }
+
+      /* ----- Alerte : réduction du nombre de jours avec données ----- */
+      const jMax = jourMaxAvecDonnees();
+      if (nj < params.nombreJours && jMax > nj) {
+        const message = "Attention : vous réduisez le nombre de jours à " + nj +
+          ", mais des données de vente existent jusqu'au jour " + jMax + ".\n\n" +
+          "Les jours " + (nj + 1) + " à " + jMax + " ne seront plus accessibles " +
+          "depuis le sélecteur (mais leurs données ne sont PAS effacées).\n\n" +
+          "Continuer ?";
+        if (!confirm(message)) return;
+      }
+
+      /* ----- Sauvegarde en base ----- */
+      ActionsParams.sauvegarderTout({
+        nombreJours: nj,
+        maxFutsParBar: mfpb,
+        prixPinte: pp,
+        prixPichet: ppi,
+        prixGobelet: pg,
+        volumeFutBiere: vfb,
+        volumeFutCidre: vfc,
+        stockInitialBiere: sib,
+        stockInitialCidre: sic,
+        volumePinte: vp,
+        volumePichet: vpi,
+        seuilTolerancePerte: stp
+      }).then(function () {
+        onFermer();
+      }).catch(function (e) {
+        alert("Erreur lors de la sauvegarde : " + e.message);
+      });
+    }
+
+    /* Petit champ de saisie réutilisable. */
+    function champ(libelle, valeur, onChange, suffixe, type) {
+      return React.createElement(
+        "div",
+        { className: "flex items-center justify-between gap-2 py-1" },
+        React.createElement("label", { className: "text-sm text-neutral-300 flex-1" }, libelle),
+        React.createElement(
+          "div",
+          { className: "flex items-center gap-1" },
+          React.createElement("input", {
+            type: type || "number",
+            inputMode: type === "number" ? "decimal" : "text",
+            value: valeur,
+            onChange: function (e) { onChange(e.target.value); },
+            className: "w-20 px-2 py-1 bg-neutral-800 rounded text-white text-sm text-right"
+          }),
+          suffixe
+            ? React.createElement("span", { className: "text-xs text-neutral-500 w-6" }, suffixe)
+            : null
+        )
+      );
+    }
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" },
+      React.createElement(
+        "div",
+        { className: "bg-neutral-900 rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto" },
+
+        React.createElement("h3", { className: "text-xl font-bold text-white mb-4" }, "Paramètres"),
+
+        /* Bloc Festival. */
+        React.createElement(
+          "div",
+          { className: "mb-4" },
+          React.createElement("p", { className: "text-xs text-neutral-500 mb-1 uppercase" }, "Festival"),
+          champ("Nombre de jours", nombreJours, setNombreJours, "j", "number"),
+          champ("Max fûts par bar", maxFutsParBar, setMaxFutsParBar, "", "number")
+        ),
+
+        /* Bloc Stock initial. */
+        React.createElement(
+          "div",
+          { className: "mb-4 pt-3 border-t border-neutral-800" },
+          React.createElement("p", { className: "text-xs text-neutral-500 mb-1 uppercase" }, "Stock initial"),
+          champ("Bière", stockInitialBiere, setStockInitialBiere, "fûts", "number"),
+          champ("Cidre", stockInitialCidre, setStockInitialCidre, "fûts", "number")
+        ),
+
+        /* Bloc Volumes. */
+        React.createElement(
+          "div",
+          { className: "mb-4 pt-3 border-t border-neutral-800" },
+          React.createElement("p", { className: "text-xs text-neutral-500 mb-1 uppercase" }, "Volume d'un fût"),
+          champ("Bière", volumeFutBiere, setVolumeFutBiere, "L", "number"),
+          champ("Cidre", volumeFutCidre, setVolumeFutCidre, "L", "number")
+        ),
+
+        /* Bloc Volume d'un service. Sert au contrôle de cohérence
+           (volume sorti en fûts vs volume vendu en pintes/pichets). */
+        React.createElement(
+          "div",
+          { className: "mb-4 pt-3 border-t border-neutral-800" },
+          React.createElement("p", { className: "text-xs text-neutral-500 mb-1 uppercase" }, "Volume d'un service"),
+          champ("Pinte", volumePinte, setVolumePinte, "cl", "number"),
+          champ("Pichet", volumePichet, setVolumePichet, "cl", "number"),
+          React.createElement("p", { className: "text-xs text-neutral-600 mt-2 italic" },
+            "Le gobelet est un consommable vendu à part, sans volume de boisson.")
+        ),
+
+        /* Bloc Prix. */
+        React.createElement(
+          "div",
+          { className: "mb-4 pt-3 border-t border-neutral-800" },
+          React.createElement("p", { className: "text-xs text-neutral-500 mb-1 uppercase" }, "Prix unitaires"),
+          champ("Pinte", prixPinte, setPrixPinte, "€", "number"),
+          champ("Pichet", prixPichet, setPrixPichet, "€", "number"),
+          champ("Gobelet", prixGobelet, setPrixGobelet, "€", "number"),
+          React.createElement("p", { className: "text-xs text-neutral-600 mt-2 italic" },
+            "Décision validée : modifier un prix après que des ventes ont été " +
+            "saisies fausse les calculs théoriques d'écart. À éviter en cours de festival.")
+        ),
+
+        /* Bloc Cohérence. Seuil au-delà duquel le dashboard signalera
+           un bar comme suspect (perte de volume dépassant la tolérance). */
+        React.createElement(
+          "div",
+          { className: "mb-5 pt-3 border-t border-neutral-800" },
+          React.createElement("p", { className: "text-xs text-neutral-500 mb-1 uppercase" }, "Cohérence"),
+          champ("Seuil de tolérance de perte", seuilTolerancePerte, setSeuilTolerancePerte, "%", "number"),
+          React.createElement("p", { className: "text-xs text-neutral-600 mt-2 italic" },
+            "Utilisé dans le dashboard : un bar dépassant ce pourcentage de perte " +
+            "(volume sorti vs vendu) sera signalé. Typiquement entre 5 et 10 %.")
+        ),
+
+        /* Boutons. */
+        React.createElement(
+          "div",
+          { className: "flex gap-2" },
+          React.createElement(
+            "button",
+            { onClick: onFermer, className: "flex-1 py-3 bg-neutral-700 text-white rounded-lg" },
+            "Annuler"
+          ),
+          React.createElement(
+            "button",
+            { onClick: enregistrer, className: "flex-1 py-3 bg-emerald-600 text-white rounded-lg font-medium" },
+            "Enregistrer"
+          )
+        )
+      )
+    );
+  }
+
+  /* =========================================================================
      SECTION 15 — ÉCRAN PRINCIPAL
   ========================================================================= */
   function EcranPrincipal({ prenom, role, onDeconnexion }) {
@@ -1587,8 +1906,15 @@
     const [fenetreCreneaux, setFenetreCreneaux] = useState(false);
     const [casesVentes, setCasesVentes] = useState({});
     const [ecranVentes, setEcranVentes] = useState(false);
+    const [fenetreParams, setFenetreParams] = useState(false);
+    /* Toutes les ventes du festival, tous jours confondus. Sert
+       UNIQUEMENT à la fenêtre paramètres pour détecter les jours
+       qui contiennent déjà des données (alerte avant réduction du
+       nombre de jours). */
+    const [casesVentesTousJours, setCasesVentesTousJours] = useState({});
 
     const peutGererBars = Droits.peutGererBars(role);
+    const peutGererParams = Droits.peutGererParams(role);
 
     /* Abonnement temps réel : bars, historique, params, jour actif. */
     useEffect(function () {
@@ -1653,6 +1979,20 @@
         refVentes.off("value", surVentes);
       };
     }, [jourActuel]);
+
+    /* Abonnement aux ventes TOUS JOURS confondus.
+       Utilisé uniquement par la fenêtre paramètres pour détecter les jours
+       contenant des données (alerte avant réduction du nombre de jours). */
+    useEffect(function () {
+      const ref = db.ref("sessions/" + ID_SESSION + "/ventes");
+      function surTout(s) {
+        setCasesVentesTousJours(s.val() || {});
+      }
+      ref.on("value", surTout);
+      return function () {
+        ref.off("value", surTout);
+      };
+    }, []);
 
     const stock = calculerStock(historique, params);
 
@@ -1723,7 +2063,8 @@
         nombreJours: params.nombreJours,
         role: role,
         onChangerJour: changerJour,
-        onOuvrirCreneaux: function () { setFenetreCreneaux(true); }
+        onOuvrirCreneaux: function () { setFenetreCreneaux(true); },
+        onOuvrirParams: function () { setFenetreParams(true); }
       }),
 
       /* Information sur les créneaux du jour. */
@@ -1857,6 +2198,17 @@
             creneaux: creneaux,
             casesVentes: casesVentes,
             onFermer: function () { setEcranVentes(false); }
+          })
+        : null,
+
+      /* Fenêtre paramètres (admin et plus). */
+      fenetreParams
+        ? React.createElement(FenetreParametres, {
+            params: params,
+            bars: bars,
+            historique: historique,
+            casesVentesTousJours: casesVentesTousJours,
+            onFermer: function () { setFenetreParams(false); }
           })
         : null
     );
