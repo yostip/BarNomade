@@ -4555,31 +4555,217 @@
   }
 
   /* =========================================================================
-     SECTION 14undecies — FENÊTRE MÉMO/AIDE (aide-mémoire selon le rôle)
+     SECTION 14undecies — FENÊTRE MÉMO/AIDE (cartes par sujet)
 
-     Bouton "?" discret en haut de l'écran principal. Ouvre une popup
-     avec quelques rappels de gestes essentiels selon le rôle.
+     Bouton "?" discret en haut de l'écran principal. Ouvre une fenêtre
+     en deux étapes :
+       1. Grille de cartes par sujet (filtrées selon le rôle).
+       2. Au clic sur une carte, affichage du détail de ce sujet.
+       Bouton retour pour revenir à la grille.
+
      Volontairement COURT : c'est un aide-mémoire en cours d'usage, pas
      un guide d'apprentissage. Les guides détaillés sont fournis à part
      (PDF distincts pour secrétaire et admin).
-     Le visiteur n'a pas de mémo (rien à faire d'actif).
   ========================================================================= */
   function FenetreMemoAide({ role, onFermer }) {
+    /* Carte sélectionnée (null = on est sur la grille). */
+    const [carteSelectionnee, setCarteSelectionnee] = useState(null);
 
-    /* Bloc-section réutilisable. */
-    function section(titre, items) {
+    /* Définition des cartes. Chacune a :
+         id           — identifiant unique
+         titre        — affiché dans la tuile et dans le détail
+         icone        — caractère emoji ou symbole pour la tuile
+         rolesMin     — rôle minimum requis pour voir cette carte
+         points       — liste de rappels (courts)
+       L'ordre des cartes définit l'ordre d'affichage. */
+    const cartes = [
+      {
+        id: "saisie",
+        titre: "Saisie d'une vente",
+        icone: "€",
+        rolesMin: ROLES.SECRETAIRE,
+        points: [
+          "Vérifier le JOUR ACTIF en haut de l'écran avant toute saisie.",
+          "Une case = un bar × un créneau. Plusieurs saisies possibles dans une case.",
+          "Renseigner montant, pintes, pichets, gobelets.",
+          "Le commentaire est optionnel mais utile en cas d'incident."
+        ]
+      },
+      {
+        id: "pad",
+        titre: "PAD en panne",
+        icone: "!",
+        rolesMin: ROLES.SECRETAIRE,
+        points: [
+          "Cocher « PAD en panne » dans la saisie.",
+          "Le numéro de PAD est OBLIGATOIRE.",
+          "« Données partielles » cochée = tu as récupéré quelques infos.",
+          "Non cochée = données perdues, montant = 0 (mais le PAD reste tracé)."
+        ]
+      },
+      {
+        id: "cloture",
+        titre: "Clôture d'un créneau",
+        icone: "✓",
+        rolesMin: ROLES.SECRETAIRE,
+        points: [
+          "Clôturer dès que le créneau est terminé : la case passe en gris clair.",
+          "Une fois clôturée, plus aucune nouvelle saisie possible.",
+          "Si tu te trompes, un admin peut rouvrir.",
+          "Penser à clôturer en fin de service !"
+        ]
+      },
+      {
+        id: "attribuer",
+        titre: "Attribution de fût",
+        icone: "↗",
+        rolesMin: ROLES.SECRETAIRE,
+        points: [
+          "Le fût passe du stock central vers le bar choisi.",
+          "L'app empêche d'attribuer si le stock est à 0.",
+          "Limite du nombre de fûts par bar paramétrée (admin).",
+          "Heure réelle enregistrée, pas le créneau."
+        ]
+      },
+      {
+        id: "retour",
+        titre: "Retour de fût",
+        icone: "↙",
+        rolesMin: ROLES.SECRETAIRE,
+        points: [
+          "4 motifs : vide / cassé / non terminé / plein.",
+          "Fût cassé : commentaire OBLIGATOIRE (raison, ce qu'il s'est passé).",
+          "Fût plein : réintégré au stock central automatiquement.",
+          "« Non terminé » : reste à la disposition du bar."
+        ]
+      },
+      {
+        id: "planning",
+        titre: "Planning bénévoles",
+        icone: "👥",
+        rolesMin: ROLES.SECRETAIRE,
+        points: [
+          "Tableau bar × créneau, 3 postes : vendeur, serveur, runner.",
+          "Saisie libre, ATTENTION à la casse (« Kevin » ≠ « kevin »).",
+          "L'app détecte les conflits et BLOQUE l'enregistrement.",
+          "Standardiser la saisie : Prénom NOM en majuscules par exemple."
+        ]
+      },
+      {
+        id: "annulation",
+        titre: "Annulation d'une saisie",
+        icone: "✗",
+        rolesMin: ROLES.ADMIN,
+        points: [
+          "Annulation SAISIE PAR SAISIE, pas toute la case.",
+          "La saisie annulée reste tracée (barrée), son montant ne compte plus.",
+          "Annuler dans une case clôturée déclôture la case automatiquement.",
+          "Pas d'annulation par le secrétaire."
+        ]
+      },
+      {
+        id: "params",
+        titre: "Paramètres",
+        icone: "⚙",
+        rolesMin: ROLES.ADMIN,
+        points: [
+          "Modifier les prix en cours de festival fausse les calculs passés.",
+          "Modifier le stock initial déclenche une alerte rétroactive.",
+          "Réduire le nombre de jours alerte si le jour supprimé a des données.",
+          "Volumes en cl pour pinte/pichet, en L pour les fûts."
+        ]
+      },
+      {
+        id: "users",
+        titre: "Gestion des utilisateurs",
+        icone: "👤",
+        rolesMin: ROLES.ADMIN,
+        points: [
+          "Promotion/rétrogradation visiteur ↔ secrétaire uniquement.",
+          "Admin créé en console Firebase (pas dans l'app).",
+          "Éjection = suppression douce, le bénévole peut revenir en visiteur.",
+          "Tu ne peux ni te rétrograder ni t'éjecter toi-même."
+        ]
+      },
+      {
+        id: "dashboard",
+        titre: "Dashboard et exports",
+        icone: "📊",
+        rolesMin: ROLES.ADMIN,
+        points: [
+          "4 onglets : Vue, Par bar, Par bénévole, Anomalies.",
+          "Bascule de granularité (Tout / Jour actif / Comparatif).",
+          "Récapitulatif Excel : synthèse en 4 feuilles.",
+          "Journal brut Excel : tous les mouvements + toutes les saisies."
+        ]
+      },
+      {
+        id: "creneaux",
+        titre: "Créneaux horaires",
+        icone: "🕐",
+        rolesMin: ROLES.SUPERADMIN,
+        points: [
+          "Chaque jour a SA propre liste de créneaux.",
+          "Bouton « copier d'un autre jour » utile en début de festival.",
+          "Modifier un créneau après saisies : à éviter, ça casse l'historique.",
+          "Les créneaux servent pour les ventes ET le planning bénévoles."
+        ]
+      },
+      {
+        id: "raz",
+        titre: "Remise à zéro de la session",
+        icone: "⚠",
+        rolesMin: ROLES.SUPERADMIN,
+        points: [
+          "Action IRRÉVERSIBLE — à utiliser uniquement APRÈS le festival.",
+          "L'export Excel des deux fichiers est OBLIGATOIRE avant l'effacement.",
+          "Si l'export échoue, l'effacement est bloqué.",
+          "Confirmation finale : taper EFFACER en majuscules."
+        ]
+      }
+    ];
+
+    /* Filtre les cartes selon le rôle. */
+    const ordreRoles = { visiteur: 0, secretaire: 1, admin: 2, superadmin: 3 };
+    const monNiveau = ordreRoles[role] != null ? ordreRoles[role] : 0;
+    const cartesVisibles = cartes.filter(function (c) {
+      return monNiveau >= ordreRoles[c.rolesMin];
+    });
+
+    /* Titre selon le rôle. */
+    const titreRole = role === ROLES.SUPERADMIN ? "Super admin"
+      : role === ROLES.ADMIN ? "Admin"
+      : role === ROLES.SECRETAIRE ? "Secrétaire"
+      : "Visiteur";
+
+    /* Vue détail d'une carte. */
+    function vueDetail() {
+      const c = carteSelectionnee;
       return React.createElement(
         "div",
-        { className: "mb-4" },
-        React.createElement("p", { className: "text-xs text-emerald-400 uppercase font-bold mb-1" }, titre),
+        null,
+        React.createElement(
+          "div",
+          { className: "flex items-center gap-3 mb-4" },
+          React.createElement(
+            "button",
+            {
+              onClick: function () { setCarteSelectionnee(null); },
+              className: "text-sm px-3 py-1 bg-neutral-800 text-neutral-300 rounded-lg"
+            },
+            "← Retour"
+          ),
+          React.createElement("div", { className: "text-2xl" }, c.icone),
+          React.createElement("h3", { className: "text-lg font-bold text-emerald-400 flex-1" }, c.titre)
+        ),
         React.createElement(
           "ul",
-          { className: "space-y-1.5 text-sm text-neutral-300" },
-          items.map(function (txt, i) {
+          { className: "space-y-2 text-sm text-neutral-200" },
+          c.points.map(function (txt, i) {
             return React.createElement(
               "li",
               { key: i, className: "flex" },
-              React.createElement("span", { className: "text-emerald-500 mr-2" }, "•"),
+              React.createElement("span", { className: "text-emerald-500 mr-2 mt-0.5" }, "•"),
               React.createElement("span", null, txt)
             );
           })
@@ -4587,90 +4773,41 @@
       );
     }
 
-    /* Contenu commun à tous les rôles actifs (secrétaire+). */
-    const blocsSecretaire = [
-      section("Saisie d'une vente", [
-        "Saisie case par case : un bar × un créneau du jour actif.",
-        "Bien vérifier le jour actif en haut de l'écran principal AVANT de saisir.",
-        "Si le PAD est en panne, cocher la case et NOTER LE NUMÉRO DE PAD obligatoirement.",
-        "Plusieurs saisies possibles dans une même case (succession de PAD)."
-      ]),
-      section("Clôture d'un créneau", [
-        "Clôturer dès que le créneau est terminé : verrouille la case.",
-        "Si tu te trompes, un admin peut rouvrir le créneau.",
-        "Une case clôturée passe en gris clair dans le tableau."
-      ]),
-      section("Fûts — attribution / retour", [
-        "Attribuer un fût : passe du stock central vers le bar choisi.",
-        "Retour : 4 motifs (vide, cassé, non terminé, plein).",
-        "Fût cassé : commentaire obligatoire.",
-        "Fût plein : réintégré au stock central."
-      ]),
-      section("Planning bénévoles", [
-        "Tableau bar × créneau, 3 postes : vendeur, serveur, runner.",
-        "Saisie libre : ATTENTION à la casse (« Kevin » ≠ « kevin »).",
-        "L'app détecte les conflits et BLOQUE l'enregistrement."
-      ])
-    ];
-
-    /* Contenu supplémentaire admin. */
-    const blocsAdmin = [
-      section("Annulation d'une saisie", [
-        "Annulation saisie par saisie, pas toute la case.",
-        "La saisie annulée reste tracée (barrée), son montant ne compte plus.",
-        "Annuler dans une case clôturée déclôture la case automatiquement."
-      ]),
-      section("Paramètres", [
-        "Modifier les prix EN COURS de festival fausse les calculs sur les ventes passées.",
-        "Modifier le stock initial déclenche une alerte rétroactive.",
-        "Réduire le nombre de jours alerte si le jour supprimé contient des données."
-      ]),
-      section("Gestion des utilisateurs", [
-        "Promotion visiteur ↔ secrétaire uniquement (admin créé en console Firebase).",
-        "Éjection = suppression douce (le bénévole peut revenir en visiteur).",
-        "Tu ne peux ni te rétrograder ni t'éjecter toi-même.",
-        "Le changement de rôle est appliqué immédiatement chez la personne, sans rechargement."
-      ]),
-      section("Dashboard et exports", [
-        "Récapitulatif Excel : synthèse en 4 feuilles (Vue, Bar, Bénévole, Anomalies).",
-        "Journal brut Excel : tous les mouvements de fûts + toutes les saisies (annulées comprises).",
-        "Onglet Anomalies : surveille bars hors seuil, données perdues, créneaux non clôturés."
-      ])
-    ];
-
-    /* Contenu supplémentaire super admin. */
-    const blocsSuperAdmin = [
-      section("Créneaux horaires", [
-        "Chaque jour a SA propre liste de créneaux.",
-        "Bouton « copier d'un autre jour » utile en début de festival.",
-        "Modifier un créneau après saisies : à éviter, ça casse l'historique des ventes."
-      ]),
-      section("Remise à zéro de la session", [
-        "Action IRRÉVERSIBLE — à utiliser uniquement APRÈS le festival.",
-        "L'export Excel des deux fichiers est OBLIGATOIRE avant l'effacement.",
-        "Si l'export échoue, l'effacement est bloqué (filet de sécurité).",
-        "Confirmation finale : taper EFFACER en majuscules.",
-        "Les paramètres et ton compte super admin sont PRÉSERVÉS."
-      ])
-    ];
-
-    /* Composition des blocs à afficher selon le rôle. */
-    let blocs = [];
-    if (role === ROLES.SECRETAIRE || role === ROLES.ADMIN || role === ROLES.SUPERADMIN) {
-      blocs = blocs.concat(blocsSecretaire);
+    /* Vue grille de cartes. */
+    function vueGrille() {
+      if (cartesVisibles.length === 0) {
+        return React.createElement(
+          "div",
+          null,
+          React.createElement("p", { className: "text-sm text-neutral-400 text-center py-8" },
+            "Rien de spécifique pour le rôle visiteur."),
+          React.createElement("p", { className: "text-xs text-neutral-500 text-center" },
+            "Tu peux consulter le plan et la liste des bars depuis l'écran principal.")
+        );
+      }
+      return React.createElement(
+        "div",
+        null,
+        React.createElement("p", { className: "text-xs text-neutral-500 mb-3 text-center italic" },
+          "Touche une carte pour voir le détail."),
+        React.createElement(
+          "div",
+          { className: "grid grid-cols-2 gap-2" },
+          cartesVisibles.map(function (c) {
+            return React.createElement(
+              "button",
+              {
+                key: c.id,
+                onClick: function () { setCarteSelectionnee(c); },
+                className: "bg-neutral-800 hover:bg-neutral-700 rounded-xl p-3 text-left border border-neutral-700 transition-colors"
+              },
+              React.createElement("div", { className: "text-2xl mb-1" }, c.icone),
+              React.createElement("p", { className: "text-xs font-medium text-white leading-tight" }, c.titre)
+            );
+          })
+        )
+      );
     }
-    if (role === ROLES.ADMIN || role === ROLES.SUPERADMIN) {
-      blocs = blocs.concat(blocsAdmin);
-    }
-    if (role === ROLES.SUPERADMIN) {
-      blocs = blocs.concat(blocsSuperAdmin);
-    }
-
-    /* Titre selon le rôle. */
-    const titreRole = role === ROLES.SUPERADMIN ? "Super admin"
-      : role === ROLES.ADMIN ? "Admin"
-      : role === ROLES.SECRETAIRE ? "Secrétaire"
-      : "Visiteur";
 
     return React.createElement(
       "div",
@@ -4685,25 +4822,25 @@
           onClick: function (e) { e.stopPropagation(); }
         },
 
-        React.createElement(
-          "div",
-          { className: "flex items-center justify-between mb-2" },
-          React.createElement("h3", { className: "text-lg font-bold text-emerald-400" }, "Aide-mémoire"),
-          React.createElement("span", { className: "text-xs text-neutral-500" }, titreRole)
-        ),
-        React.createElement("p", { className: "text-xs text-neutral-500 mb-4 italic" },
-          "Rappels essentiels. Le guide détaillé est dans le PDF distribué."),
+        /* En-tête (uniquement en vue grille, masqué en vue détail). */
+        carteSelectionnee === null
+          ? React.createElement(
+              "div",
+              { className: "flex items-center justify-between mb-3" },
+              React.createElement("h3", { className: "text-lg font-bold text-emerald-400" }, "Aide-mémoire"),
+              React.createElement("span", { className: "text-xs text-neutral-500" }, titreRole)
+            )
+          : null,
 
-        blocs.length === 0
-          ? React.createElement("p", { className: "text-sm text-neutral-400 text-center py-8" },
-              "Rien de spécifique pour le rôle visiteur. Tu peux consulter le plan et la liste des bars.")
-          : React.createElement("div", null, blocs),
+        /* Vue active : grille ou détail. */
+        carteSelectionnee === null ? vueGrille() : vueDetail(),
 
+        /* Bouton fermer. */
         React.createElement(
           "button",
           {
             onClick: onFermer,
-            className: "w-full mt-2 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium"
+            className: "w-full mt-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium"
           },
           "Fermer"
         )
