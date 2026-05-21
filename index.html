@@ -233,6 +233,21 @@
     },
     positionBar: function (idBar) {
       return db.ref("sessions/" + ID_SESSION + "/positionsBars/" + idBar);
+    },
+    /* ----- POT DE FÛTS EN ATTENTE (module fûts non terminés) -----
+       Format : { idFutAttente: { type, dateRetour, idBarPrecedent,
+                                  nomBarPrecedent, retourPar } }
+       Quand un fût est retourné "non terminé" depuis un bar, il vient
+       ici. Il peut ensuite être réattribué à n'importe quel bar du
+       même type (bière vers bar bière, cidre vers bar cidre).
+       Lien avec l'historique : à l'aller-retour fût-pot, deux entrées
+       sont créées dans historiqueFuts ("retour" puis "reattribution"
+       lors de la réutilisation). */
+    futsEnAttente: function () {
+      return db.ref("sessions/" + ID_SESSION + "/futsEnAttente");
+    },
+    futEnAttente: function (idAttente) {
+      return db.ref("sessions/" + ID_SESSION + "/futsEnAttente/" + idAttente);
     }
   };
 
@@ -440,6 +455,39 @@
       });
     },
     retourner: function (bar, idFut, fut, motif, commentaire, prenomUtilisateur) {
+      /* COMPORTEMENT SPÉCIAL pour le motif "non terminé" :
+         Au lieu de simplement retirer le fût du bar, on le déplace dans
+         le pot "fûts en attente". Il pourra être réattribué plus tard à
+         n'importe quel bar du même type via reattribuerDepuisPot.
+         Le calcul du stock reste correct : le fût a été comptabilisé
+         comme sorti à son attribution initiale, il n'est pas remis au
+         stock central (juste en attente d'usage). */
+      if (motif === RETOUR.NON_TERMINE) {
+        /* On retire du bar, on enregistre l'historique (retour), puis on
+           crée une entrée dans le pot. */
+        return Base.futsDuBar(bar.id).child(idFut).remove().then(function () {
+          return Base.historiqueFuts().push({
+            mouvement: "retour",
+            motifRetour: motif,
+            typeFut: fut.type,
+            idBar: bar.id,
+            nomBar: bar.nom,
+            commentaire: (commentaire || "").trim(),
+            par: prenomUtilisateur,
+            date: Date.now()
+          });
+        }).then(function () {
+          return Base.futsEnAttente().push({
+            type: fut.type,
+            dateRetour: Date.now(),
+            idBarPrecedent: bar.id,
+            nomBarPrecedent: bar.nom,
+            retourPar: prenomUtilisateur
+          });
+        });
+      }
+      /* Cas normal (vide, cassé, plein) : on retire du bar et on
+         enregistre l'historique. Comportement inchangé. */
       return Base.futsDuBar(bar.id).child(idFut).remove().then(function () {
         return Base.historiqueFuts().push({
           mouvement: "retour",
@@ -451,6 +499,41 @@
           par: prenomUtilisateur,
           date: Date.now()
         });
+      });
+    },
+
+    /* Réattribue un fût depuis le pot d'attente vers un bar.
+       Le bar doit être du MÊME TYPE que le fût (bière → bar bière,
+       cidre → bar cidre). Génère un mouvement "reattribution" dans
+       l'historique (distinct d'"attribution" pour ne pas le compter
+       deux fois comme sortie de stock dans le dashboard). */
+    reattribuerDepuisPot: function (idAttente, futAttente, bar, prenomUtilisateur) {
+      if (futAttente.type !== bar.type) {
+        return Promise.reject(new Error("Type incompatible : fût " + futAttente.type +
+          " vers bar " + bar.type));
+      }
+      /* On crée un nouveau fût sur le bar avec un nouvel identifiant.
+         Le lien avec le fût initial est tracé via l'historique. */
+      const refFut = Base.futsDuBar(bar.id).push();
+      return refFut.set({
+        type: futAttente.type,
+        dateAttribution: Date.now(),
+        attribuePar: prenomUtilisateur,
+        provenance: "pot"          /* trace que ce fût vient du pot */
+      }).then(function () {
+        return Base.historiqueFuts().push({
+          mouvement: "reattribution",      /* DIFFÉRENT d'attribution */
+          typeFut: futAttente.type,
+          idBar: bar.id,
+          nomBar: bar.nom,
+          idBarPrecedent: futAttente.idBarPrecedent,
+          nomBarPrecedent: futAttente.nomBarPrecedent,
+          par: prenomUtilisateur,
+          date: Date.now()
+        });
+      }).then(function () {
+        /* Retirer du pot. */
+        return Base.futEnAttente(idAttente).remove();
       });
     }
   };
@@ -636,7 +719,8 @@
             planning: null,
             jourActuel: null,
             users: null,
-            positionsBars: null     /* on efface aussi les positions */
+            positionsBars: null,    /* on efface aussi les positions */
+            futsEnAttente: null     /* et le pot de fûts en attente */
           };
           return refSession.update(maj).then(function () {
             /* ...puis on remet uniquement le super admin. */
@@ -1147,6 +1231,24 @@
           dateAttribution: f.dateAttribution || 0,
           attribuePar: f.attribuePar || "?"
         });
+      });
+    });
+    return liste;
+  }
+
+  /* Liste les fûts encore présents dans le pot d'attente.
+     Anomalie post-festival : un fût non terminé jamais réutilisé. */
+  function listerFutsAuPot(futsEnAttente) {
+    const liste = [];
+    Object.keys(futsEnAttente || {}).forEach(function (id) {
+      const f = futsEnAttente[id];
+      if (!f) return;
+      liste.push({
+        idAttente: id,
+        type: f.type,
+        dateRetour: f.dateRetour || 0,
+        nomBarPrecedent: f.nomBarPrecedent || "?",
+        retourPar: f.retourPar || "?"
       });
     });
     return liste;
@@ -2730,6 +2832,16 @@
       return function () { ref.off("value", surPlanning); };
     }, []);
 
+    /* Fûts en attente (pot) — pour l'onglet Anomalies (un fût qui reste
+       au pot en fin de festival est une anomalie comptable). */
+    const [futsEnAttente, setFutsEnAttente] = useState({});
+    useEffect(function () {
+      const ref = Base.futsEnAttente();
+      function surPot(s) { setFutsEnAttente(s.val() || {}); }
+      ref.on("value", surPot);
+      return function () { ref.off("value", surPot); };
+    }, []);
+
     /* Pour "jour", on filtre sur jourActuel. Pour "tout" et "comparatif",
        pas de filtre jour. */
     const filtreJourPourVentes = (granularite === "jour") ? jourActuel : null;
@@ -2755,6 +2867,7 @@
     const listeDonneesPerdues = listerDonneesPerdues(casesVentesTousJours);
     const listeNonCloturees = listerCasesNonCloturees(casesVentesTousJours);
     const listeFutsNonRetournes = listerFutsNonRetournes(bars);
+    const listeFutsAuPot = listerFutsAuPot(futsEnAttente);
 
     /* Helper : retrouve le nom d'un bar et le libellé d'un créneau à
        partir d'un idBar / idCreneau (utilisé pour afficher les anomalies). */
@@ -3179,6 +3292,34 @@
                     f.nomBar + " — " + (f.type === TYPE_BAR.BIERE ? "bière" : "cidre")),
                   React.createElement("span", { className: "text-xs text-neutral-500" },
                     "par " + f.attribuePar)
+                );
+              })
+            )
+      ));
+
+      /* Section 5 : fûts encore au pot (non terminés jamais réutilisés).
+         Pendant le festival c'est normal d'en avoir, en fin de festival
+         c'est une anomalie comptable à investiguer. */
+      blocs.push(React.createElement(
+        "div",
+        { key: "pot", className: "mb-4" },
+        React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+          "Fûts encore au pot (non terminés en attente)"),
+        listeFutsAuPot.length === 0
+          ? React.createElement("p", { className: "text-xs text-neutral-600 italic" },
+              "Aucun fût en attente.")
+          : React.createElement(
+              "div",
+              { className: "space-y-1" },
+              listeFutsAuPot.map(function (f, i) {
+                return React.createElement(
+                  "div",
+                  { key: i, className: "flex justify-between items-center bg-neutral-900 border border-purple-900 rounded-lg p-2 text-sm" },
+                  React.createElement("span", { className: "text-white" },
+                    (f.type === TYPE_BAR.BIERE ? "Bière" : "Cidre") +
+                      " — depuis " + f.nomBarPrecedent),
+                  React.createElement("span", { className: "text-xs text-neutral-500" },
+                    "par " + f.retourPar)
                 );
               })
             )
@@ -4636,7 +4777,19 @@
           "4 motifs : vide / cassé / non terminé / plein.",
           "Fût cassé : commentaire OBLIGATOIRE (raison, ce qu'il s'est passé).",
           "Fût plein : réintégré au stock central automatiquement.",
-          "« Non terminé » : reste à la disposition du bar."
+          "« Non terminé » : fût envoyé au pot, réutilisable plus tard via « Fûts en attente »."
+        ]
+      },
+      {
+        id: "pot",
+        titre: "Fûts en attente",
+        icone: "⏳",
+        rolesMin: ROLES.SECRETAIRE,
+        points: [
+          "Les fûts retournés « non terminés » s'accumulent dans ce pot.",
+          "On peut réattribuer un fût du pot à un bar du MÊME TYPE.",
+          "Le bouton « Fûts en attente » affiche un badge avec le nombre disponible.",
+          "Utile pour les fûts qui débordent d'un jour sur l'autre."
         ]
       },
       {
@@ -4849,6 +5002,216 @@
   }
 
   /* =========================================================================
+     SECTION 14duodecies — ÉCRAN FÛTS EN ATTENTE (pot)
+
+     Liste les fûts retournés "non terminés" qui peuvent être réattribués
+     à un bar du même type. Secrétaire et plus.
+
+     Workflow :
+       1. L'écran liste les fûts au pot (type, bar précédent, date, qui).
+       2. Au clic "Réattribuer", l'utilisateur choisit un bar du même type.
+       3. Le fût est créé sur le bar choisi, un mouvement "reattribution"
+          est tracé dans l'historique, et le fût est retiré du pot.
+  ========================================================================= */
+  function EcranFutsEnAttente({ prenom, role, bars, onFermer }) {
+    const [futsEnAttente, setFutsEnAttente] = useState({});
+    /* Fût en cours de réattribution : on stocke { idAttente, fut } pour
+       déclencher la fenêtre de choix de bar. */
+    const [futACharger, setFutACharger] = useState(null);
+    const [enCours, setEnCours] = useState(false);
+
+    /* Abonnement temps réel au pot. */
+    useEffect(function () {
+      const ref = Base.futsEnAttente();
+      function surPot(s) { setFutsEnAttente(s.val() || {}); }
+      ref.on("value", surPot);
+      return function () { ref.off("value", surPot); };
+    }, []);
+
+    /* Liste triée par date de retour (les plus anciens en haut). */
+    const liste = Object.keys(futsEnAttente || {}).map(function (id) {
+      const f = futsEnAttente[id] || {};
+      return { idAttente: id, fut: f };
+    }).sort(function (a, b) {
+      return (a.fut.dateRetour || 0) - (b.fut.dateRetour || 0);
+    });
+
+    function fmtDateHeure(ts) {
+      if (!ts) return "—";
+      const d = new Date(ts);
+      const p = function (n) { return n < 10 ? "0" + n : "" + n; };
+      return p(d.getDate()) + "/" + p(d.getMonth() + 1) +
+        " à " + p(d.getHours()) + ":" + p(d.getMinutes());
+    }
+
+    /* Bars compatibles pour la réattribution : même type que le fût,
+       et pas saturés (sous la limite paramétrée). */
+    function barsCompatibles(typeFut) {
+      return (bars || []).filter(function (b) {
+        return b.type === typeFut;
+      });
+    }
+
+    function lancerReattribution(idAttente, fut, bar) {
+      if (enCours) return;
+      setEnCours(true);
+      ActionsFuts.reattribuerDepuisPot(idAttente, fut, bar, prenom)
+        .then(function () {
+          setEnCours(false);
+          setFutACharger(null);
+        })
+        .catch(function (e) {
+          setEnCours(false);
+          alert("Erreur : " + e.message);
+        });
+    }
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black z-40 flex flex-col" },
+
+      /* En-tête. */
+      React.createElement(
+        "div",
+        { className: "p-3 border-b border-neutral-800 flex items-center justify-between" },
+        React.createElement(
+          "div",
+          null,
+          React.createElement("h2", { className: "text-lg font-bold text-purple-400" }, "Fûts en attente"),
+          React.createElement("p", { className: "text-xs text-neutral-500" },
+            liste.length + " fût(s) au pot")
+        ),
+        React.createElement(
+          "button",
+          { onClick: onFermer, className: "text-xs px-3 py-1.5 bg-neutral-800 text-neutral-300 rounded-lg" },
+          "Fermer"
+        )
+      ),
+
+      /* Liste des fûts au pot. */
+      React.createElement(
+        "div",
+        { className: "flex-1 overflow-auto p-3" },
+        liste.length === 0
+          ? React.createElement(
+              "div",
+              { className: "text-center py-12" },
+              React.createElement("p", { className: "text-neutral-500 text-sm" },
+                "Aucun fût en attente."),
+              React.createElement("p", { className: "text-xs text-neutral-600 italic mt-2" },
+                "Les fûts retournés « non terminés » s'accumulent ici, prêts à être réutilisés.")
+            )
+          : React.createElement(
+              "div",
+              { className: "space-y-2" },
+              liste.map(function (item) {
+                const f = item.fut;
+                const couleur = f.type === TYPE_BAR.BIERE
+                  ? "border-amber-700 bg-amber-950/30"
+                  : "border-green-700 bg-green-950/30";
+                return React.createElement(
+                  "div",
+                  {
+                    key: item.idAttente,
+                    className: "rounded-xl border p-3 " + couleur
+                  },
+                  React.createElement(
+                    "div",
+                    { className: "flex items-center justify-between mb-2" },
+                    React.createElement(
+                      "div",
+                      null,
+                      React.createElement("p", { className: "font-bold text-white" },
+                        f.type === TYPE_BAR.BIERE ? "Bière" : "Cidre"),
+                      React.createElement("p", { className: "text-xs text-neutral-400" },
+                        "Depuis " + (f.nomBarPrecedent || "?"))
+                    ),
+                    React.createElement(
+                      "div",
+                      { className: "text-right" },
+                      React.createElement("p", { className: "text-xs text-neutral-300" },
+                        fmtDateHeure(f.dateRetour)),
+                      React.createElement("p", { className: "text-xs text-neutral-500" },
+                        "par " + (f.retourPar || "?"))
+                    )
+                  ),
+                  React.createElement(
+                    "button",
+                    {
+                      onClick: function () { setFutACharger(item); },
+                      className: "w-full py-2 bg-purple-700 hover:bg-purple-600 text-white rounded-lg text-sm font-medium"
+                    },
+                    "Réattribuer à un bar"
+                  )
+                );
+              })
+            )
+      ),
+
+      /* Fenêtre de choix du bar. */
+      futACharger
+        ? React.createElement(
+            "div",
+            {
+              className: "fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50",
+              onClick: function () { if (!enCours) setFutACharger(null); }
+            },
+            React.createElement(
+              "div",
+              {
+                className: "bg-neutral-900 rounded-2xl w-full max-w-sm p-5 max-h-[80vh] overflow-y-auto border border-purple-800",
+                onClick: function (e) { e.stopPropagation(); }
+              },
+              React.createElement("h3", { className: "text-lg font-bold text-purple-400 mb-1" },
+                "Choisir un bar"),
+              React.createElement("p", { className: "text-xs text-neutral-500 mb-3" },
+                "Fût " + (futACharger.fut.type === TYPE_BAR.BIERE ? "bière" : "cidre") +
+                " — bars compatibles uniquement"),
+
+              (function () {
+                const compatibles = barsCompatibles(futACharger.fut.type);
+                if (compatibles.length === 0) {
+                  return React.createElement("p", { className: "text-sm text-neutral-400 italic py-4 text-center" },
+                    "Aucun bar du bon type pour le moment.");
+                }
+                return React.createElement(
+                  "div",
+                  { className: "space-y-1" },
+                  compatibles.map(function (b) {
+                    const nbFuts = b.futs ? Object.keys(b.futs).length : 0;
+                    return React.createElement(
+                      "button",
+                      {
+                        key: b.id,
+                        onClick: function () {
+                          lancerReattribution(futACharger.idAttente, futACharger.fut, b);
+                        },
+                        disabled: enCours,
+                        className: "w-full text-left px-3 py-2 bg-neutral-800 hover:bg-purple-800 disabled:opacity-50 text-white rounded text-sm flex justify-between items-center"
+                      },
+                      React.createElement("span", null, b.nom),
+                      React.createElement("span", { className: "text-xs text-neutral-400" },
+                        nbFuts + " fût(s)")
+                    );
+                  })
+                );
+              })(),
+
+              React.createElement(
+                "button",
+                {
+                  onClick: function () { if (!enCours) setFutACharger(null); },
+                  className: "w-full mt-3 py-2 bg-neutral-700 text-white rounded text-sm"
+                },
+                "Annuler"
+              )
+            )
+          )
+        : null
+    );
+  }
+
+  /* =========================================================================
      SECTION 15 — ÉCRAN PRINCIPAL
   ========================================================================= */
   function EcranPrincipal({ prenom, role, onDeconnexion }) {
@@ -4880,6 +5243,10 @@
     const [ecranPlan, setEcranPlan] = useState(false);
     /* Fenêtre mémo/aide selon le rôle. */
     const [fenetreMemo, setFenetreMemo] = useState(false);
+    /* Écran des fûts en attente (pot). */
+    const [ecranFutsEnAttente, setEcranFutsEnAttente] = useState(false);
+    /* Comptage des fûts au pot (pour afficher un badge sur le bouton). */
+    const [nbFutsAuPot, setNbFutsAuPot] = useState(0);
     /* Planning de TOUS les jours, nécessaire au moment d'un export depuis
        la fenêtre de remise à zéro (qui n'est pas l'écran Dashboard).
        Chargé une seule fois à l'ouverture de l'écran principal. */
@@ -4978,6 +5345,18 @@
       return function () { ref.off("value", surTout); };
     }, []);
 
+    /* Abonnement au pot de fûts en attente, pour afficher le badge sur
+       le bouton Fûts en attente. */
+    useEffect(function () {
+      const ref = Base.futsEnAttente();
+      function surPot(s) {
+        const v = s.val() || {};
+        setNbFutsAuPot(Object.keys(v).length);
+      }
+      ref.on("value", surPot);
+      return function () { ref.off("value", surPot); };
+    }, []);
+
     /* Abonnement aux ventes TOUS JOURS confondus.
        Utilisé uniquement par la fenêtre paramètres pour détecter les jours
        contenant des données (alerte avant réduction du nombre de jours). */
@@ -5024,6 +5403,18 @@
 
     function changerJour(nouveauJour) {
       if (nouveauJour < 1 || nouveauJour > params.nombreJours) return;
+      if (nouveauJour === jourActuel) return;
+      /* Double-check : un changement de jour bascule TOUS les utilisateurs
+         connectés sur le nouveau jour. C'est sensible, surtout pendant un
+         service en cours (saisie de ventes, planning). Confirmation
+         requise pour éviter le clic accidentel. */
+      const ok = window.confirm(
+        "Basculer sur le jour " + nouveauJour + " ?\n\n" +
+        "Tous les utilisateurs connectés vont voir leur écran changer " +
+        "(saisie des ventes, planning bénévoles).\n\n" +
+        "À ne faire qu'en fin de journée, ou pour corriger une erreur."
+      );
+      if (!ok) return;
       ActionsCreneaux.definirJourActuel(nouveauJour)
         .catch(function (e) { alert(e.message); });
     }
@@ -5147,6 +5538,26 @@
           },
           "Plan"
         ),
+
+        /* Fûts en attente — violet (secrétaire et plus).
+           Affiche un badge si des fûts sont au pot. */
+        Droits.peutGererFuts(role)
+          ? React.createElement(
+              "button",
+              {
+                onClick: function () { setEcranFutsEnAttente(true); },
+                className: "flex-1 min-w-[140px] py-2.5 bg-purple-900 hover:bg-purple-800 text-white rounded-lg text-sm font-medium relative"
+              },
+              "Fûts en attente",
+              nbFutsAuPot > 0
+                ? React.createElement(
+                    "span",
+                    { className: "absolute -top-1 -right-1 bg-purple-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center" },
+                    nbFutsAuPot
+                  )
+                : null
+            )
+          : null,
 
         /* Saisie des ventes — vert. */
         Droits.peutSaisirVentes(role)
@@ -5342,6 +5753,16 @@
         ? React.createElement(FenetreMemoAide, {
             role: role,
             onFermer: function () { setFenetreMemo(false); }
+          })
+        : null,
+
+      /* Écran fûts en attente (plein écran, secrétaire et plus). */
+      ecranFutsEnAttente
+        ? React.createElement(EcranFutsEnAttente, {
+            prenom: prenom,
+            role: role,
+            bars: bars,
+            onFermer: function () { setEcranFutsEnAttente(false); }
           })
         : null
     );
