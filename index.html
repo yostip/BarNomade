@@ -43,7 +43,7 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#39ff14" />
   <title>Bars Nomades — Gestion des Fûts</title>
 
@@ -4202,26 +4202,43 @@
                   : "bg-neutral-900 text-neutral-400") },
             sousMode === "place"
               ? "Tapez sur le plan à l'endroit où placer un bar"
-              : "Faites défiler pour atteindre la zone voulue, puis « Placer »"
+              : "Pincez pour zoomer · faites défiler · puis « Placer »"
           )
-        : null,
+        : React.createElement(
+            "div",
+            { className: "px-3 py-1.5 text-xs text-center bg-neutral-900 text-neutral-500" },
+            "Pincez avec deux doigts pour zoomer sur le plan"
+          ),
 
-      /* Zone du plan : scrollable. En mode "place", le scroll est désactivé
-         via "overflow-hidden" et "touch-none". */
+      /* Zone du plan : conteneur scrollable. En mode "place", le scroll
+         et le zoom à deux doigts sont désactivés pour fiabiliser le tap.
+         En mode normal/édition-nav, le zoom à deux doigts du navigateur
+         est utilisable pour lire les détails du plan. */
       React.createElement(
         "div",
         {
           className: "flex-1 overflow-auto bg-neutral-950 " +
-            (modeEdition && sousMode === "place" ? "overflow-hidden touch-none" : "")
+            (modeEdition && sousMode === "place" ? "overflow-hidden touch-none" : ""),
+          /* touchAction "manipulation" : sur mobile, ça laisse le zoom à
+             deux doigts mais empêche le double-tap-pour-zoomer qui pourrait
+             interférer avec le placement.
+             touchAction "none" en mode placement : aucun geste tactile
+             géré par le navigateur (ni scroll ni zoom). */
+          style: { touchAction: modeEdition && sousMode === "place" ? "none" : "manipulation" }
         },
         React.createElement(
           "div",
           { className: "relative inline-block" },
-          /* L'image en taille naturelle. */
+          /* L'image. La largeur est plafonnée à 100% du conteneur pour que
+             l'image tienne dans la largeur de l'écran par défaut. L'utilisateur
+             peut ensuite zoomer à deux doigts pour voir les détails.
+             "max-w-full" + "h-auto" = redimensionnement proportionnel.
+             "max-w-none" en mode placement = image en taille naturelle si
+             elle est plus grande, ce qui aide à placer précisément. */
           React.createElement("img", {
             src: "plan-hellfest.jpg",
             alt: "Plan du Hellfest",
-            className: "block max-w-none",
+            className: "block max-w-full h-auto",
             onClick: tapSurCarte
           }),
           /* Pastilles des bars placés, en position absolue par-dessus. */
