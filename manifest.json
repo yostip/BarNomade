@@ -1,11 +1,10 @@
 {
-  "name": "Gestion Fûts - Bar Nomade Hellfest 2026",
-  "short_name": "Bar Nomade",
+  "name": "Gestion Fûts - Bars Nomades Hellfest 2026",
+  "short_name": "Bars Nomades",
   "description": "Application de gestion des fûts pour les bars nomades du Hellfest",
-  "start_url": "/BarNomade/",
-  "scope": "/BarNomade/",
+  "start_url": "./",
   "display": "standalone",
-  "background_color": "#0D0D0D",
+  "background_color": "#000000",
   "theme_color": "#39ff14",
   "orientation": "portrait",
   "icons": [
