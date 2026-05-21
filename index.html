@@ -4,24 +4,25 @@
   GESTION DES FÛTS - BARS NOMADES - HELLFEST
   Application reconstruite proprement (remplace la version V16-V23 minifiée).
 
-  ÉTAT : MODULES 1 + 2 + 3A + 3B (complet) + PARAMÈTRES + PLANNING + DASHBOARD + UTILISATEURS
+  ÉTAT : MODULES 1 + 2 + 3A + 3B (complet) + PARAMÈTRES + PLANNING + DASHBOARD + UTILISATEURS + PLAN-1
   Contenu actuel :
     - démarrage, Firebase, authentification anonyme             (module 1)
     - écran d'accueil (prénom), connexion utilisateur           (module 1)
     - gestion des BARS : créer, renommer, supprimer             (module 2)
     - gestion des FÛTS : attribuer, retourner, stock            (module 2)
     - gestion des JOURS et des CRÉNEAUX horaires                (module 3A)
-    - SAISIE DES VENTES : tableau bar x créneau, saisie,
-      PAD en panne, succession de PAD, clôture, annulation      (module 3B)
+    - SAISIE DES VENTES                                         (module 3B)
     - écran PARAMÈTRES                                          (module params)
     - PLANNING BÉNÉVOLES                                        (module planning)
     - DASHBOARD : 4 onglets, exports Excel récap + journal      (module dashboard)
-    - UTILISATEURS : liste des inscrits, promotion/rétrogradation
-      visiteur<->secrétaire, éjection douce. Admin et plus.
-      Remise à zéro de la session (super admin only) avec
-      export Excel obligatoire et double confirmation par mot-clé. (module users)
+    - UTILISATEURS + remise à zéro session                      (module users)
+    - PLAN DU FESTIVAL : affichage scrollable du plan,
+      pastilles des bars positionnés (taille = nb de fûts),
+      placement par mode édition tap-pour-placer. Accessible
+      à tous, modification admin et plus.                       (module plan-1)
 
-  Pas encore inclus : règles Firebase définitives, plan, doc technique.
+  Pas encore inclus : interaction au clic sur une pastille (plan-2),
+  règles Firebase étendues pour positionsBars, doc technique.
 
   PRINCIPE D'ARCHITECTURE
     - Un seul fichier HTML. Code lisible, commenté en français, non minifié.
@@ -220,6 +221,18 @@
     shiftPlanning: function (numeroJour, idBar, idCreneau) {
       return db.ref("sessions/" + ID_SESSION + "/planning/jour" + numeroJour +
         "/" + idBar + "/" + idCreneau);
+    },
+    /* ----- POSITIONS DES BARS SUR LE PLAN (module plan-1) -----
+       Format : { idBar: { x: 12.5, y: 34.0 } }
+       Les coordonnées sont en POURCENTAGE de la taille naturelle de
+       l'image (entre 0 et 100). Pas en pixels — pour rester valide
+       quelle que soit la résolution de l'image, et pour qu'un changement
+       d'image en 2027 ne casse pas les positions. */
+    positionsBars: function () {
+      return db.ref("sessions/" + ID_SESSION + "/positionsBars");
+    },
+    positionBar: function (idBar) {
+      return db.ref("sessions/" + ID_SESSION + "/positionsBars/" + idBar);
     }
   };
 
@@ -358,6 +371,13 @@
        conforme au tableau gelé. */
     peutRemettreAZero: function (role) {
       return role === ROLES.SUPERADMIN;
+    },
+    /* Positionner les bars sur le plan : admin et plus.
+       Décision validée par Yoann (tableau gelé mentionne "super admin",
+       élargi à admin pour ne pas dépendre d'une seule personne en
+       cours de festival). */
+    peutPositionnerBars: function (role) {
+      return role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
     }
   };
 
@@ -615,7 +635,8 @@
             creneaux: null,
             planning: null,
             jourActuel: null,
-            users: null               /* on efface tous les users... */
+            users: null,
+            positionsBars: null     /* on efface aussi les positions */
           };
           return refSession.update(maj).then(function () {
             /* ...puis on remet uniquement le super admin. */
@@ -624,6 +645,22 @@
             }
           });
         });
+    }
+  };
+
+  /* =========================================================================
+     SECTION 8septies — ACTIONS PLAN (module plan-1)
+     Positionnement des bars sur le plan du festival.
+  ========================================================================= */
+  const ActionsPlan = {
+    /* Définit ou met à jour la position d'un bar.
+       x et y sont en pourcentage (0-100). */
+    placerBar: function (idBar, x, y) {
+      return Base.positionBar(idBar).set({ x: x, y: y });
+    },
+    /* Retire un bar du plan (sans le supprimer de la liste des bars). */
+    retirerDuPlan: function (idBar) {
+      return Base.positionBar(idBar).remove();
     }
   };
 
@@ -3996,6 +4033,355 @@
   }
 
   /* =========================================================================
+     SECTION 14decies — ÉCRAN PLAN DU FESTIVAL (module plan-1)
+
+     Accessible à TOUS les rôles. Affichage scrollable du plan du Hellfest
+     avec les pastilles des bars positionnés.
+
+     Pour les admins et plus : bouton "Modifier les positions" qui active
+     un mode édition. Dans ce mode, deux sous-modes :
+       - "Naviguer" : le scroll est libre (consultation).
+       - "Placer"   : le scroll est désactivé, un tap sur la carte ouvre
+                      une fenêtre pour choisir quel bar placer ici.
+
+     Stockage des positions : sessions/festival/positionsBars/<idBar>
+                              avec { x, y } en pourcentage (0-100).
+  ========================================================================= */
+  function EcranPlan({ prenom, role, bars, onFermer }) {
+    const [positions, setPositions] = useState({});
+    /* État du mode édition (admin+ uniquement). */
+    const [modeEdition, setModeEdition] = useState(false);
+    /* En mode édition, sous-mode "nav" (scroll libre) ou "place" (tap pour placer). */
+    const [sousMode, setSousMode] = useState("nav");
+    /* Quand on tape sur la carte en mode "place", on stocke les coordonnées
+       du clic et on ouvre la fenêtre de choix du bar. */
+    const [tapEnAttente, setTapEnAttente] = useState(null);
+
+    const peutPositionner = Droits.peutPositionnerBars(role);
+
+    /* Abonnement temps réel aux positions. */
+    useEffect(function () {
+      const ref = Base.positionsBars();
+      function surPositions(s) { setPositions(s.val() || {}); }
+      ref.on("value", surPositions);
+      return function () { ref.off("value", surPositions); };
+    }, []);
+
+    /* Liste des bars non placés (présents dans bars mais pas dans positions). */
+    const barsNonPlaces = (bars || []).filter(function (b) {
+      return !positions[b.id];
+    });
+
+    /* Liste des bars placés, avec leurs coordonnées. */
+    const barsPlaces = (bars || []).map(function (b) {
+      const p = positions[b.id];
+      if (!p) return null;
+      return { id: b.id, nom: b.nom, type: b.type, x: p.x, y: p.y, futs: b.futs };
+    }).filter(function (b) { return b !== null; });
+
+    /* Gestion du tap sur la carte en mode "place".
+       On récupère les coordonnées du tap relatives à l'image,
+       converties en pourcentage. */
+    function tapSurCarte(e) {
+      if (!modeEdition || sousMode !== "place") return;
+      const img = e.currentTarget;
+      const rect = img.getBoundingClientRect();
+      /* Position du tap dans le repère de l'image (sans le scroll). */
+      const xPx = e.clientX - rect.left;
+      const yPx = e.clientY - rect.top;
+      /* Conversion en pourcentage de la largeur/hauteur de l'image. */
+      const xPct = (xPx / rect.width) * 100;
+      const yPct = (yPx / rect.height) * 100;
+      /* Bornes (au cas où). */
+      if (xPct < 0 || xPct > 100 || yPct < 0 || yPct > 100) return;
+      setTapEnAttente({ x: xPct, y: yPct });
+    }
+
+    function confirmerPlacement(idBar) {
+      const t = tapEnAttente;
+      if (!t) return;
+      ActionsPlan.placerBar(idBar, t.x, t.y)
+        .then(function () { setTapEnAttente(null); })
+        .catch(function (e) { alert("Erreur : " + e.message); });
+    }
+
+    function retirerBarDuPlan(idBar) {
+      if (!confirm("Retirer ce bar du plan ? (Il restera dans la liste des bars.)")) return;
+      ActionsPlan.retirerDuPlan(idBar)
+        .catch(function (e) { alert("Erreur : " + e.message); });
+    }
+
+    /* Quitter le mode édition revient automatiquement en mode nav. */
+    function basculerEdition() {
+      if (modeEdition) {
+        setModeEdition(false);
+        setSousMode("nav");
+        setTapEnAttente(null);
+      } else {
+        setModeEdition(true);
+      }
+    }
+
+    /* Couleur de pastille selon le type de bar. */
+    function couleurPastille(type) {
+      return type === TYPE_BAR.BIERE
+        ? "bg-amber-500 border-amber-200"
+        : "bg-green-500 border-green-200";
+    }
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black z-40 flex flex-col" },
+
+      /* En-tête. */
+      React.createElement(
+        "div",
+        { className: "p-3 border-b border-neutral-800 flex items-center justify-between" },
+        React.createElement(
+          "div",
+          null,
+          React.createElement("h2", { className: "text-lg font-bold text-green-400" }, "Plan du festival"),
+          React.createElement("p", { className: "text-xs text-neutral-500" },
+            barsPlaces.length + " bar(s) placé(s) / " + (bars || []).length + " au total")
+        ),
+        React.createElement(
+          "button",
+          { onClick: onFermer, className: "text-xs px-3 py-1.5 bg-neutral-800 text-neutral-300 rounded-lg" },
+          "Fermer"
+        )
+      ),
+
+      /* Barre du mode édition (admin et plus). */
+      peutPositionner
+        ? React.createElement(
+            "div",
+            { className: "px-3 py-2 border-b border-neutral-800 flex items-center gap-2" },
+            React.createElement(
+              "button",
+              {
+                onClick: basculerEdition,
+                className: "text-xs px-3 py-1.5 rounded-lg font-medium " +
+                  (modeEdition ? "bg-red-700 text-white" : "bg-neutral-800 text-neutral-300")
+              },
+              modeEdition ? "Quitter l'édition" : "Modifier les positions"
+            ),
+            /* Sous-modes navigation/placement, visibles seulement en édition. */
+            modeEdition
+              ? React.createElement(
+                  "div",
+                  { className: "flex gap-1" },
+                  React.createElement(
+                    "button",
+                    {
+                      onClick: function () { setSousMode("nav"); },
+                      className: "text-xs px-3 py-1.5 rounded-lg " +
+                        (sousMode === "nav" ? "bg-blue-700 text-white" : "bg-neutral-900 text-neutral-500")
+                    },
+                    "Naviguer"
+                  ),
+                  React.createElement(
+                    "button",
+                    {
+                      onClick: function () { setSousMode("place"); },
+                      className: "text-xs px-3 py-1.5 rounded-lg " +
+                        (sousMode === "place" ? "bg-emerald-700 text-white" : "bg-neutral-900 text-neutral-500")
+                    },
+                    "Placer"
+                  )
+                )
+              : null
+          )
+        : null,
+
+      /* Message d'aide selon le mode. */
+      modeEdition
+        ? React.createElement(
+            "div",
+            { className: "px-3 py-1.5 text-xs text-center " +
+                (sousMode === "place" ? "bg-emerald-950/50 text-emerald-300"
+                  : "bg-neutral-900 text-neutral-400") },
+            sousMode === "place"
+              ? "Tapez sur le plan à l'endroit où placer un bar"
+              : "Faites défiler pour atteindre la zone voulue, puis « Placer »"
+          )
+        : null,
+
+      /* Zone du plan : scrollable. En mode "place", le scroll est désactivé
+         via "overflow-hidden" et "touch-none". */
+      React.createElement(
+        "div",
+        {
+          className: "flex-1 overflow-auto bg-neutral-950 " +
+            (modeEdition && sousMode === "place" ? "overflow-hidden touch-none" : "")
+        },
+        React.createElement(
+          "div",
+          { className: "relative inline-block" },
+          /* L'image en taille naturelle. */
+          React.createElement("img", {
+            src: "plan-hellfest.jpg",
+            alt: "Plan du Hellfest",
+            className: "block max-w-none",
+            onClick: tapSurCarte
+          }),
+          /* Pastilles des bars placés, en position absolue par-dessus. */
+          barsPlaces.map(function (b) {
+            const nbFuts = b.futs ? Object.keys(b.futs).length : 0;
+            return React.createElement(
+              "div",
+              {
+                key: b.id,
+                style: { left: b.x + "%", top: b.y + "%" },
+                className: "absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+              },
+              React.createElement(
+                "div",
+                { className: "flex flex-col items-center" },
+                React.createElement(
+                  "div",
+                  { className: "w-6 h-6 rounded-full border-2 shadow-lg " + couleurPastille(b.type) +
+                      " flex items-center justify-center text-xs font-bold text-black" },
+                  nbFuts
+                ),
+                React.createElement(
+                  "div",
+                  { className: "mt-0.5 px-1.5 py-0.5 bg-black/80 rounded text-xs text-white whitespace-nowrap" },
+                  b.nom
+                )
+              )
+            );
+          })
+        )
+      ),
+
+      /* Liste des bars non placés (en pied d'écran). */
+      barsNonPlaces.length > 0
+        ? React.createElement(
+            "div",
+            { className: "px-3 py-2 border-t border-amber-900 bg-amber-950/30" },
+            React.createElement("p", { className: "text-xs text-amber-300 mb-1" },
+              "Bars non placés sur le plan (" + barsNonPlaces.length + ") :"),
+            React.createElement(
+              "div",
+              { className: "flex flex-wrap gap-1" },
+              barsNonPlaces.map(function (b) {
+                return React.createElement(
+                  "span",
+                  {
+                    key: b.id,
+                    className: "text-xs px-2 py-0.5 rounded " +
+                      (b.type === TYPE_BAR.BIERE ? "bg-amber-800" : "bg-green-800") +
+                      " text-white"
+                  },
+                  b.nom
+                );
+              })
+            )
+          )
+        : null,
+
+      /* Liste des bars placés (admin+, pour pouvoir retirer du plan). */
+      (peutPositionner && modeEdition && barsPlaces.length > 0)
+        ? React.createElement(
+            "div",
+            { className: "px-3 py-2 border-t border-neutral-800 bg-neutral-950" },
+            React.createElement("p", { className: "text-xs text-neutral-400 mb-1" }, "Retirer du plan :"),
+            React.createElement(
+              "div",
+              { className: "flex flex-wrap gap-1" },
+              barsPlaces.map(function (b) {
+                return React.createElement(
+                  "button",
+                  {
+                    key: b.id,
+                    onClick: function () { retirerBarDuPlan(b.id); },
+                    className: "text-xs px-2 py-1 bg-neutral-800 hover:bg-red-900 text-white rounded"
+                  },
+                  "× " + b.nom
+                );
+              })
+            )
+          )
+        : null,
+
+      /* Fenêtre de choix du bar après un tap (mode place). */
+      tapEnAttente
+        ? React.createElement(
+            "div",
+            { className: "fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" },
+            React.createElement(
+              "div",
+              { className: "bg-neutral-900 rounded-2xl w-full max-w-sm p-5 max-h-[80vh] overflow-y-auto" },
+              React.createElement("h3", { className: "text-lg font-bold text-white mb-3" },
+                "Quel bar placer ici ?"),
+              React.createElement("p", { className: "text-xs text-neutral-500 mb-3" },
+                "Position : " + tapEnAttente.x.toFixed(1) + "% / " + tapEnAttente.y.toFixed(1) + "%"),
+
+              /* Liste des bars non placés (priorité). */
+              barsNonPlaces.length > 0
+                ? React.createElement(
+                    "div",
+                    { className: "mb-3" },
+                    React.createElement("p", { className: "text-xs text-neutral-400 mb-1 uppercase" },
+                      "À placer"),
+                    React.createElement(
+                      "div",
+                      { className: "space-y-1" },
+                      barsNonPlaces.map(function (b) {
+                        return React.createElement(
+                          "button",
+                          {
+                            key: b.id,
+                            onClick: function () { confirmerPlacement(b.id); },
+                            className: "w-full text-left px-3 py-2 bg-neutral-800 hover:bg-emerald-800 text-white rounded text-sm"
+                          },
+                          b.nom + " (" + (b.type === TYPE_BAR.BIERE ? "bière" : "cidre") + ")"
+                        );
+                      })
+                    )
+                  )
+                : null,
+
+              /* Liste des bars déjà placés (pour les déplacer). */
+              barsPlaces.length > 0
+                ? React.createElement(
+                    "div",
+                    null,
+                    React.createElement("p", { className: "text-xs text-neutral-400 mb-1 uppercase" },
+                      "Ou déplacer un bar déjà placé"),
+                    React.createElement(
+                      "div",
+                      { className: "space-y-1" },
+                      barsPlaces.map(function (b) {
+                        return React.createElement(
+                          "button",
+                          {
+                            key: b.id,
+                            onClick: function () { confirmerPlacement(b.id); },
+                            className: "w-full text-left px-3 py-2 bg-neutral-900 hover:bg-blue-800 text-neutral-300 rounded text-sm"
+                          },
+                          "↻ " + b.nom
+                        );
+                      })
+                    )
+                  )
+                : null,
+
+              React.createElement(
+                "button",
+                {
+                  onClick: function () { setTapEnAttente(null); },
+                  className: "w-full mt-3 py-2 bg-neutral-700 text-white rounded text-sm"
+                },
+                "Annuler"
+              )
+            )
+          )
+        : null
+    );
+  }
+
+  /* =========================================================================
      SECTION 15 — ÉCRAN PRINCIPAL
   ========================================================================= */
   function EcranPrincipal({ prenom, role, onDeconnexion }) {
@@ -4023,6 +4409,8 @@
     /* Écran utilisateurs et fenêtre de remise à zéro (module utilisateurs). */
     const [ecranUtilisateurs, setEcranUtilisateurs] = useState(false);
     const [fenetreRemiseAZero, setFenetreRemiseAZero] = useState(false);
+    /* Écran plan du festival (module plan). */
+    const [ecranPlan, setEcranPlan] = useState(false);
     /* Planning de TOUS les jours, nécessaire au moment d'un export depuis
        la fenêtre de remise à zéro (qui n'est pas l'écran Dashboard).
        Chargé une seule fois à l'ouverture de l'écran principal. */
@@ -4260,61 +4648,71 @@
          sans casser la mise en page : flex-wrap permet le retour à la
          ligne automatique si la largeur écran est trop petite ou si on
          dépasse 3-4 boutons. Chaque bouton garde sa couleur identitaire
-         (vert = ventes, bleu = planning, etc.). */
-      (Droits.peutSaisirVentes(role) || peutGererPlanning || peutVoirDashboard || peutGererUtilisateurs)
-        ? React.createElement(
-            "div",
-            { className: "px-3 pb-2 flex flex-wrap gap-2" },
+         (vert = ventes, bleu = planning, etc.).
+         Le bouton Plan est TOUJOURS visible (accessible à tous les rôles)
+         donc la barre est toujours présente. */
+      React.createElement(
+        "div",
+        { className: "px-3 pb-2 flex flex-wrap gap-2" },
 
-            /* Saisie des ventes — vert. */
-            Droits.peutSaisirVentes(role)
-              ? React.createElement(
-                  "button",
-                  {
-                    onClick: function () { setEcranVentes(true); },
-                    className: "flex-1 min-w-[140px] py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium"
-                  },
-                  "Saisie des ventes"
-                )
-              : null,
+        /* Plan du festival — gris (TOUS les rôles). */
+        React.createElement(
+          "button",
+          {
+            onClick: function () { setEcranPlan(true); },
+            className: "flex-1 min-w-[140px] py-2.5 bg-neutral-700 hover:bg-neutral-600 text-white rounded-lg text-sm font-medium"
+          },
+          "Plan"
+        ),
 
-            /* Planning bénévoles — bleu. */
-            peutGererPlanning
-              ? React.createElement(
-                  "button",
-                  {
-                    onClick: function () { setEcranPlanning(true); },
-                    className: "flex-1 min-w-[140px] py-2.5 bg-blue-800 hover:bg-blue-700 text-white rounded-lg text-sm font-medium"
-                  },
-                  "Planning bénévoles"
-                )
-              : null,
+        /* Saisie des ventes — vert. */
+        Droits.peutSaisirVentes(role)
+          ? React.createElement(
+              "button",
+              {
+                onClick: function () { setEcranVentes(true); },
+                className: "flex-1 min-w-[140px] py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium"
+              },
+              "Saisie des ventes"
+            )
+          : null,
 
-            /* Dashboard — violet (admin et plus). */
-            peutVoirDashboard
-              ? React.createElement(
-                  "button",
-                  {
-                    onClick: function () { setEcranDashboard(true); },
-                    className: "flex-1 min-w-[140px] py-2.5 bg-purple-800 hover:bg-purple-700 text-white rounded-lg text-sm font-medium"
-                  },
-                  "Dashboard"
-                )
-              : null,
+        /* Planning bénévoles — bleu. */
+        peutGererPlanning
+          ? React.createElement(
+              "button",
+              {
+                onClick: function () { setEcranPlanning(true); },
+                className: "flex-1 min-w-[140px] py-2.5 bg-blue-800 hover:bg-blue-700 text-white rounded-lg text-sm font-medium"
+              },
+              "Planning bénévoles"
+            )
+          : null,
 
-            /* Utilisateurs — orange (admin et plus). */
-            peutGererUtilisateurs
-              ? React.createElement(
-                  "button",
-                  {
-                    onClick: function () { setEcranUtilisateurs(true); },
-                    className: "flex-1 min-w-[140px] py-2.5 bg-orange-800 hover:bg-orange-700 text-white rounded-lg text-sm font-medium"
-                  },
-                  "Utilisateurs"
-                )
-              : null
-          )
-        : null,
+        /* Dashboard — violet (admin et plus). */
+        peutVoirDashboard
+          ? React.createElement(
+              "button",
+              {
+                onClick: function () { setEcranDashboard(true); },
+                className: "flex-1 min-w-[140px] py-2.5 bg-purple-800 hover:bg-purple-700 text-white rounded-lg text-sm font-medium"
+              },
+              "Dashboard"
+            )
+          : null,
+
+        /* Utilisateurs — orange (admin et plus). */
+        peutGererUtilisateurs
+          ? React.createElement(
+              "button",
+              {
+                onClick: function () { setEcranUtilisateurs(true); },
+                className: "flex-1 min-w-[140px] py-2.5 bg-orange-800 hover:bg-orange-700 text-white rounded-lg text-sm font-medium"
+              },
+              "Utilisateurs"
+            )
+          : null
+      ),
 
       /* Liste des bars. */
       React.createElement(
@@ -4443,6 +4841,16 @@
             planningTousJoursPourExport: planningTousJours,
             prenom: prenom,
             onFermer: function () { setFenetreRemiseAZero(false); }
+          })
+        : null,
+
+      /* Écran plan du festival (plein écran, accessible à tous les rôles). */
+      ecranPlan
+        ? React.createElement(EcranPlan, {
+            prenom: prenom,
+            role: role,
+            bars: bars,
+            onFermer: function () { setEcranPlan(false); }
           })
         : null
     );
