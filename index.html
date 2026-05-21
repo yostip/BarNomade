@@ -1718,6 +1718,40 @@
     const peutAnnulerAttribution = role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
     const barComplet = nbFuts >= maxFuts;
 
+    /* Formate la durée écoulée depuis l'attribution d'un fût.
+         < 1 min   → "à l'instant"
+         < 60 min  → "47 min"
+         < 24 h    → "2h17"
+         >= 24 h   → "1j 3h"
+       Calcul à l'instant T : la valeur se rafraîchira naturellement à
+       chaque mise à jour de l'écran (très fréquente vu les abonnements
+       Firebase temps réel). */
+    function formatDuree(dateAttribution) {
+      if (!dateAttribution) return "";
+      const dureeMs = Date.now() - dateAttribution;
+      if (dureeMs < 0) return "";
+      const minutes = Math.floor(dureeMs / 60000);
+      if (minutes < 1) return "à l'instant";
+      if (minutes < 60) return minutes + " min";
+      const heures = Math.floor(minutes / 60);
+      const min = minutes % 60;
+      if (heures < 24) {
+        return heures + "h" + (min < 10 ? "0" + min : min);
+      }
+      const jours = Math.floor(heures / 24);
+      const h = heures % 24;
+      return jours + "j " + h + "h";
+    }
+
+    /* Couleur de la durée selon son ancienneté (alerte visuelle). */
+    function couleurDuree(dateAttribution) {
+      if (!dateAttribution) return "text-neutral-500";
+      const minutes = (Date.now() - dateAttribution) / 60000;
+      if (minutes < 120) return "text-neutral-400";          /* < 2h : OK */
+      if (minutes < 240) return "text-amber-400";            /* 2-4h : attention */
+      return "text-red-400";                                  /* > 4h : vieux */
+    }
+
     return React.createElement(
       "div",
       { className: "rounded-xl border p-3 " +
@@ -1745,11 +1779,21 @@
             "div",
             { className: "space-y-1" },
             listeFuts.map(function (f) {
+              const duree = formatDuree(f.donnees.dateAttribution);
+              const couleur = couleurDuree(f.donnees.dateAttribution);
               return React.createElement(
                 "div",
                 { key: f.id, className: "flex items-center justify-between bg-black/40 rounded px-2 py-1.5" },
-                React.createElement("span", { className: "text-sm text-neutral-200" },
-                  "Fût " + (f.donnees.type === TYPE_BAR.BIERE ? "bière" : "cidre")),
+                React.createElement(
+                  "div",
+                  { className: "flex-1 min-w-0" },
+                  React.createElement("span", { className: "text-sm text-neutral-200" },
+                    "Fût " + (f.donnees.type === TYPE_BAR.BIERE ? "bière" : "cidre")),
+                  duree
+                    ? React.createElement("span", { className: "text-xs ml-2 " + couleur },
+                        "· depuis " + duree)
+                    : null
+                ),
                 React.createElement(
                   "div",
                   { className: "flex gap-1" },
@@ -5596,6 +5640,18 @@
     const [nbFutsAuPot, setNbFutsAuPot] = useState(0);
     /* Écran historique des mouvements de fûts (admin et plus). */
     const [ecranHistoriqueFuts, setEcranHistoriqueFuts] = useState(false);
+
+    /* Timer pour rafraîchir l'affichage des durées de fûts.
+       L'état "tick" est incrémenté toutes les 60 secondes, ce qui force
+       un re-rendu et donc une recalcul des durées affichées sur les fûts.
+       Coût négligeable : un seul re-rendu par minute. */
+    const [tickHorloge, setTickHorloge] = useState(0);
+    useEffect(function () {
+      const intervalle = setInterval(function () {
+        setTickHorloge(function (t) { return t + 1; });
+      }, 60000);
+      return function () { clearInterval(intervalle); };
+    }, []);
     /* Planning de TOUS les jours, nécessaire au moment d'un export depuis
        la fenêtre de remise à zéro (qui n'est pas l'écran Dashboard).
        Chargé une seule fois à l'ouverture de l'écran principal. */
