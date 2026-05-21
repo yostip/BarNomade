@@ -370,6 +370,20 @@
     },
     futEnAttente: function (idAttente) {
       return db.ref("sessions/" + ID_SESSION + "/futsEnAttente/" + idAttente);
+    },
+    /* ----- HISTORIQUE DES RENOMMAGES DE BARS (module renommage) -----
+       Format : historiqueRenommages/$idBar/$idEntree = {
+         ancienNom, nouveauNom, date, par
+       }
+       À chaque renommage, une entrée est ajoutée. Permet d'afficher
+       sur la carte du bar les noms précédents, et de retrouver dans
+       l'export le contexte des anciens mouvements (qui référencent
+       potentiellement un nom obsolète). */
+    historiqueRenommages: function () {
+      return db.ref("sessions/" + ID_SESSION + "/historiqueRenommages");
+    },
+    historiqueRenommagesBar: function (idBar) {
+      return db.ref("sessions/" + ID_SESSION + "/historiqueRenommages/" + idBar);
     }
   };
 
@@ -527,10 +541,23 @@
       if (!nomPropre) return Promise.reject(new Error("Nom de bar vide"));
       return Base.bars().push({ nom: nomPropre, type: type });
     },
-    renommer: function (idBar, nouveauNom) {
+    renommer: function (idBar, ancienNom, nouveauNom, prenomUtilisateur) {
       const nomPropre = (nouveauNom || "").trim();
       if (!nomPropre) return Promise.reject(new Error("Nom de bar vide"));
-      return Base.bar(idBar).child("nom").set(nomPropre);
+      if (nomPropre.length > 100) return Promise.reject(new Error("Nom trop long (100 caractères max)"));
+      if (nomPropre === ancienNom) return Promise.reject(new Error("Le nom est identique"));
+      /* Met à jour le nom, PUIS trace l'opération dans
+         historiqueRenommages/$idBar. L'ordre garantit que si le set échoue
+         (par exemple règle Firebase qui refuse), on ne pollue pas
+         l'historique avec un renommage qui n'a pas eu lieu. */
+      return Base.bar(idBar).child("nom").set(nomPropre).then(function () {
+        return Base.historiqueRenommagesBar(idBar).push({
+          ancienNom: ancienNom || "",
+          nouveauNom: nomPropre,
+          date: Date.now(),
+          par: prenomUtilisateur || ""
+        });
+      });
     },
     supprimer: function (bar) {
       const nbFuts = bar.futs ? Object.keys(bar.futs).length : 0;
@@ -942,7 +969,8 @@
             jourActuel: null,
             users: null,
             positionsBars: null,    /* on efface aussi les positions */
-            futsEnAttente: null     /* et le pot de fûts en attente */
+            futsEnAttente: null,    /* et le pot de fûts en attente */
+            historiqueRenommages: null  /* et l'historique des renommages */
           };
           return refSession.update(maj).then(function () {
             /* ...puis on remet uniquement le super admin. */
@@ -1824,9 +1852,95 @@
   }
 
   /* =========================================================================
+     SECTION 12bis — FENÊTRE DE RENOMMAGE D'UN BAR
+
+     Réservée admin et super admin. Permet de changer le nom d'un bar
+     en cours de festival (cas d'usage réel : bars nomades qui sont
+     déplacés physiquement et qu'on renomme selon leur emplacement
+     courant). Les fûts attribués au bar restent en place — c'est juste
+     le libellé qui change.
+  ========================================================================= */
+  function FenetreRenommerBar({ bar, onConfirmer, onAnnuler }) {
+    const [nouveauNom, setNouveauNom] = useState(bar.nom || "");
+    const [enCours, setEnCours] = useState(false);
+
+    function valider() {
+      const propre = (nouveauNom || "").trim();
+      if (!propre) {
+        alert("Le nom ne peut pas être vide.");
+        return;
+      }
+      if (propre === bar.nom) {
+        alert("Le nom est identique. Aucune modification.");
+        return;
+      }
+      setEnCours(true);
+      Promise.resolve(onConfirmer(propre))
+        .then(function () { setEnCours(false); })
+        .catch(function () { setEnCours(false); });
+    }
+
+    return React.createElement(
+      "div",
+      {
+        className: "fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50",
+        onClick: function () { if (!enCours) onAnnuler(); }
+      },
+      React.createElement(
+        "div",
+        {
+          className: "bg-neutral-900 rounded-2xl w-full max-w-sm p-5 border border-blue-800",
+          onClick: function (e) { e.stopPropagation(); }
+        },
+        React.createElement("h3", { className: "text-lg font-bold text-blue-400 mb-1" },
+          "Renommer le bar"),
+        React.createElement("p", { className: "text-xs text-neutral-500 mb-3" },
+          "Nom actuel : « " + (bar.nom || "?") + " »"),
+
+        React.createElement("input", {
+          type: "text",
+          value: nouveauNom,
+          onChange: function (e) { setNouveauNom(e.target.value); },
+          maxLength: 100,
+          autoFocus: true,
+          placeholder: "Nouveau nom du bar",
+          className: "w-full px-3 py-2 bg-neutral-800 border border-neutral-700 text-white rounded mb-3"
+        }),
+
+        React.createElement("p", { className: "text-xs text-neutral-500 italic mb-3" },
+          "Les fûts attribués restent en place. L'ancien nom est conservé " +
+          "dans l'historique."),
+
+        React.createElement(
+          "div",
+          { className: "flex gap-2" },
+          React.createElement(
+            "button",
+            {
+              onClick: onAnnuler,
+              disabled: enCours,
+              className: "flex-1 py-2 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 text-white rounded text-sm"
+            },
+            "Annuler"
+          ),
+          React.createElement(
+            "button",
+            {
+              onClick: valider,
+              disabled: enCours,
+              className: "flex-1 py-2 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white rounded text-sm font-medium"
+            },
+            enCours ? "Enregistrement…" : "Renommer"
+          )
+        )
+      )
+    );
+  }
+
+  /* =========================================================================
      SECTION 13 — CARTE D'UN BAR
   ========================================================================= */
-  function CarteBar({ bar, role, maxFuts, prenom, onAttribuer, onDemanderRetour, onSupprimer, onAnnulerAttribution }) {
+  function CarteBar({ bar, role, maxFuts, prenom, onAttribuer, onDemanderRetour, onSupprimer, onAnnulerAttribution, onRenommer, historiqueRenommagesBar }) {
     const futs = bar.futs || {};
     const listeFuts = Object.keys(futs).map(function (idFut) {
       return { id: idFut, donnees: futs[idFut] };
@@ -1895,6 +2009,24 @@
           nbFuts + " / " + maxFuts
         )
       ),
+      /* Anciens noms si le bar a déjà été renommé. Récupérés depuis
+         l'objet historiqueRenommagesBar passé en prop par EcranPrincipal. */
+      (function () {
+        const renommages = historiqueRenommagesBar || {};
+        const liste = Object.keys(renommages).map(function (k) { return renommages[k]; });
+        if (liste.length === 0) return null;
+        /* Trie du plus ancien au plus récent et déduplique les noms. */
+        liste.sort(function (a, b) { return (a.date || 0) - (b.date || 0); });
+        const anciensNoms = [];
+        liste.forEach(function (r) {
+          if (r.ancienNom && r.ancienNom !== bar.nom && anciensNoms.indexOf(r.ancienNom) === -1) {
+            anciensNoms.push(r.ancienNom);
+          }
+        });
+        if (anciensNoms.length === 0) return null;
+        return React.createElement("p", { className: "text-xs text-neutral-500 italic mb-2 -mt-1" },
+          "Anciennement : " + anciensNoms.join(", "));
+      })(),
       listeFuts.length === 0
         ? React.createElement("p", { className: "text-neutral-500 text-sm" }, "Aucun fût en cours")
         : React.createElement(
@@ -1961,6 +2093,17 @@
                     : "bg-emerald-600 hover:bg-emerald-500 text-white")
               },
               barComplet ? "Bar complet" : "+ Attribuer un fût"
+            )
+          : null,
+        peutGererBars
+          ? React.createElement(
+              "button",
+              {
+                onClick: function () { onRenommer(bar); },
+                className: "py-2 px-3 rounded-lg text-sm bg-neutral-800 hover:bg-blue-900 text-neutral-400",
+                title: "Renommer ce bar"
+              },
+              "✏️"
             )
           : null,
         peutGererBars
@@ -5131,6 +5274,18 @@
         ]
       },
       {
+        id: "renommage",
+        titre: "Renommer un bar",
+        icone: "✏️",
+        rolesMin: ROLES.ADMIN,
+        points: [
+          "Bouton ✏️ sur chaque carte de bar (à côté du bouton Supprimer).",
+          "Utile pour les bars nomades qui changent d'emplacement.",
+          "Les fûts en cours RESTENT sur le bar (le nom change, pas la cargaison).",
+          "Les anciens noms s'affichent en italique sous le nom actuel."
+        ]
+      },
+      {
         id: "correction",
         titre: "Correction d'erreurs fûts",
         icone: "↶",
@@ -5778,6 +5933,13 @@
     const [nbFutsAuPot, setNbFutsAuPot] = useState(0);
     /* Écran historique des mouvements de fûts (admin et plus). */
     const [ecranHistoriqueFuts, setEcranHistoriqueFuts] = useState(false);
+    /* Bar en cours de renommage (null si aucune fenêtre ouverte). */
+    const [barARenommer, setBarARenommer] = useState(null);
+    /* Historique des renommages de tous les bars, indexé par idBar.
+       Format : { idBar: { idEntree: { ancienNom, nouveauNom, date, par } } }
+       Récupéré en temps réel pour afficher les anciens noms sur chaque
+       carte de bar. */
+    const [historiqueRenommages, setHistoriqueRenommages] = useState({});
 
     /* Timer pour rafraîchir l'affichage des durées de fûts.
        L'état "tick" est incrémenté toutes les 60 secondes, ce qui force
@@ -5906,6 +6068,17 @@
       }
       ref.on("value", surPot);
       return function () { ref.off("value", surPot); };
+    }, []);
+
+    /* Abonnement à l'historique des renommages de bars, pour pouvoir
+       afficher les anciens noms sur chaque carte de bar. */
+    useEffect(function () {
+      const ref = Base.historiqueRenommages();
+      function surRen(s) {
+        setHistoriqueRenommages(s.val() || {});
+      }
+      ref.on("value", surRen);
+      return function () { ref.off("value", surRen); };
     }, []);
 
     /* Abonnement aux ventes TOUS JOURS confondus.
@@ -6221,11 +6394,13 @@
                 role: role,
                 maxFuts: params.maxFutsParBar,
                 prenom: prenom,
+                historiqueRenommagesBar: historiqueRenommages[bar.id] || null,
                 onAttribuer: attribuerFut,
                 onDemanderRetour: function (b, idFut, fut) {
                   setRetourEnCours({ bar: b, idFut: idFut, fut: fut });
                 },
                 onSupprimer: supprimerBar,
+                onRenommer: function (b) { setBarARenommer(b); },
                 onAnnulerAttribution: function (b, idFut, fut) {
                   /* Confirmation explicite (action sensible). */
                   if (!window.confirm(
@@ -6280,6 +6455,19 @@
             fut: retourEnCours.fut,
             onConfirmer: confirmerRetour,
             onAnnuler: function () { setRetourEnCours(null); }
+          })
+        : null,
+
+      /* Fenêtre de renommage de bar (admin et plus). */
+      barARenommer
+        ? React.createElement(FenetreRenommerBar, {
+            bar: barARenommer,
+            onAnnuler: function () { setBarARenommer(null); },
+            onConfirmer: function (nouveauNom) {
+              return ActionsBars.renommer(barARenommer.id, barARenommer.nom, nouveauNom, prenom)
+                .then(function () { setBarARenommer(null); })
+                .catch(function (e) { alert("Erreur : " + e.message); });
+            }
           })
         : null,
 
