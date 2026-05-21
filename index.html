@@ -4555,6 +4555,163 @@
   }
 
   /* =========================================================================
+     SECTION 14undecies — FENÊTRE MÉMO/AIDE (aide-mémoire selon le rôle)
+
+     Bouton "?" discret en haut de l'écran principal. Ouvre une popup
+     avec quelques rappels de gestes essentiels selon le rôle.
+     Volontairement COURT : c'est un aide-mémoire en cours d'usage, pas
+     un guide d'apprentissage. Les guides détaillés sont fournis à part
+     (PDF distincts pour secrétaire et admin).
+     Le visiteur n'a pas de mémo (rien à faire d'actif).
+  ========================================================================= */
+  function FenetreMemoAide({ role, onFermer }) {
+
+    /* Bloc-section réutilisable. */
+    function section(titre, items) {
+      return React.createElement(
+        "div",
+        { className: "mb-4" },
+        React.createElement("p", { className: "text-xs text-emerald-400 uppercase font-bold mb-1" }, titre),
+        React.createElement(
+          "ul",
+          { className: "space-y-1.5 text-sm text-neutral-300" },
+          items.map(function (txt, i) {
+            return React.createElement(
+              "li",
+              { key: i, className: "flex" },
+              React.createElement("span", { className: "text-emerald-500 mr-2" }, "•"),
+              React.createElement("span", null, txt)
+            );
+          })
+        )
+      );
+    }
+
+    /* Contenu commun à tous les rôles actifs (secrétaire+). */
+    const blocsSecretaire = [
+      section("Saisie d'une vente", [
+        "Saisie case par case : un bar × un créneau du jour actif.",
+        "Bien vérifier le jour actif en haut de l'écran principal AVANT de saisir.",
+        "Si le PAD est en panne, cocher la case et NOTER LE NUMÉRO DE PAD obligatoirement.",
+        "Plusieurs saisies possibles dans une même case (succession de PAD)."
+      ]),
+      section("Clôture d'un créneau", [
+        "Clôturer dès que le créneau est terminé : verrouille la case.",
+        "Si tu te trompes, un admin peut rouvrir le créneau.",
+        "Une case clôturée passe en gris clair dans le tableau."
+      ]),
+      section("Fûts — attribution / retour", [
+        "Attribuer un fût : passe du stock central vers le bar choisi.",
+        "Retour : 4 motifs (vide, cassé, non terminé, plein).",
+        "Fût cassé : commentaire obligatoire.",
+        "Fût plein : réintégré au stock central."
+      ]),
+      section("Planning bénévoles", [
+        "Tableau bar × créneau, 3 postes : vendeur, serveur, runner.",
+        "Saisie libre : ATTENTION à la casse (« Kevin » ≠ « kevin »).",
+        "L'app détecte les conflits et BLOQUE l'enregistrement."
+      ])
+    ];
+
+    /* Contenu supplémentaire admin. */
+    const blocsAdmin = [
+      section("Annulation d'une saisie", [
+        "Annulation saisie par saisie, pas toute la case.",
+        "La saisie annulée reste tracée (barrée), son montant ne compte plus.",
+        "Annuler dans une case clôturée déclôture la case automatiquement."
+      ]),
+      section("Paramètres", [
+        "Modifier les prix EN COURS de festival fausse les calculs sur les ventes passées.",
+        "Modifier le stock initial déclenche une alerte rétroactive.",
+        "Réduire le nombre de jours alerte si le jour supprimé contient des données."
+      ]),
+      section("Gestion des utilisateurs", [
+        "Promotion visiteur ↔ secrétaire uniquement (admin créé en console Firebase).",
+        "Éjection = suppression douce (le bénévole peut revenir en visiteur).",
+        "Tu ne peux ni te rétrograder ni t'éjecter toi-même.",
+        "Le changement de rôle est appliqué immédiatement chez la personne, sans rechargement."
+      ]),
+      section("Dashboard et exports", [
+        "Récapitulatif Excel : synthèse en 4 feuilles (Vue, Bar, Bénévole, Anomalies).",
+        "Journal brut Excel : tous les mouvements de fûts + toutes les saisies (annulées comprises).",
+        "Onglet Anomalies : surveille bars hors seuil, données perdues, créneaux non clôturés."
+      ])
+    ];
+
+    /* Contenu supplémentaire super admin. */
+    const blocsSuperAdmin = [
+      section("Créneaux horaires", [
+        "Chaque jour a SA propre liste de créneaux.",
+        "Bouton « copier d'un autre jour » utile en début de festival.",
+        "Modifier un créneau après saisies : à éviter, ça casse l'historique des ventes."
+      ]),
+      section("Remise à zéro de la session", [
+        "Action IRRÉVERSIBLE — à utiliser uniquement APRÈS le festival.",
+        "L'export Excel des deux fichiers est OBLIGATOIRE avant l'effacement.",
+        "Si l'export échoue, l'effacement est bloqué (filet de sécurité).",
+        "Confirmation finale : taper EFFACER en majuscules.",
+        "Les paramètres et ton compte super admin sont PRÉSERVÉS."
+      ])
+    ];
+
+    /* Composition des blocs à afficher selon le rôle. */
+    let blocs = [];
+    if (role === ROLES.SECRETAIRE || role === ROLES.ADMIN || role === ROLES.SUPERADMIN) {
+      blocs = blocs.concat(blocsSecretaire);
+    }
+    if (role === ROLES.ADMIN || role === ROLES.SUPERADMIN) {
+      blocs = blocs.concat(blocsAdmin);
+    }
+    if (role === ROLES.SUPERADMIN) {
+      blocs = blocs.concat(blocsSuperAdmin);
+    }
+
+    /* Titre selon le rôle. */
+    const titreRole = role === ROLES.SUPERADMIN ? "Super admin"
+      : role === ROLES.ADMIN ? "Admin"
+      : role === ROLES.SECRETAIRE ? "Secrétaire"
+      : "Visiteur";
+
+    return React.createElement(
+      "div",
+      {
+        className: "fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50",
+        onClick: onFermer
+      },
+      React.createElement(
+        "div",
+        {
+          className: "bg-neutral-900 rounded-2xl w-full max-w-md p-5 max-h-[85vh] overflow-y-auto border border-emerald-800",
+          onClick: function (e) { e.stopPropagation(); }
+        },
+
+        React.createElement(
+          "div",
+          { className: "flex items-center justify-between mb-2" },
+          React.createElement("h3", { className: "text-lg font-bold text-emerald-400" }, "Aide-mémoire"),
+          React.createElement("span", { className: "text-xs text-neutral-500" }, titreRole)
+        ),
+        React.createElement("p", { className: "text-xs text-neutral-500 mb-4 italic" },
+          "Rappels essentiels. Le guide détaillé est dans le PDF distribué."),
+
+        blocs.length === 0
+          ? React.createElement("p", { className: "text-sm text-neutral-400 text-center py-8" },
+              "Rien de spécifique pour le rôle visiteur. Tu peux consulter le plan et la liste des bars.")
+          : React.createElement("div", null, blocs),
+
+        React.createElement(
+          "button",
+          {
+            onClick: onFermer,
+            className: "w-full mt-2 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium"
+          },
+          "Fermer"
+        )
+      )
+    );
+  }
+
+  /* =========================================================================
      SECTION 15 — ÉCRAN PRINCIPAL
   ========================================================================= */
   function EcranPrincipal({ prenom, role, onDeconnexion }) {
@@ -4584,6 +4741,8 @@
     const [fenetreRemiseAZero, setFenetreRemiseAZero] = useState(false);
     /* Écran plan du festival (module plan). */
     const [ecranPlan, setEcranPlan] = useState(false);
+    /* Fenêtre mémo/aide selon le rôle. */
+    const [fenetreMemo, setFenetreMemo] = useState(false);
     /* Planning de TOUS les jours, nécessaire au moment d'un export depuis
        la fenêtre de remise à zéro (qui n'est pas l'écran Dashboard).
        Chargé une seule fois à l'ouverture de l'écran principal. */
@@ -4749,13 +4908,27 @@
           React.createElement("h1", { className: "text-lg font-bold text-green-400" }, "Bars Nomades"),
           React.createElement("p", { className: "text-xs text-neutral-500" }, prenom + " — " + role)
         ),
+        /* Groupe de boutons à droite : aide et quitter. */
         React.createElement(
-          "button",
-          {
-            onClick: onDeconnexion,
-            className: "text-xs px-3 py-1.5 bg-neutral-800 text-neutral-300 rounded-lg"
-          },
-          "Quitter"
+          "div",
+          { className: "flex items-center gap-2" },
+          /* Bouton aide-mémoire — accessible à tous (le mémo s'adapte au rôle). */
+          React.createElement(
+            "button",
+            {
+              onClick: function () { setFenetreMemo(true); },
+              className: "w-8 h-8 rounded-full bg-emerald-800 hover:bg-emerald-700 text-white text-base font-bold"
+            },
+            "?"
+          ),
+          React.createElement(
+            "button",
+            {
+              onClick: onDeconnexion,
+              className: "text-xs px-3 py-1.5 bg-neutral-800 text-neutral-300 rounded-lg"
+            },
+            "Quitter"
+          )
         )
       ),
 
@@ -5024,6 +5197,14 @@
             role: role,
             bars: bars,
             onFermer: function () { setEcranPlan(false); }
+          })
+        : null,
+
+      /* Fenêtre mémo/aide (modal, contenu selon le rôle). */
+      fenetreMemo
+        ? React.createElement(FenetreMemoAide, {
+            role: role,
+            onFermer: function () { setFenetreMemo(false); }
           })
         : null
     );
