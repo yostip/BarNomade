@@ -535,6 +535,106 @@
         /* Retirer du pot. */
         return Base.futEnAttente(idAttente).remove();
       });
+    },
+
+    /* ===== ANNULATION D'ACTIONS (admin et plus) =====
+       Principe : on ne SUPPRIME PAS le mouvement initial, on le MARQUE
+       comme annulé (annule: true) et on ajoute un nouveau mouvement
+       inverse. Cohérent avec l'annulation des saisies de vente.
+       Les agrégations (dashboard, stock, cohérence) IGNORENT les
+       mouvements annulés et les annulations elles-mêmes. */
+
+    /* Annule une ATTRIBUTION : retire le fût du bar (puisqu'il ne devait
+       pas y être). Crée un mouvement "annulation_attribution".
+       "idMouvement" est la clé Firebase du mouvement initial dans
+       historiqueFuts. "mvt" est le mouvement lui-même (pour avoir le bar,
+       le type, etc.). "idFut" est l'id du fût actuellement sur le bar. */
+    annulerAttribution: function (idMouvement, mvt, idFut, prenomUtilisateur) {
+      /* Marquer le mouvement initial comme annulé. */
+      return Base.historiqueFuts().child(idMouvement).update({ annule: true })
+        .then(function () {
+          /* Retirer le fût du bar (s'il y est encore — sécurité). */
+          if (idFut) {
+            return Base.futsDuBar(mvt.idBar).child(idFut).remove();
+          }
+        })
+        .then(function () {
+          /* Tracer l'annulation. */
+          return Base.historiqueFuts().push({
+            mouvement: "annulation_attribution",
+            idMouvementAnnule: idMouvement,
+            typeFut: mvt.typeFut,
+            idBar: mvt.idBar,
+            nomBar: mvt.nomBar,
+            par: prenomUtilisateur,
+            date: Date.now()
+          });
+        });
+    },
+
+    /* Annule un RETOUR : remet le fût sur le bar d'origine.
+       Selon le motif du retour :
+         - vide / cassé : on crée un NOUVEAU fût sur le bar (pas de
+           sortie de stock supplémentaire, car le retour initial est
+           neutralisé par l'annulation).
+         - plein : pareil, et il faudra ré-ajuster le stock central
+           (le retour plein avait ajouté 1, on retire 1).
+         - non terminé : on retire le fût du pot et on le remet sur le bar.
+       "idMouvement" = clé du mouvement de retour initial dans historiqueFuts.
+       "mvt" = le mouvement de retour. */
+    annulerRetour: function (idMouvement, mvt, prenomUtilisateur) {
+      /* On marque d'abord le retour initial comme annulé. */
+      return Base.historiqueFuts().child(idMouvement).update({ annule: true })
+        .then(function () {
+          /* Cas spécial : retour "non terminé" -> on retrouve le fût
+             dans le pot et on le retire pour le remettre sur le bar.
+             On retrouve par : type, idBarPrecedent, dateRetour proche. */
+          if (mvt.motifRetour === RETOUR.NON_TERMINE) {
+            return Base.futsEnAttente().once("value").then(function (snap) {
+              const pot = snap.val() || {};
+              /* Trouve l'entrée du pot qui correspond au retour. */
+              let idPotMatch = null;
+              Object.keys(pot).forEach(function (idA) {
+                const e = pot[idA];
+                if (!e) return;
+                if (e.type === mvt.typeFut &&
+                    e.idBarPrecedent === mvt.idBar &&
+                    Math.abs((e.dateRetour || 0) - (mvt.date || 0)) < 5000) {
+                  idPotMatch = idA;
+                }
+              });
+              if (idPotMatch) {
+                return Base.futEnAttente(idPotMatch).remove();
+              }
+              /* Si on ne trouve pas dans le pot (réattribué entre temps),
+                 on continue quand même : on remettra un nouveau fût sur
+                 le bar. Cas rare. */
+            });
+          }
+        })
+        .then(function () {
+          /* Recréer un fût sur le bar d'origine (nouvelle identité). */
+          const refNouveauFut = Base.futsDuBar(mvt.idBar).push();
+          return refNouveauFut.set({
+            type: mvt.typeFut,
+            dateAttribution: Date.now(),
+            attribuePar: prenomUtilisateur,
+            provenance: "annulation_retour"
+          });
+        })
+        .then(function () {
+          /* Tracer l'annulation. */
+          return Base.historiqueFuts().push({
+            mouvement: "annulation_retour",
+            idMouvementAnnule: idMouvement,
+            motifRetourAnnule: mvt.motifRetour,
+            typeFut: mvt.typeFut,
+            idBar: mvt.idBar,
+            nomBar: mvt.nomBar,
+            par: prenomUtilisateur,
+            date: Date.now()
+          });
+        });
     }
   };
 
@@ -935,6 +1035,13 @@
     let stockBiere = params.stockInitialBiere;
     let stockCidre = params.stockInitialCidre;
     historique.forEach(function (mvt) {
+      /* Ignorer les mouvements annulés et les mouvements d'annulation
+         eux-mêmes (les annulations sont des entrées de traçabilité,
+         pas des effets comptables — l'effet a été obtenu en marquant
+         le mouvement original comme annule:true). */
+      if (mvt.annule === true) return;
+      if (mvt.mouvement === "annulation_attribution") return;
+      if (mvt.mouvement === "annulation_retour") return;
       if (mvt.mouvement === "attribution") {
         if (mvt.typeFut === TYPE_BAR.BIERE) stockBiere = stockBiere - 1;
         if (mvt.typeFut === TYPE_BAR.CIDRE) stockCidre = stockCidre - 1;
@@ -1032,6 +1139,11 @@
     let nbBiereSortis = 0, nbCidreSortis = 0;
     let nbCasses = 0, nbPleinsRendus = 0;
     (historique || []).forEach(function (mvt) {
+      /* Ignorer les mouvements annulés et les annulations elles-mêmes
+         (cf. calculerStock pour le détail). */
+      if (mvt.annule === true) return;
+      if (mvt.mouvement === "annulation_attribution") return;
+      if (mvt.mouvement === "annulation_retour") return;
       if (filtreBar != null && mvt.idBar !== filtreBar) return;
       if (mvt.mouvement === "attribution") {
         if (mvt.typeFut === TYPE_BAR.BIERE) nbBiereSortis++;
@@ -1592,7 +1704,7 @@
   /* =========================================================================
      SECTION 13 — CARTE D'UN BAR
   ========================================================================= */
-  function CarteBar({ bar, role, maxFuts, prenom, onAttribuer, onDemanderRetour, onSupprimer }) {
+  function CarteBar({ bar, role, maxFuts, prenom, onAttribuer, onDemanderRetour, onSupprimer, onAnnulerAttribution }) {
     const futs = bar.futs || {};
     const listeFuts = Object.keys(futs).map(function (idFut) {
       return { id: idFut, donnees: futs[idFut] };
@@ -1601,6 +1713,9 @@
     const estBiere = bar.type === TYPE_BAR.BIERE;
     const peutGererFuts = Droits.peutGererFuts(role);
     const peutGererBars = Droits.peutGererBars(role);
+    /* L'annulation d'attribution est réservée admin et plus, conformément
+       à la décision (correction d'erreur de manip). */
+    const peutAnnulerAttribution = role === ROLES.ADMIN || role === ROLES.SUPERADMIN;
     const barComplet = nbFuts >= maxFuts;
 
     return React.createElement(
@@ -1635,16 +1750,33 @@
                 { key: f.id, className: "flex items-center justify-between bg-black/40 rounded px-2 py-1.5" },
                 React.createElement("span", { className: "text-sm text-neutral-200" },
                   "Fût " + (f.donnees.type === TYPE_BAR.BIERE ? "bière" : "cidre")),
-                peutGererFuts
-                  ? React.createElement(
-                      "button",
-                      {
-                        onClick: function () { onDemanderRetour(bar, f.id, f.donnees); },
-                        className: "text-xs px-2 py-1 bg-neutral-700 hover:bg-neutral-600 text-white rounded"
-                      },
-                      "Retour"
-                    )
-                  : null
+                React.createElement(
+                  "div",
+                  { className: "flex gap-1" },
+                  /* Bouton "Annuler attribution" (admin et plus). Permet de
+                     corriger une attribution erronée du secrétaire. */
+                  peutAnnulerAttribution
+                    ? React.createElement(
+                        "button",
+                        {
+                          onClick: function () { onAnnulerAttribution(bar, f.id, f.donnees); },
+                          className: "text-xs px-2 py-1 bg-red-900 hover:bg-red-800 text-white rounded",
+                          title: "Annuler cette attribution (correction d'erreur)"
+                        },
+                        "↶"
+                      )
+                    : null,
+                  peutGererFuts
+                    ? React.createElement(
+                        "button",
+                        {
+                          onClick: function () { onDemanderRetour(bar, f.id, f.donnees); },
+                          className: "text-xs px-2 py-1 bg-neutral-700 hover:bg-neutral-600 text-white rounded"
+                        },
+                        "Retour"
+                      )
+                    : null
+                )
               );
             })
           ),
@@ -4817,6 +4949,18 @@
         ]
       },
       {
+        id: "correction",
+        titre: "Correction d'erreurs fûts",
+        icone: "↶",
+        rolesMin: ROLES.ADMIN,
+        points: [
+          "Bouton « ↶ » à côté de chaque fût d'un bar : annule l'attribution.",
+          "Bouton « Historique fûts » : voir et annuler les mouvements récents.",
+          "Annulation possible jusqu'à 12h après le mouvement.",
+          "Les annulations sont tracées (pas effacées) pour audit."
+        ]
+      },
+      {
         id: "params",
         titre: "Paramètres",
         icone: "⚙",
@@ -5212,6 +5356,209 @@
   }
 
   /* =========================================================================
+     SECTION 14terdecies — ÉCRAN HISTORIQUE DES MOUVEMENTS DE FÛTS
+
+     Réservé admin et plus. Liste les mouvements des 12 dernières heures
+     avec un bouton "Annuler" sur les mouvements éligibles (attribution
+     ou retour non encore annulés).
+
+     Cohérent avec la décision A : on n'efface pas, on marque "annule"
+     et on ajoute un mouvement d'annulation visible dans l'historique.
+  ========================================================================= */
+  function EcranHistoriqueFuts({ prenom, role, historique, onFermer }) {
+    /* Fenêtre temporelle des actions annulables : 12 heures. */
+    const FENETRE_MS = 12 * 60 * 60 * 1000;
+    const maintenant = Date.now();
+    const [enCours, setEnCours] = useState(false);
+
+    /* Liste des mouvements filtrée et triée du plus récent au plus ancien. */
+    const liste = (historique || [])
+      .filter(function (m) { return m && m.date; })
+      .sort(function (a, b) { return (b.date || 0) - (a.date || 0); });
+
+    function fmtHeure(ts) {
+      const d = new Date(ts);
+      const p = function (n) { return n < 10 ? "0" + n : "" + n; };
+      return p(d.getDate()) + "/" + p(d.getMonth() + 1) +
+        " à " + p(d.getHours()) + ":" + p(d.getMinutes());
+    }
+
+    /* Retourne le libellé court d'un mouvement. */
+    function libelleMouvement(m) {
+      if (m.mouvement === "attribution") {
+        return "Attribution sur " + (m.nomBar || "?");
+      }
+      if (m.mouvement === "retour") {
+        const motifs = { vide: "vide", casse: "cassé", non_termine: "non terminé", plein: "plein" };
+        return "Retour " + (motifs[m.motifRetour] || m.motifRetour) +
+          " depuis " + (m.nomBar || "?");
+      }
+      if (m.mouvement === "reattribution") {
+        return "Réattribution sur " + (m.nomBar || "?") +
+          " (venait de " + (m.nomBarPrecedent || "?") + ")";
+      }
+      if (m.mouvement === "annulation_attribution") {
+        return "Annulation d'attribution sur " + (m.nomBar || "?");
+      }
+      if (m.mouvement === "annulation_retour") {
+        return "Annulation de retour vers " + (m.nomBar || "?");
+      }
+      return m.mouvement || "?";
+    }
+
+    /* Couleur d'arrière-plan selon le type de mouvement. */
+    function couleurMvt(m) {
+      if (m.annule) return "bg-neutral-900 border-neutral-800 opacity-60";
+      if (m.mouvement === "annulation_attribution" || m.mouvement === "annulation_retour")
+        return "bg-neutral-900 border-orange-900";
+      if (m.mouvement === "attribution") return "bg-emerald-950/30 border-emerald-900";
+      if (m.mouvement === "retour") return "bg-blue-950/30 border-blue-900";
+      if (m.mouvement === "reattribution") return "bg-purple-950/30 border-purple-900";
+      return "bg-neutral-900 border-neutral-800";
+    }
+
+    /* Détermine si un mouvement est annulable. */
+    function estAnnulable(m) {
+      if (m.annule === true) return false;
+      if (m.mouvement === "annulation_attribution") return false;
+      if (m.mouvement === "annulation_retour") return false;
+      if (m.mouvement === "reattribution") return false;     /* trop complexe, on laisse */
+      if (m.mouvement !== "attribution" && m.mouvement !== "retour") return false;
+      if (!m.date) return false;
+      return (maintenant - m.date) <= FENETRE_MS;
+    }
+
+    function annuler(m) {
+      if (enCours) return;
+      if (!window.confirm(
+        "Annuler ce mouvement ?\n\n" +
+        libelleMouvement(m) + "\n" +
+        fmtHeure(m.date) + "\n\n" +
+        "L'effet sera inversé immédiatement, et l'annulation tracée dans l'historique."
+      )) return;
+      setEnCours(true);
+      let action;
+      if (m.mouvement === "attribution") {
+        /* Pour annuler une attribution, on cherche d'abord si un fût
+           correspondant existe encore sur le bar. Sinon, c'est qu'il a
+           déjà été retourné — on ne peut plus annuler proprement. */
+        action = Base.futsDuBar(m.idBar).once("value").then(function (snap) {
+          const futs = snap.val() || {};
+          let idFutACibler = null;
+          /* On prend n'importe quel fût du bon type sur le bar (le plus
+             récent en pratique). */
+          let dateMax = 0;
+          Object.keys(futs).forEach(function (idF) {
+            if (futs[idF].type === m.typeFut && (futs[idF].dateAttribution || 0) > dateMax) {
+              dateMax = futs[idF].dateAttribution || 0;
+              idFutACibler = idF;
+            }
+          });
+          if (!idFutACibler) {
+            throw new Error("Le fût attribué n'est plus sur le bar (probablement déjà retourné). " +
+              "Annulez plutôt le retour s'il y en a un.");
+          }
+          return ActionsFuts.annulerAttribution(m.id, m, idFutACibler, prenom);
+        });
+      } else if (m.mouvement === "retour") {
+        action = ActionsFuts.annulerRetour(m.id, m, prenom);
+      } else {
+        setEnCours(false);
+        return;
+      }
+      action.then(function () { setEnCours(false); })
+        .catch(function (e) {
+          setEnCours(false);
+          alert("Erreur : " + e.message);
+        });
+    }
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black z-40 flex flex-col" },
+
+      /* En-tête. */
+      React.createElement(
+        "div",
+        { className: "p-3 border-b border-neutral-800 flex items-center justify-between" },
+        React.createElement(
+          "div",
+          null,
+          React.createElement("h2", { className: "text-lg font-bold text-orange-400" }, "Historique des fûts"),
+          React.createElement("p", { className: "text-xs text-neutral-500" },
+            liste.length + " mouvement(s) — annulation possible jusqu'à 12h après")
+        ),
+        React.createElement(
+          "button",
+          { onClick: onFermer, className: "text-xs px-3 py-1.5 bg-neutral-800 text-neutral-300 rounded-lg" },
+          "Fermer"
+        )
+      ),
+
+      /* Liste. */
+      React.createElement(
+        "div",
+        { className: "flex-1 overflow-auto p-3" },
+        liste.length === 0
+          ? React.createElement("p", { className: "text-neutral-500 text-sm text-center py-8" },
+              "Aucun mouvement dans l'historique.")
+          : React.createElement(
+              "div",
+              { className: "space-y-1.5" },
+              liste.map(function (m, i) {
+                const annulable = estAnnulable(m);
+                return React.createElement(
+                  "div",
+                  {
+                    key: m.id || i,
+                    className: "rounded-lg border p-2 " + couleurMvt(m)
+                  },
+                  React.createElement(
+                    "div",
+                    { className: "flex items-start justify-between gap-2" },
+                    React.createElement(
+                      "div",
+                      { className: "flex-1 min-w-0" },
+                      React.createElement(
+                        "p",
+                        {
+                          className: "text-sm text-white " +
+                            (m.annule ? "line-through text-neutral-500" : "")
+                        },
+                        libelleMouvement(m) +
+                          " (" + (m.typeFut === TYPE_BAR.BIERE ? "bière" : "cidre") + ")"
+                      ),
+                      React.createElement("p", { className: "text-xs text-neutral-500" },
+                        fmtHeure(m.date) + " — par " + (m.par || "?")),
+                      m.annule
+                        ? React.createElement("p", { className: "text-xs text-orange-400 italic" },
+                            "Annulé")
+                        : null,
+                      m.commentaire
+                        ? React.createElement("p", { className: "text-xs text-neutral-400 italic mt-1" },
+                            "« " + m.commentaire + " »")
+                        : null
+                    ),
+                    annulable
+                      ? React.createElement(
+                          "button",
+                          {
+                            onClick: function () { annuler(m); },
+                            disabled: enCours,
+                            className: "text-xs px-2 py-1 bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white rounded shrink-0"
+                          },
+                          "↶ Annuler"
+                        )
+                      : null
+                  )
+                );
+              })
+            )
+      )
+    );
+  }
+
+  /* =========================================================================
      SECTION 15 — ÉCRAN PRINCIPAL
   ========================================================================= */
   function EcranPrincipal({ prenom, role, onDeconnexion }) {
@@ -5247,6 +5594,8 @@
     const [ecranFutsEnAttente, setEcranFutsEnAttente] = useState(false);
     /* Comptage des fûts au pot (pour afficher un badge sur le bouton). */
     const [nbFutsAuPot, setNbFutsAuPot] = useState(0);
+    /* Écran historique des mouvements de fûts (admin et plus). */
+    const [ecranHistoriqueFuts, setEcranHistoriqueFuts] = useState(false);
     /* Planning de TOUS les jours, nécessaire au moment d'un export depuis
        la fenêtre de remise à zéro (qui n'est pas l'écran Dashboard).
        Chargé une seule fois à l'ouverture de l'écran principal. */
@@ -5271,7 +5620,11 @@
       }
       function surHisto(s) {
         const v = s.val() || {};
-        setHistorique(Object.keys(v).map(function (cle) { return v[cle]; }));
+        /* On inclut la clé Firebase de chaque mouvement (utile pour les
+           annulations qui doivent référencer le mouvement initial). */
+        setHistorique(Object.keys(v).map(function (cle) {
+          return Object.assign({ id: cle }, v[cle]);
+        }));
       }
       function surParams(s) {
         const v = s.val();
@@ -5540,8 +5893,9 @@
         ),
 
         /* Fûts en attente — violet (secrétaire et plus).
-           Affiche un badge si des fûts sont au pot. */
-        Droits.peutGererFuts(role)
+           Le bouton n'est visible QUE si au moins un fût est au pot.
+           Le badge affiche le nombre disponible. */
+        (Droits.peutGererFuts(role) && nbFutsAuPot > 0)
           ? React.createElement(
               "button",
               {
@@ -5549,13 +5903,11 @@
                 className: "flex-1 min-w-[140px] py-2.5 bg-purple-900 hover:bg-purple-800 text-white rounded-lg text-sm font-medium relative"
               },
               "Fûts en attente",
-              nbFutsAuPot > 0
-                ? React.createElement(
-                    "span",
-                    { className: "absolute -top-1 -right-1 bg-purple-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center" },
-                    nbFutsAuPot
-                  )
-                : null
+              React.createElement(
+                "span",
+                { className: "absolute -top-1 -right-1 bg-purple-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center" },
+                nbFutsAuPot
+              )
             )
           : null,
 
@@ -5605,6 +5957,19 @@
               },
               "Utilisateurs"
             )
+          : null,
+
+        /* Historique des fûts — orange foncé (admin et plus).
+           Permet de visualiser et annuler les mouvements récents. */
+        (role === ROLES.ADMIN || role === ROLES.SUPERADMIN)
+          ? React.createElement(
+              "button",
+              {
+                onClick: function () { setEcranHistoriqueFuts(true); },
+                className: "flex-1 min-w-[140px] py-2.5 bg-orange-900 hover:bg-orange-800 text-white rounded-lg text-sm font-medium"
+              },
+              "Historique fûts"
+            )
           : null
       ),
 
@@ -5634,7 +5999,42 @@
                 onDemanderRetour: function (b, idFut, fut) {
                   setRetourEnCours({ bar: b, idFut: idFut, fut: fut });
                 },
-                onSupprimer: supprimerBar
+                onSupprimer: supprimerBar,
+                onAnnulerAttribution: function (b, idFut, fut) {
+                  /* Confirmation explicite (action sensible). */
+                  if (!window.confirm(
+                    "Annuler l'attribution de ce fût " +
+                    (fut.type === TYPE_BAR.BIERE ? "bière" : "cidre") +
+                    " sur " + b.nom + " ?\n\n" +
+                    "Le fût sera retiré du bar et l'attribution sera marquée " +
+                    "comme erronée dans l'historique. Le stock central sera ajusté."
+                  )) return;
+                  /* On cherche le mouvement d'attribution le plus récent
+                     pour ce bar/type, non annulé. Approche pragmatique :
+                     l'annulation se fait juste après l'erreur, le mouvement
+                     est forcément le plus récent. */
+                  let idMvtTrouve = null;
+                  let mvtTrouve = null;
+                  let dateMax = 0;
+                  historique.forEach(function (mvt) {
+                    if (mvt.annule === true) return;
+                    if (mvt.mouvement !== "attribution") return;
+                    if (mvt.idBar !== b.id) return;
+                    if (mvt.typeFut !== fut.type) return;
+                    if ((mvt.date || 0) > dateMax) {
+                      dateMax = mvt.date || 0;
+                      idMvtTrouve = mvt.id;
+                      mvtTrouve = mvt;
+                    }
+                  });
+                  if (!idMvtTrouve) {
+                    alert("Impossible de retrouver le mouvement d'attribution. " +
+                      "Utilisez plutôt l'écran Historique.");
+                    return;
+                  }
+                  ActionsFuts.annulerAttribution(idMvtTrouve, mvtTrouve, idFut, prenom)
+                    .catch(function (e) { alert("Erreur : " + e.message); });
+                }
               });
             })
       ),
@@ -5763,6 +6163,16 @@
             role: role,
             bars: bars,
             onFermer: function () { setEcranFutsEnAttente(false); }
+          })
+        : null,
+
+      /* Écran historique des fûts (admin et plus). */
+      ecranHistoriqueFuts
+        ? React.createElement(EcranHistoriqueFuts, {
+            prenom: prenom,
+            role: role,
+            historique: historique,
+            onFermer: function () { setEcranHistoriqueFuts(false); }
           })
         : null
     );
