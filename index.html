@@ -100,6 +100,19 @@
   const db = firebase.database();
   const auth = firebase.auth();
 
+  /* ----- TOLÉRANCE AU RÉSEAU INSTABLE -----
+     Le SDK Firebase Realtime Database met EN FILE D'ATTENTE les écritures
+     quand le réseau est coupé : dès que la connexion revient, elles
+     partent automatiquement. Ce comportement est ACTIF PAR DÉFAUT, pas
+     besoin d'opt-in.
+
+     Pour les lectures, on garde aussi le cache local. Comme ça, si
+     l'utilisateur rouvre l'app dans une zone sans réseau, il voit ses
+     dernières données reçues. Le SDK les marque automatiquement comme
+     potentiellement obsolètes ; combiné avec notre indicateur de
+     connexion (point rouge), l'utilisateur sait qu'il est hors ligne. */
+  db.goOnline();
+
   /* =========================================================================
      CONSTANTES DE L'APPLICATION
   ========================================================================= */
@@ -161,6 +174,115 @@
   ========================================================================= */
   function obtenirBadgeAnonyme() {
     return auth.signInAnonymously();
+  }
+
+  /* Hook personnalisé : indique si le SDK Firebase est connecté à ses
+     serveurs. S'appuie sur le nœud spécial ".info/connected" exposé par
+     Firebase. Renvoie un booléen, true = connecté, false = hors ligne.
+     Utilisé pour afficher l'indicateur de connexion dans l'en-tête. */
+  function useConnexionFirebase() {
+    const [connecte, setConnecte] = useState(true);
+    useEffect(function () {
+      const ref = db.ref(".info/connected");
+      function surEtat(snap) {
+        setConnecte(snap.val() === true);
+      }
+      ref.on("value", surEtat);
+      return function () { ref.off("value", surEtat); };
+    }, []);
+    return connecte;
+  }
+
+  /* Système de TOAST pour notifier le résultat d'une action sensible
+     (saisie de vente, attribution/retour de fût). Centralisé pour ne
+     pas avoir à modifier chaque fenêtre.
+
+     Usage :
+       toasts.executer(promesse, "Saisie envoyée")
+     Le toast affiche "Envoi…" pendant l'action, puis :
+       - "Saisie envoyée ✓" si la promise se résout dans les 2 secondes
+       - "En attente d'envoi (hors ligne)" si la promise n'a pas résolu
+         après 2 secondes — typiquement parce que le réseau est coupé.
+         Firebase a quand même mis l'écriture en file.
+       - "Erreur : ..." en cas de rejet explicite.
+
+     Le toast disparaît automatiquement après 3 secondes. */
+  const Toasts = {
+    /* Liste des fonctions à appeler pour notifier l'affichage. Initialisée
+       par le composant racine via Toasts.connecter(). */
+    _ecouteurs: [],
+    connecter: function (fn) {
+      Toasts._ecouteurs.push(fn);
+      return function () {
+        Toasts._ecouteurs = Toasts._ecouteurs.filter(function (f) { return f !== fn; });
+      };
+    },
+    _publier: function (toast) {
+      Toasts._ecouteurs.forEach(function (fn) { fn(toast); });
+    },
+    /* Affiche directement un message (sans promesse). */
+    info: function (message, couleur) {
+      Toasts._publier({ type: couleur || "info", message: message });
+    },
+    /* Exécute une promesse et affiche le toast correspondant.
+       Renvoie la promesse pour permettre le chaînage. */
+    executer: function (promesse, messageSucces) {
+      Toasts._publier({ type: "envoi", message: "Envoi…" });
+      let resolved = false;
+      const timer = setTimeout(function () {
+        if (!resolved) {
+          /* Pas de réponse après 2s : on suppose hors ligne. */
+          Toasts._publier({ type: "attente", message: "En attente d'envoi (hors ligne)" });
+        }
+      }, 2000);
+      return promesse.then(function (r) {
+        resolved = true;
+        clearTimeout(timer);
+        Toasts._publier({ type: "succes", message: messageSucces + " ✓" });
+        return r;
+      }).catch(function (e) {
+        resolved = true;
+        clearTimeout(timer);
+        Toasts._publier({ type: "erreur", message: "Erreur : " + (e && e.message ? e.message : "inconnue") });
+        throw e;
+      });
+    }
+  };
+
+  /* Composant React qui affiche les toasts. Doit être monté une seule
+     fois (en haut de l'app). Affiché en bas d'écran, par-dessus tout. */
+  function AffichageToasts() {
+    const [toast, setToast] = useState(null);
+    useEffect(function () {
+      const detacher = Toasts.connecter(function (t) {
+        setToast(t);
+        /* Auto-disparition après 3 secondes pour les états finaux.
+           Pour "envoi…" et "attente", on laisse jusqu'à la prochaine
+           mise à jour. */
+        if (t.type === "succes" || t.type === "erreur" || t.type === "info") {
+          setTimeout(function () {
+            setToast(function (courant) {
+              return courant === t ? null : courant;
+            });
+          }, 3000);
+        }
+      });
+      return detacher;
+    }, []);
+    if (!toast) return null;
+    const couleurs = {
+      envoi: "bg-neutral-800 text-neutral-200",
+      attente: "bg-amber-700 text-white",
+      succes: "bg-emerald-700 text-white",
+      erreur: "bg-red-700 text-white",
+      info: "bg-neutral-800 text-neutral-200"
+    };
+    return React.createElement(
+      "div",
+      { className: "fixed bottom-4 left-1/2 -translate-x-1/2 z-[200] px-4 py-2 rounded-lg shadow-lg text-sm font-medium " +
+          (couleurs[toast.type] || couleurs.info) },
+      toast.message
+    );
   }
 
   /* =========================================================================
@@ -2348,9 +2470,13 @@
     /* Enregistre une saisie (appelée depuis la fenêtre de saisie). */
     function enregistrerSaisie(donnees) {
       const s = saisieEnCours;
-      ActionsVentes.saisir(jourActuel, s.bar.id, s.creneau.id, donnees, prenom)
-        .then(function () { setSaisieEnCours(null); })
-        .catch(function (e) { alert(e.message); });
+      /* On ferme la fenêtre tout de suite ; le toast informe de l'envoi
+         (utile pour ne pas bloquer le secrétaire en cas de réseau lent). */
+      setSaisieEnCours(null);
+      Toasts.executer(
+        ActionsVentes.saisir(jourActuel, s.bar.id, s.creneau.id, donnees, prenom),
+        "Vente enregistrée"
+      ).catch(function () { /* déjà affiché par le toast */ });
     }
 
     /* La case actuellement affichée en détail, recalculée à chaque rendu
@@ -4969,6 +5095,18 @@
         ]
       },
       {
+        id: "reseau",
+        titre: "Réseau instable",
+        icone: "📶",
+        rolesMin: ROLES.SECRETAIRE,
+        points: [
+          "Point vert à côté du prénom = connecté ; point rouge = hors ligne.",
+          "Hors ligne : les actions sont mises en file et partent au retour du réseau.",
+          "Le toast en bas d'écran indique « Envoi… » puis « ✓ » ou « En attente d'envoi ».",
+          "Ne pas refaire la même saisie : Firebase la conserve, même app fermée."
+        ]
+      },
+      {
         id: "planning",
         titre: "Planning bénévoles",
         icone: "👥",
@@ -5652,6 +5790,10 @@
       }, 60000);
       return function () { clearInterval(intervalle); };
     }, []);
+
+    /* Indicateur de connexion Firebase (tolérance au réseau instable).
+       Vrai si le SDK est connecté aux serveurs Firebase, faux sinon. */
+    const connecte = useConnexionFirebase();
     /* Planning de TOUS les jours, nécessaire au moment d'un export depuis
        la fenêtre de remise à zéro (qui n'est pas l'écran Dashboard).
        Chargé une seule fois à l'ouverture de l'écran principal. */
@@ -5799,15 +5941,22 @@
         alert("Stock épuisé pour ce type de boisson.");
         return;
       }
-      ActionsFuts.attribuer(bar, bar.type, params.maxFutsParBar, prenom)
-        .catch(function (e) { alert(e.message); });
+      /* Toast d'envoi : signale l'état (envoi/succès/erreur/hors ligne). */
+      Toasts.executer(
+        ActionsFuts.attribuer(bar, bar.type, params.maxFutsParBar, prenom),
+        "Fût attribué"
+      ).catch(function () { /* déjà affiché par le toast */ });
     }
 
     function confirmerRetour(motif, commentaire) {
       const r = retourEnCours;
-      ActionsFuts.retourner(r.bar, r.idFut, r.fut, motif, commentaire, prenom)
-        .then(function () { setRetourEnCours(null); })
-        .catch(function (e) { alert(e.message); });
+      /* On ferme la fenêtre immédiatement et on laisse le toast informer
+         de l'avancement (utile en cas d'envoi en file d'attente). */
+      setRetourEnCours(null);
+      Toasts.executer(
+        ActionsFuts.retourner(r.bar, r.idFut, r.fut, motif, commentaire, prenom),
+        "Retour enregistré"
+      ).catch(function () { /* déjà affiché par le toast */ });
     }
 
     function changerJour(nouveauJour) {
@@ -5843,7 +5992,22 @@
           "div",
           null,
           React.createElement("h1", { className: "text-lg font-bold text-green-400" }, "Bars Nomades"),
-          React.createElement("p", { className: "text-xs text-neutral-500" }, prenom + " — " + role)
+          React.createElement(
+            "p",
+            { className: "text-xs text-neutral-500 flex items-center gap-1.5" },
+            /* Point d'indicateur de connexion. Vert = connecté ;
+               rouge clignotant = hors ligne. Discret mais visible. */
+            React.createElement("span", {
+              className: "inline-block w-2 h-2 rounded-full " +
+                (connecte ? "bg-emerald-500" : "bg-red-500 animate-pulse"),
+              title: connecte ? "Connecté au serveur" : "Hors ligne — les actions seront envoyées dès le retour du réseau"
+            }),
+            React.createElement("span", null, prenom + " — " + role),
+            /* Texte explicite quand hors ligne. */
+            !connecte
+              ? React.createElement("span", { className: "text-red-400 ml-1" }, "· hors ligne")
+              : null
+          )
         ),
         /* Groupe de boutons à droite : aide et quitter. */
         React.createElement(
@@ -6325,9 +6489,14 @@
     if (etape === "erreur") return React.createElement(EcranErreur, { details: erreur });
     if (etape === "demarrage") return React.createElement(EcranChargement, { message: "Connexion sécurisée…" });
     if (etape === "connexion") return React.createElement(EcranChargement, { message: "Enregistrement…" });
-    if (etape === "accueil") return React.createElement(EcranAccueil, { onEntrer: entrerDansApp });
+    if (etape === "accueil")
+      return React.createElement(
+        React.Fragment, null,
+        React.createElement(EcranAccueil, { onEntrer: entrerDansApp }),
+        React.createElement(AffichageToasts)
+      );
 
-    /* Écran principal + popup d'éjection si nécessaire. */
+    /* Écran principal + popup d'éjection si nécessaire + toasts. */
     return React.createElement(
       React.Fragment,
       null,
@@ -6336,6 +6505,8 @@
         role: role,
         onDeconnexion: seDeconnecter
       }),
+      /* Toasts d'envoi (info réseau). */
+      React.createElement(AffichageToasts),
       /* Popup bloquante d'éjection : superposée à tout, validation
          obligatoire pour revenir à l'accueil. */
       ejecte
