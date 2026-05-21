@@ -4,7 +4,7 @@
   GESTION DES FÛTS - BARS NOMADES - HELLFEST
   Application reconstruite proprement (remplace la version V16-V23 minifiée).
 
-  ÉTAT : MODULES 1 + 2 + 3A + 3B (complet) + PARAMÈTRES + PLANNING + DASHBOARD + UTILISATEURS + PLAN-1
+  ÉTAT : MODULES 1 + 2 + 3A + 3B (complet) + PARAMÈTRES + PLANNING + DASHBOARD + UTILISATEURS + PLAN (complet)
   Contenu actuel :
     - démarrage, Firebase, authentification anonyme             (module 1)
     - écran d'accueil (prénom), connexion utilisateur           (module 1)
@@ -17,12 +17,12 @@
     - DASHBOARD : 4 onglets, exports Excel récap + journal      (module dashboard)
     - UTILISATEURS + remise à zéro session                      (module users)
     - PLAN DU FESTIVAL : affichage scrollable du plan,
-      pastilles des bars positionnés (taille = nb de fûts),
-      placement par mode édition tap-pour-placer. Accessible
-      à tous, modification admin et plus.                       (module plan-1)
+      zoom maison (1× à 4×) sans affecter le reste de l'app,
+      pastilles cliquables, placement par mode édition,
+      fiche du bar au clic (niveau A pour visiteur = minimum,
+      niveau B pour autres = détail des fûts en cours).         (module plan)
 
-  Pas encore inclus : interaction au clic sur une pastille (plan-2),
-  règles Firebase étendues pour positionsBars, doc technique.
+  Pas encore inclus : doc technique pour les amis devs.
 
   PRINCIPE D'ARCHITECTURE
     - Un seul fichier HTML. Code lisible, commenté en français, non minifié.
@@ -4061,6 +4061,8 @@
        ne PAS affecter le reste de l'app. Boutons + / - à l'écran. */
     const [zoom, setZoom] = useState(1);
     const ZOOM_MIN = 1, ZOOM_MAX = 4, ZOOM_PAS = 0.5;
+    /* Bar dont la fiche est ouverte (Plan-2). Null si aucune fiche ouverte. */
+    const [barFiche, setBarFiche] = useState(null);
 
     const peutPositionner = Droits.peutPositionnerBars(role);
 
@@ -4241,15 +4243,27 @@
             className: "block w-full h-auto",
             onClick: tapSurCarte
           }),
-          /* Pastilles des bars placés, en position absolue par-dessus. */
+          /* Pastilles des bars placés, en position absolue par-dessus.
+             En mode édition "Placer", elles laissent passer le clic
+             (pointer-events-none) pour ne pas gêner le positionnement.
+             Hors de ce mode, elles sont cliquables pour ouvrir la fiche
+             du bar (Plan-2). */
           barsPlaces.map(function (b) {
             const nbFuts = b.futs ? Object.keys(b.futs).length : 0;
+            const enModePlace = modeEdition && sousMode === "place";
             return React.createElement(
               "div",
               {
                 key: b.id,
                 style: { left: b.x + "%", top: b.y + "%" },
-                className: "absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                className: "absolute -translate-x-1/2 -translate-y-1/2 " +
+                  (enModePlace ? "pointer-events-none" : "cursor-pointer"),
+                onClick: enModePlace ? undefined : function (e) {
+                  /* Empêche le clic de se propager au conteneur (ce qui
+                     déclencherait tapSurCarte sur l'image). */
+                  e.stopPropagation();
+                  setBarFiche(b);
+                }
               },
               React.createElement(
                 "div",
@@ -4426,6 +4440,113 @@
                   className: "w-full mt-3 py-2 bg-neutral-700 text-white rounded text-sm"
                 },
                 "Annuler"
+              )
+            )
+          )
+        : null,
+
+      /* Fiche du bar (Plan-2) : affichée quand on tape sur une pastille.
+         Visiteur : niveau A (nom, type, nb fûts).
+         Autres rôles : niveau B (avec liste des fûts en cours et heure
+         d'attribution). Lecture seule, pas d'action depuis cette fiche. */
+      barFiche
+        ? React.createElement(
+            "div",
+            {
+              className: "fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50",
+              onClick: function () { setBarFiche(null); }
+            },
+            React.createElement(
+              "div",
+              {
+                className: "bg-neutral-900 rounded-2xl w-full max-w-sm p-5 max-h-[80vh] overflow-y-auto border " +
+                  (barFiche.type === TYPE_BAR.BIERE ? "border-amber-700" : "border-green-700"),
+                /* Empêche le clic dans la fiche de fermer la fiche (sinon
+                   c'est piégeux : tu essaies de scroller, ça ferme). */
+                onClick: function (e) { e.stopPropagation(); }
+              },
+
+              /* En-tête : nom + type + pastille colorée. */
+              React.createElement(
+                "div",
+                { className: "flex items-center gap-3 mb-3" },
+                React.createElement(
+                  "div",
+                  { className: "w-10 h-10 rounded-full border-2 " + couleurPastille(barFiche.type) +
+                      " flex items-center justify-center text-base font-bold text-black" },
+                  barFiche.futs ? Object.keys(barFiche.futs).length : 0
+                ),
+                React.createElement(
+                  "div",
+                  null,
+                  React.createElement("h3", { className: "text-lg font-bold text-white" }, barFiche.nom),
+                  React.createElement("p", {
+                    className: "text-xs " + (barFiche.type === TYPE_BAR.BIERE ? "text-amber-300" : "text-green-300")
+                  }, barFiche.type === TYPE_BAR.BIERE ? "Bière" : "Cidre")
+                )
+              ),
+
+              /* Niveau A : info minimale visible par tous, y compris visiteur. */
+              React.createElement(
+                "div",
+                { className: "bg-neutral-800 rounded-lg p-3 mb-3" },
+                React.createElement("p", { className: "text-xs text-neutral-400" }, "Fûts en cours"),
+                React.createElement("p", { className: "text-2xl font-bold text-white" },
+                  barFiche.futs ? Object.keys(barFiche.futs).length : 0)
+              ),
+
+              /* Niveau B : détail des fûts (secrétaire et plus).
+                 Pour le visiteur, on s'arrête au niveau A. */
+              role !== ROLES.VISITEUR
+                ? React.createElement(
+                    "div",
+                    null,
+                    React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+                      "Détail des fûts"),
+                    (!barFiche.futs || Object.keys(barFiche.futs).length === 0)
+                      ? React.createElement("p", { className: "text-xs text-neutral-600 italic" },
+                          "Aucun fût en cours sur ce bar.")
+                      : React.createElement(
+                          "div",
+                          { className: "space-y-1" },
+                          Object.keys(barFiche.futs).map(function (idFut) {
+                            const f = barFiche.futs[idFut];
+                            /* Format heure court "JJ/MM HH:MM". */
+                            const d = new Date(f.dateAttribution || 0);
+                            const pad = function (n) { return n < 10 ? "0" + n : "" + n; };
+                            const dh = (f.dateAttribution
+                              ? pad(d.getDate()) + "/" + pad(d.getMonth() + 1) +
+                                " " + pad(d.getHours()) + ":" + pad(d.getMinutes())
+                              : "—");
+                            return React.createElement(
+                              "div",
+                              {
+                                key: idFut,
+                                className: "flex justify-between items-center bg-neutral-800 rounded-lg p-2 text-sm"
+                              },
+                              React.createElement(
+                                "div",
+                                null,
+                                React.createElement("p", { className: "text-white" },
+                                  f.type === TYPE_BAR.BIERE ? "Bière" : "Cidre"),
+                                React.createElement("p", { className: "text-xs text-neutral-500" },
+                                  "Par " + (f.attribuePar || "?"))
+                              ),
+                              React.createElement("p", { className: "text-xs text-neutral-400" }, dh)
+                            );
+                          })
+                        )
+                  )
+                : null,
+
+              /* Bouton fermer. */
+              React.createElement(
+                "button",
+                {
+                  onClick: function () { setBarFiche(null); },
+                  className: "w-full mt-4 py-2 bg-neutral-700 hover:bg-neutral-600 text-white rounded-lg text-sm"
+                },
+                "Fermer"
               )
             )
           )
