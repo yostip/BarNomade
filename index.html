@@ -4223,16 +4223,22 @@
         },
         React.createElement(
           "div",
-          { className: "relative inline-block" },
-          /* L'image. Sa largeur dépend du niveau de zoom appliqué :
-               zoom = 1 -> largeur = 100% de la zone visible
-               zoom = 2 -> largeur = 200%, et ainsi de suite.
-             Le scroll dans le conteneur permet de naviguer quand zoomé. */
+          {
+            className: "relative",
+            /* IMPORTANT : c'est le CONTENEUR PARENT qu'on dimensionne avec
+               le zoom, pas l'image elle-même. Comme ça :
+                 - L'image remplit ce conteneur agrandi (width 100%).
+                 - Les pastilles positionnées en % du parent suivent
+                   le redimensionnement automatiquement.
+                 - Le calcul du tap (getBoundingClientRect de l'image)
+                   reste correct car l'image grandit avec son parent. */
+            style: { width: (zoom * 100) + "%" }
+          },
+          /* L'image remplit la largeur de son parent zoomé. */
           React.createElement("img", {
             src: "plan-hellfest.jpg",
             alt: "Plan du Hellfest",
-            className: "block h-auto",
-            style: { width: (zoom * 100) + "%", maxWidth: "none" },
+            className: "block w-full h-auto",
             onClick: tapSurCarte
           }),
           /* Pastilles des bars placés, en position absolue par-dessus. */
