@@ -953,32 +953,47 @@
     /* Efface tous les sous-noeuds de la session SAUF "params" et l'entrée
        du super admin sous "users". On utilise un update() avec des null
        pour effacer plusieurs noeuds en une seule opération atomique. */
+    /* Remise à zéro de la session : efface bars, historique, ventes,
+       créneaux, planning, jour actuel, positions, pot, historique de
+       renommages, ET tous les utilisateurs SAUF les admins et superadmins.
+       Les admins/superadmins sont préservés intacts (on ne les efface
+       PAS, on n'y touche PAS). Cohérent avec le principe : les comptes
+       d'administration sont gérés en console Firebase, pas par la remise
+       à zéro depuis l'app.
+
+       Le paramètre prenomSuperAdmin n'est plus strictement nécessaire
+       côté logique (puisqu'on filtre par rôle, pas par appelant), mais
+       on le garde dans la signature pour compatibilité. */
     remettreAZero: function (prenomSuperAdmin) {
-      /* Lecture préalable : on doit garder l'entrée du super admin. */
       const refSession = db.ref("sessions/" + ID_SESSION);
-      return refSession.child("users/" + prenomSuperAdmin).once("value")
-        .then(function (snap) {
-          const donneesSuperAdmin = snap.val();
-          /* Effacement par "set null" sur les noeuds visés. */
-          const maj = {
-            bars: null,
-            historiqueFuts: null,
-            ventes: null,
-            creneaux: null,
-            planning: null,
-            jourActuel: null,
-            users: null,
-            positionsBars: null,    /* on efface aussi les positions */
-            futsEnAttente: null,    /* et le pot de fûts en attente */
-            historiqueRenommages: null  /* et l'historique des renommages */
-          };
-          return refSession.update(maj).then(function () {
-            /* ...puis on remet uniquement le super admin. */
-            if (donneesSuperAdmin) {
-              return refSession.child("users/" + prenomSuperAdmin).set(donneesSuperAdmin);
-            }
-          });
+      return refSession.child("users").once("value").then(function (snap) {
+        const tousUtilisateurs = snap.val() || {};
+        /* Construction de la maj : tous les noeuds principaux à null,
+           PLUS les utilisateurs non-admins effacés individuellement.
+           On ne fait PAS "users: null" car cela effacerait aussi les
+           admins (et les règles Firebase empêcheraient leur recréation). */
+        const maj = {
+          bars: null,
+          historiqueFuts: null,
+          ventes: null,
+          creneaux: null,
+          planning: null,
+          jourActuel: null,
+          positionsBars: null,
+          futsEnAttente: null,
+          historiqueRenommages: null
+        };
+        Object.keys(tousUtilisateurs).forEach(function (cle) {
+          const u = tousUtilisateurs[cle];
+          if (!u) return;
+          /* On préserve UNIQUEMENT les comptes admin et superadmin.
+             Les visiteurs et secrétaires sont effacés. */
+          if (u.role !== ROLES.ADMIN && u.role !== ROLES.SUPERADMIN) {
+            maj["users/" + cle] = null;
+          }
         });
+        return refSession.update(maj);
+      });
     }
   };
 
@@ -4544,10 +4559,12 @@
           React.createElement("li", null, "Toutes les ventes saisies (tous les jours)"),
           React.createElement("li", null, "Tous les créneaux horaires"),
           React.createElement("li", null, "Tout le planning bénévoles"),
-          React.createElement("li", null, "Tous les utilisateurs sauf vous")
+          React.createElement("li", null, "Tous les visiteurs et secrétaires")
         ),
-        React.createElement("p", { className: "text-sm text-emerald-300 mb-4" },
+        React.createElement("p", { className: "text-sm text-emerald-300 mb-1" },
           "✓ Les paramètres (prix, volumes, seuil...) seront PRÉSERVÉS."),
+        React.createElement("p", { className: "text-sm text-emerald-300 mb-4" },
+          "✓ Les comptes ADMIN et SUPER ADMIN seront PRÉSERVÉS."),
 
         /* Étape 1 : déclencher l'export. */
         etape === "init"
@@ -5354,7 +5371,8 @@
           "Action IRRÉVERSIBLE — à utiliser uniquement APRÈS le festival.",
           "L'export Excel des deux fichiers est OBLIGATOIRE avant l'effacement.",
           "Si l'export échoue, l'effacement est bloqué.",
-          "Confirmation finale : taper EFFACER en majuscules."
+          "Confirmation finale : taper EFFACER en majuscules.",
+          "Les paramètres et les comptes admin/superadmin sont PRÉSERVÉS."
         ]
       }
     ];
