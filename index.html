@@ -560,11 +560,44 @@
       });
     },
     supprimer: function (bar) {
+      /* Conservé pour compatibilité, mais l'UI utilise désormais archiver()
+         pour les bars avec données passées. Cette fonction supprime
+         DÉFINITIVEMENT le bar, à n'utiliser QUE si pas de fûts ET pas de
+         données passées (saisies de vente). La vérification "pas de
+         données passées" se fait côté UI (le bouton "Supprimer
+         définitivement" n'apparaît que dans ce cas). */
       const nbFuts = bar.futs ? Object.keys(bar.futs).length : 0;
       if (nbFuts > 0) {
         return Promise.reject(new Error("Ce bar a encore " + nbFuts + " fût(s). Retournez-les d'abord."));
       }
       return Base.bar(bar.id).remove();
+    },
+
+    /* Archivage doux : marque le bar comme archivé. Il disparaît de
+       l'écran principal, du tableau des ventes, du planning, du plan.
+       Mais il reste en base avec son nom — donc le dashboard et les
+       exports Excel le voient toujours, et ses saisies passées restent
+       attribuables à ce bar.
+       Conditions : pas de fût en cours (comme la suppression). */
+    archiver: function (bar, prenomUtilisateur) {
+      const nbFuts = bar.futs ? Object.keys(bar.futs).length : 0;
+      if (nbFuts > 0) {
+        return Promise.reject(new Error("Ce bar a encore " + nbFuts + " fût(s). Retournez-les d'abord."));
+      }
+      return Base.bar(bar.id).update({
+        archive: true,
+        archiveLe: Date.now(),
+        archivePar: prenomUtilisateur || ""
+      });
+    },
+
+    /* Restauration d'un bar archivé. */
+    restaurer: function (bar) {
+      return Base.bar(bar.id).update({
+        archive: null,        /* on efface les champs d'archivage */
+        archiveLe: null,
+        archivePar: null
+      });
     }
   };
 
@@ -1955,7 +1988,7 @@
   /* =========================================================================
      SECTION 13 — CARTE D'UN BAR
   ========================================================================= */
-  function CarteBar({ bar, role, maxFuts, prenom, onAttribuer, onDemanderRetour, onSupprimer, onAnnulerAttribution, onRenommer, historiqueRenommagesBar }) {
+  function CarteBar({ bar, role, maxFuts, prenom, onAttribuer, onDemanderRetour, onSupprimer, onArchiver, onAnnulerAttribution, onRenommer, historiqueRenommagesBar, barADesVentes }) {
     const futs = bar.futs || {};
     const listeFuts = Object.keys(futs).map(function (idFut) {
       return { id: idFut, donnees: futs[idFut] };
@@ -2121,12 +2154,32 @@
               "✏️"
             )
           : null,
-        peutGererBars
+        /* Bouton "Archiver" (admin et plus) : retire le bar de l'usage
+           courant tout en conservant ses données pour le dashboard.
+           Affiché TANT QUE le bar n'a pas été archivé (et qu'il a déjà
+           des saisies de vente, sinon "Supprimer définitivement" est
+           disponible plus bas). */
+        peutGererBars && barADesVentes
+          ? React.createElement(
+              "button",
+              {
+                onClick: function () { onArchiver(bar); },
+                className: "py-2 px-3 rounded-lg text-sm bg-neutral-800 hover:bg-amber-900 text-neutral-400",
+                title: "Archiver ce bar (conservé dans le dashboard)"
+              },
+              "Archiver"
+            )
+          : null,
+        /* Bouton "Supprimer définitivement" (admin et plus) : disponible
+           UNIQUEMENT si le bar n'a aucune saisie de vente (donc rien à
+           conserver). Sinon, l'utilisateur doit passer par "Archiver". */
+        peutGererBars && !barADesVentes
           ? React.createElement(
               "button",
               {
                 onClick: function () { onSupprimer(bar); },
-                className: "py-2 px-3 rounded-lg text-sm bg-neutral-800 hover:bg-red-900 text-neutral-400"
+                className: "py-2 px-3 rounded-lg text-sm bg-neutral-800 hover:bg-red-900 text-neutral-400",
+                title: "Suppression définitive (aucune donnée à conserver)"
               },
               "Supprimer"
             )
@@ -3343,6 +3396,7 @@
       const cohBar = calculerCoherence(historique, casesVentesTousJours, params, bar.id);
       return {
         id: bar.id, nom: bar.nom, type: bar.type,
+        archive: !!bar.archive,
         ventes: ventesBar, futs: futsBar, coherence: cohBar
       };
     });
@@ -3543,7 +3597,15 @@
             React.createElement(
               "div",
               { className: "flex items-center justify-between mb-2" },
-              React.createElement("span", { className: "font-bold text-white" }, l.nom),
+              React.createElement(
+                "span",
+                { className: "font-bold text-white" },
+                l.nom,
+                l.archive
+                  ? React.createElement("span", { className: "ml-2 text-xs text-amber-400 italic" },
+                      "(archivé)")
+                  : null
+              ),
               React.createElement("span", { className: "text-xs text-neutral-400" },
                 l.type === TYPE_BAR.BIERE ? "Bière" : "Cidre")
             ),
@@ -5291,6 +5353,19 @@
         ]
       },
       {
+        id: "archivage_bar",
+        titre: "Archiver un bar",
+        icone: "📦",
+        rolesMin: ROLES.ADMIN,
+        points: [
+          "Le bouton « Archiver » remplace « Supprimer » dès qu'un bar a des saisies de vente.",
+          "Bar archivé : disparaît de l'écran principal, saisie, planning, plan.",
+          "Mais RESTE visible dans le dashboard et les exports Excel (données préservées).",
+          "Bouton « Bars archivés » (barre d'actions) pour les voir et les restaurer.",
+          "Pré-requis : le bar ne doit avoir aucun fût encore attribué."
+        ]
+      },
+      {
         id: "renommage",
         titre: "Renommer un bar",
         icone: "✏️",
@@ -5914,6 +5989,111 @@
   }
 
   /* =========================================================================
+     SECTION 14quattuordecies — ÉCRAN BARS ARCHIVÉS
+
+     Liste les bars archivés (champ archive: true). Permet à un admin
+     de RESTAURER un bar pour le remettre en usage. Les saisies de
+     vente passées sur le bar restent intactes dans tous les cas — le
+     dashboard et les exports les voient toujours.
+  ========================================================================= */
+  function EcranBarsArchives({ bars, role, onFermer }) {
+    const archivables = (bars || []).filter(function (b) { return !!b.archive; });
+    /* Tri du plus récemment archivé au plus ancien. */
+    archivables.sort(function (a, b) {
+      return (b.archiveLe || 0) - (a.archiveLe || 0);
+    });
+
+    function fmtDateHeure(ts) {
+      if (!ts) return "?";
+      const d = new Date(ts);
+      const p = function (n) { return n < 10 ? "0" + n : "" + n; };
+      return p(d.getDate()) + "/" + p(d.getMonth() + 1) +
+        " à " + p(d.getHours()) + ":" + p(d.getMinutes());
+    }
+
+    function restaurer(bar) {
+      if (!window.confirm("Restaurer le bar « " + bar.nom + " » ?\n\n" +
+        "Il redeviendra disponible dans la liste des bars, dans la saisie " +
+        "des ventes, dans le planning et dans le plan."))
+        return;
+      ActionsBars.restaurer(bar).catch(function (e) { alert("Erreur : " + e.message); });
+    }
+
+    return React.createElement(
+      "div",
+      { className: "fixed inset-0 bg-black z-40 flex flex-col" },
+
+      /* En-tête. */
+      React.createElement(
+        "div",
+        { className: "p-3 border-b border-neutral-800 flex items-center justify-between" },
+        React.createElement(
+          "div",
+          null,
+          React.createElement("h2", { className: "text-lg font-bold text-amber-400" }, "Bars archivés"),
+          React.createElement("p", { className: "text-xs text-neutral-500" },
+            archivables.length + " bar(s) archivé(s)")
+        ),
+        React.createElement(
+          "button",
+          { onClick: onFermer, className: "text-xs px-3 py-1.5 bg-neutral-800 text-neutral-300 rounded-lg" },
+          "Fermer"
+        )
+      ),
+
+      /* Liste. */
+      React.createElement(
+        "div",
+        { className: "flex-1 overflow-auto p-3" },
+        archivables.length === 0
+          ? React.createElement(
+              "div",
+              { className: "text-center py-12" },
+              React.createElement("p", { className: "text-neutral-500 text-sm" },
+                "Aucun bar archivé."),
+              React.createElement("p", { className: "text-xs text-neutral-600 italic mt-2" },
+                "Les bars archivés depuis l'écran principal apparaîtront ici.")
+            )
+          : React.createElement(
+              "div",
+              { className: "space-y-2" },
+              archivables.map(function (b) {
+                const estBiere = b.type === TYPE_BAR.BIERE;
+                return React.createElement(
+                  "div",
+                  {
+                    key: b.id,
+                    className: "rounded-xl border border-amber-900 bg-neutral-900 p-3"
+                  },
+                  React.createElement(
+                    "div",
+                    { className: "flex items-center justify-between mb-2" },
+                    React.createElement(
+                      "div",
+                      null,
+                      React.createElement("p", { className: "font-bold text-white" }, b.nom),
+                      React.createElement("p", { className: "text-xs text-neutral-500" },
+                        (estBiere ? "Bière" : "Cidre") +
+                        " — archivé le " + fmtDateHeure(b.archiveLe) +
+                        " par " + (b.archivePar || "?"))
+                    )
+                  ),
+                  React.createElement(
+                    "button",
+                    {
+                      onClick: function () { restaurer(b); },
+                      className: "w-full py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium"
+                    },
+                    "Restaurer ce bar"
+                  )
+                );
+              })
+            )
+      )
+    );
+  }
+
+  /* =========================================================================
      SECTION 15 — ÉCRAN PRINCIPAL
   ========================================================================= */
   function EcranPrincipal({ prenom, role, onDeconnexion }) {
@@ -5951,6 +6131,9 @@
     const [nbFutsAuPot, setNbFutsAuPot] = useState(0);
     /* Écran historique des mouvements de fûts (admin et plus). */
     const [ecranHistoriqueFuts, setEcranHistoriqueFuts] = useState(false);
+    /* Écran "Bars archivés" (admin et plus) : liste les bars marqués
+       comme archive=true et permet de les restaurer. */
+    const [ecranBarsArchives, setEcranBarsArchives] = useState(false);
     /* Bar en cours de renommage (null si aucune fenêtre ouverte). */
     const [barARenommer, setBarARenommer] = useState(null);
     /* Historique des renommages de tous les bars, indexé par idBar.
@@ -6115,6 +6298,13 @@
 
     const stock = calculerStock(historique, params);
 
+    /* Liste des bars NON archivés. Utilisée pour la saisie des ventes,
+       le planning, le plan, le pot, l'historique fûts — partout où c'est
+       l'usage courant qui compte. Le dashboard et les exports utilisent
+       la liste complète (bars actifs + archivés) pour préserver les
+       données historiques. */
+    const barsActifs = (bars || []).filter(function (b) { return !b.archive; });
+
     function creerBar(nom, type) {
       ActionsBars.creer(nom, type)
         .then(function () { setFenetreAjoutBar(false); })
@@ -6122,8 +6312,18 @@
     }
 
     function supprimerBar(bar) {
-      if (!confirm("Supprimer le bar « " + bar.nom + " » ?")) return;
+      if (!confirm("Supprimer DÉFINITIVEMENT le bar « " + bar.nom + " » ?\n\n" +
+        "Aucune donnée n'est attachée à ce bar — il sera effacé sans trace.")) return;
       ActionsBars.supprimer(bar).catch(function (e) { alert(e.message); });
+    }
+
+    function archiverBar(bar) {
+      if (!confirm("Archiver le bar « " + bar.nom + " » ?\n\n" +
+        "Le bar disparaîtra de l'écran principal, de la saisie des ventes, " +
+        "du planning et du plan. Ses saisies passées RESTENT visibles dans " +
+        "le dashboard et les exports Excel.\n\n" +
+        "Tu pourras le restaurer depuis l'écran « Bars archivés ».")) return;
+      ActionsBars.archiver(bar, prenom).catch(function (e) { alert(e.message); });
     }
 
     function attribuerFut(bar) {
@@ -6387,6 +6587,30 @@
               },
               "Historique fûts"
             )
+          : null,
+
+        /* Bars archivés — ambre (admin et plus). Affiche un badge avec
+           le nombre de bars archivés si > 0, sinon le bouton reste là
+           mais sans badge. Le calcul est local au rendu. */
+        (role === ROLES.ADMIN || role === ROLES.SUPERADMIN)
+          ? (function () {
+              const nbArchives = (bars || []).filter(function (b) { return !!b.archive; }).length;
+              return React.createElement(
+                "button",
+                {
+                  onClick: function () { setEcranBarsArchives(true); },
+                  className: "flex-1 min-w-[140px] py-2.5 bg-amber-900 hover:bg-amber-800 text-white rounded-lg text-sm font-medium relative"
+                },
+                "Bars archivés",
+                nbArchives > 0
+                  ? React.createElement(
+                      "span",
+                      { className: "ml-2 inline-block px-1.5 py-0.5 bg-amber-700 text-amber-100 rounded text-xs font-bold" },
+                      nbArchives
+                    )
+                  : null
+              );
+            })()
           : null
       ),
 
@@ -6405,7 +6629,32 @@
                 : React.createElement("p", { className: "text-sm mt-1" },
                     "Un administrateur doit créer les bars.")
             )
-          : bars.map(function (bar) {
+          : bars.filter(function (bar) {
+              /* On masque les bars archivés de l'écran principal. */
+              return !bar.archive;
+            }).map(function (bar) {
+              /* Calcule si ce bar a déjà des saisies de vente passées,
+                 pour décider si on propose "Archiver" ou "Supprimer
+                 définitivement" sur sa carte. On parcourt toutes les
+                 ventes de tous les jours pour ce bar. */
+              const barADesVentes = (function () {
+                if (!casesVentesTousJours) return false;
+                const jours = Object.keys(casesVentesTousJours);
+                for (let i = 0; i < jours.length; i++) {
+                  const ventesJour = casesVentesTousJours[jours[i]] || {};
+                  if (ventesJour[bar.id]) {
+                    const creneaux = ventesJour[bar.id] || {};
+                    const idsCreneaux = Object.keys(creneaux);
+                    for (let j = 0; j < idsCreneaux.length; j++) {
+                      const cas = creneaux[idsCreneaux[j]] || {};
+                      if (cas.saisies && Object.keys(cas.saisies).length > 0) {
+                        return true;
+                      }
+                    }
+                  }
+                }
+                return false;
+              })();
               return React.createElement(CarteBar, {
                 key: bar.id,
                 bar: bar,
@@ -6413,11 +6662,13 @@
                 maxFuts: params.maxFutsParBar,
                 prenom: prenom,
                 historiqueRenommagesBar: historiqueRenommages[bar.id] || null,
+                barADesVentes: barADesVentes,
                 onAttribuer: attribuerFut,
                 onDemanderRetour: function (b, idFut, fut) {
                   setRetourEnCours({ bar: b, idFut: idFut, fut: fut });
                 },
                 onSupprimer: supprimerBar,
+                onArchiver: archiverBar,
                 onRenommer: function (b) { setBarARenommer(b); },
                 onAnnulerAttribution: function (b, idFut, fut) {
                   /* Confirmation explicite (action sensible). */
@@ -6504,7 +6755,7 @@
             prenom: prenom,
             role: role,
             jourActuel: jourActuel,
-            bars: bars,
+            bars: barsActifs,
             creneaux: creneaux,
             casesVentes: casesVentes,
             onFermer: function () { setEcranVentes(false); }
@@ -6528,7 +6779,7 @@
             prenom: prenom,
             role: role,
             jourActuel: jourActuel,
-            bars: bars,
+            bars: barsActifs,
             creneaux: creneaux,
             planningDuJour: planningDuJour,
             onFermer: function () { setEcranPlanning(false); }
@@ -6575,7 +6826,7 @@
         ? React.createElement(EcranPlan, {
             prenom: prenom,
             role: role,
-            bars: bars,
+            bars: barsActifs,
             onFermer: function () { setEcranPlan(false); }
           })
         : null,
@@ -6593,7 +6844,7 @@
         ? React.createElement(EcranFutsEnAttente, {
             prenom: prenom,
             role: role,
-            bars: bars,
+            bars: barsActifs,
             onFermer: function () { setEcranFutsEnAttente(false); }
           })
         : null,
@@ -6605,6 +6856,15 @@
             role: role,
             historique: historique,
             onFermer: function () { setEcranHistoriqueFuts(false); }
+          })
+        : null,
+
+      /* Écran "Bars archivés" (admin et plus). */
+      ecranBarsArchives
+        ? React.createElement(EcranBarsArchives, {
+            bars: bars,
+            role: role,
+            onFermer: function () { setEcranBarsArchives(false); }
           })
         : null
     );
