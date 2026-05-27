@@ -1342,6 +1342,8 @@
   function agregerFuts(historique, filtreBar, filtreJour) {
     let nbBiereSortis = 0, nbCidreSortis = 0;
     let nbCasses = 0, nbPleinsRendus = 0;
+    let nbBiereCasses = 0, nbCidreCasses = 0;
+    let nbBierePleinsRendus = 0, nbCidrePleinsRendus = 0;
     (historique || []).forEach(function (mvt) {
       /* Ignorer les mouvements annulés et les annulations elles-mêmes
          (cf. calculerStock pour le détail). */
@@ -1359,51 +1361,133 @@
         if (mvt.typeFut === TYPE_BAR.BIERE) nbBiereSortis++;
         if (mvt.typeFut === TYPE_BAR.CIDRE) nbCidreSortis++;
       } else if (mvt.mouvement === "retour") {
-        if (mvt.motifRetour === RETOUR.CASSE) nbCasses++;
-        if (mvt.motifRetour === RETOUR.PLEIN) nbPleinsRendus++;
+        if (mvt.motifRetour === RETOUR.CASSE) {
+          nbCasses++;
+          if (mvt.typeFut === TYPE_BAR.BIERE) nbBiereCasses++;
+          if (mvt.typeFut === TYPE_BAR.CIDRE) nbCidreCasses++;
+        }
+        if (mvt.motifRetour === RETOUR.PLEIN) {
+          nbPleinsRendus++;
+          if (mvt.typeFut === TYPE_BAR.BIERE) nbBierePleinsRendus++;
+          if (mvt.typeFut === TYPE_BAR.CIDRE) nbCidrePleinsRendus++;
+        }
       }
     });
     return {
       nbBiereSortis: nbBiereSortis, nbCidreSortis: nbCidreSortis,
-      nbCasses: nbCasses, nbPleinsRendus: nbPleinsRendus
+      nbCasses: nbCasses, nbPleinsRendus: nbPleinsRendus,
+      nbBiereCasses: nbBiereCasses, nbCidreCasses: nbCidreCasses,
+      nbBierePleinsRendus: nbBierePleinsRendus,
+      nbCidrePleinsRendus: nbCidrePleinsRendus
     };
   }
 
   /* Calcul de cohérence volume : volume sorti (via fûts) vs volume vendu
      (via pintes + pichets, le gobelet n'a pas de volume).
-     Renvoie { volumeSortiL, volumeVenduL, ecartL, ecartPct, dansSeuil }.
-     "filtreBar" optionnel. "filtreJour" optionnel. */
-  function calculerCoherence(historique, casesVentesTousJours, params, filtreBar, filtreJour) {
+     Renvoie un objet avec :
+       - les agrégats globaux à plat (rétrocompatibilité avec l'existant) :
+         { volumeSortiL, volumeVenduL, ecartL, ecartPct, dansSeuil }
+       - et un sous-objet "parType" avec les mêmes champs pour bière et
+         cidre séparément : { parType: { biere: {...}, cidre: {...} } }
+     "filtreBar" optionnel. "filtreJour" optionnel.
+     "bars" optionnel mais nécessaire pour calculer la décomposition par
+     type (sert à connaître le type de chaque bar pour ventiler les
+     pintes/pichets). */
+  function calculerCoherence(historique, casesVentesTousJours, params, filtreBar, filtreJour, bars) {
     const futs = agregerFuts(historique, filtreBar, filtreJour);
     const ventes = agregerVentes(casesVentesTousJours, filtreJour, filtreBar);
-    /* Volume sorti = (nb fûts bière * volumeFutBiere) + (nb fûts cidre *
-       volumeFutCidre). Un fût plein rendu reste compté comme sorti car
-       l'attribution est aussi comptée — pour ne pas le compter, on
-       soustrait son volume. */
-    const volumeSortiL =
-      (futs.nbBiereSortis * (params.volumeFutBiere || 0))
-      + (futs.nbCidreSortis * (params.volumeFutCidre || 0))
-      - (futs.nbPleinsRendus * (params.volumeFutBiere || 0));
-      /* Hypothèse simplificatrice ci-dessus : on suppose les fûts rendus
-         pleins sont des fûts bière (car volumeFutCidre peut différer).
-         En pratique le nombre de pleins rendus est faible. À affiner si
-         besoin dans une version future. */
-    /* Volume vendu = pintes * volumePinte + pichets * volumePichet, en cl,
-       converti en litres. */
-    const volumeVenduCl =
-      (ventes.nbPintes * (params.volumePinte || 0))
-      + (ventes.nbPichets * (params.volumePichet || 0));
-    const volumeVenduL = volumeVenduCl / 100;
 
-    const ecartL = volumeSortiL - volumeVenduL;
-    const ecartPct = (volumeSortiL > 0) ? (ecartL / volumeSortiL) * 100 : 0;
-    const dansSeuil = Math.abs(ecartPct) <= (params.seuilTolerancePerte || 0);
+    /* Calcul du volume vendu par type : on parcourt les saisies en
+       associant chaque idBar à son type (via la liste de bars passée). */
+    function calculerVolumeVenduParType() {
+      let pintesBiere = 0, pichetsBiere = 0;
+      let pintesCidre = 0, pichetsCidre = 0;
+      if (!bars || bars.length === 0) {
+        return { pintesBiere: 0, pichetsBiere: 0, pintesCidre: 0, pichetsCidre: 0 };
+      }
+      const indexType = {};
+      bars.forEach(function (b) { indexType[b.id] = b.type; });
+      Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
+        const nj = numeroDepuisCleJour(cleJour);
+        if (nj === null) return;
+        if (filtreJour != null && nj !== filtreJour) return;
+        const parBar = casesVentesTousJours[cleJour] || {};
+        Object.keys(parBar).forEach(function (idBar) {
+          if (filtreBar != null && idBar !== filtreBar) return;
+          const typeBar = indexType[idBar];
+          if (!typeBar) return;
+          const parCr = parBar[idBar] || {};
+          Object.keys(parCr).forEach(function (idCr) {
+            const cas = parCr[idCr] || {};
+            const saisies = cas.saisies || {};
+            Object.keys(saisies).forEach(function (idS) {
+              const s = saisies[idS];
+              if (!s || s.annulee === true) return;
+              if (typeBar === TYPE_BAR.BIERE) {
+                pintesBiere += (s.nbPintes || 0);
+                pichetsBiere += (s.nbPichets || 0);
+              } else if (typeBar === TYPE_BAR.CIDRE) {
+                pintesCidre += (s.nbPintes || 0);
+                pichetsCidre += (s.nbPichets || 0);
+              }
+            });
+          });
+        });
+      });
+      return {
+        pintesBiere: pintesBiere, pichetsBiere: pichetsBiere,
+        pintesCidre: pintesCidre, pichetsCidre: pichetsCidre
+      };
+    }
+    const ventesParType = calculerVolumeVenduParType();
+
+    /* Helper : calcule un bilan {sorti, vendu, ecartL, ecartPct, dansSeuil}
+       à partir de volumeSortiL et volumeVenduL. */
+    const seuilPct = params.seuilTolerancePerte || 0;
+    function bilan(volumeSortiL, volumeVenduL) {
+      const ecartL = volumeSortiL - volumeVenduL;
+      const ecartPct = (volumeSortiL > 0) ? (ecartL / volumeSortiL) * 100 : 0;
+      const dansSeuil = Math.abs(ecartPct) <= seuilPct;
+      return {
+        volumeSortiL: volumeSortiL, volumeVenduL: volumeVenduL,
+        ecartL: ecartL, ecartPct: ecartPct, dansSeuil: dansSeuil
+      };
+    }
+
+    /* Bière : sorti via fûts bière, vendu via pintes/pichets de bars bière. */
+    const volBiereSortiL =
+      (futs.nbBiereSortis * (params.volumeFutBiere || 0))
+      - (futs.nbBierePleinsRendus * (params.volumeFutBiere || 0));
+    const volBiereVenduL =
+      ((ventesParType.pintesBiere * (params.volumePinte || 0))
+       + (ventesParType.pichetsBiere * (params.volumePichet || 0))) / 100;
+    const bilanBiere = bilan(volBiereSortiL, volBiereVenduL);
+
+    /* Cidre : sorti via fûts cidre, vendu via pintes/pichets de bars cidre. */
+    const volCidreSortiL =
+      (futs.nbCidreSortis * (params.volumeFutCidre || 0))
+      - (futs.nbCidrePleinsRendus * (params.volumeFutCidre || 0));
+    const volCidreVenduL =
+      ((ventesParType.pintesCidre * (params.volumePinte || 0))
+       + (ventesParType.pichetsCidre * (params.volumePichet || 0))) / 100;
+    const bilanCidre = bilan(volCidreSortiL, volCidreVenduL);
+
+    /* Total : somme des deux. Le bug historique (volumeFutBiere appliqué
+       à tous les pleins rendus) est corrigé : chaque type utilise son
+       propre volume de fût. */
+    const bilanTotal = bilan(
+      volBiereSortiL + volCidreSortiL,
+      volBiereVenduL + volCidreVenduL
+    );
+
+    /* On renvoie le bilan total à plat (rétro-compat) + parType. */
     return {
-      volumeSortiL: volumeSortiL,
-      volumeVenduL: volumeVenduL,
-      ecartL: ecartL,
-      ecartPct: ecartPct,
-      dansSeuil: dansSeuil
+      volumeSortiL: bilanTotal.volumeSortiL,
+      volumeVenduL: bilanTotal.volumeVenduL,
+      ecartL: bilanTotal.ecartL,
+      ecartPct: bilanTotal.ecartPct,
+      dansSeuil: bilanTotal.dansSeuil,
+      parType: { biere: bilanBiere, cidre: bilanCidre }
     };
   }
 
@@ -3382,7 +3466,7 @@
     /* ----- CALCULS POUR L'ONGLET VUE D'ENSEMBLE ----- */
     const ventesGlobal = agregerVentes(casesVentesTousJours, filtreJourPourVentes, null);
     const futsGlobal = agregerFuts(historique, null, filtreJourPourFuts);
-    const coherenceGlobal = calculerCoherence(historique, casesVentesTousJours, params, null, filtreJourPourFuts);
+    const coherenceGlobal = calculerCoherence(historique, casesVentesTousJours, params, null, filtreJourPourFuts, bars);
     const stockGlobal = calculerStock(historique, params);
 
     /* ----- CA BIÈRE vs CIDRE -----
@@ -3468,10 +3552,10 @@
     /* ----- DONNÉES POUR L'ONGLET ANOMALIES ----- */
     /* Bars dépassant le seuil (filtré sur tout festival). */
     const barsHorsSeuil = (bars || []).filter(function (bar) {
-      const c = calculerCoherence(historique, casesVentesTousJours, params, bar.id, null);
+      const c = calculerCoherence(historique, casesVentesTousJours, params, bar.id, null, bars);
       return !c.dansSeuil && c.volumeSortiL > 0;
     }).map(function (bar) {
-      const c = calculerCoherence(historique, casesVentesTousJours, params, bar.id, null);
+      const c = calculerCoherence(historique, casesVentesTousJours, params, bar.id, null, bars);
       return { id: bar.id, nom: bar.nom, ecartPct: c.ecartPct };
     });
     const listeDonneesPerdues = listerDonneesPerdues(casesVentesTousJours);
@@ -3490,7 +3574,7 @@
     const lignesParBar = (bars || []).map(function (bar) {
       const ventesBar = agregerVentes(casesVentesTousJours, filtreJourPourVentes, bar.id);
       const futsBar = agregerFuts(historique, bar.id, filtreJourPourFuts);
-      const cohBar = calculerCoherence(historique, casesVentesTousJours, params, bar.id, filtreJourPourFuts);
+      const cohBar = calculerCoherence(historique, casesVentesTousJours, params, bar.id, filtreJourPourFuts, bars);
       return {
         id: bar.id, nom: bar.nom, type: bar.type,
         archive: !!bar.archive,
@@ -3505,7 +3589,7 @@
     for (let j = 1; j <= (params.nombreJours || 1); j++) {
       const v = agregerVentes(casesVentesTousJours, j, null);
       const f = agregerFuts(historique, null, j);
-      const c = calculerCoherence(historique, casesVentesTousJours, params, null, j);
+      const c = calculerCoherence(historique, casesVentesTousJours, params, null, j, bars);
       joursPourComparatif.push({
         numero: j,
         ventes: v,
@@ -3709,10 +3793,21 @@
         )
       ));
 
-      /* Cohérence (suit désormais la granularité). */
+      /* Cohérence (granularité Tout/Jour + dissociation Total/Bière/Cidre).
+         Tableau compact : 4 lignes × 3 colonnes.
+         Couleur du cadre extérieur = statut du total ; couleurs des cellules
+         écart/statut adaptées à chaque type. */
       const couleurCoh = coherenceGlobal.dansSeuil
         ? "bg-emerald-950/40 border border-emerald-800"
         : "bg-red-950/40 border border-red-900";
+      const cohBiere = coherenceGlobal.parType.biere;
+      const cohCidre = coherenceGlobal.parType.cidre;
+      function classeEcart(b) {
+        return "text-sm font-bold " + (b.dansSeuil ? "text-emerald-300" : "text-red-300");
+      }
+      function classeStatut(b) {
+        return "text-xs " + (b.dansSeuil ? "text-emerald-400" : "text-red-400");
+      }
       blocs.push(React.createElement(
         "div",
         { key: "coh", className: "mb-4" },
@@ -3722,32 +3817,59 @@
           "div",
           { className: "rounded-xl p-3 " + couleurCoh },
           React.createElement(
-            "div",
-            { className: "grid grid-cols-3 gap-2 text-center" },
+            "table",
+            { className: "w-full text-sm" },
             React.createElement(
-              "div",
+              "thead",
               null,
-              React.createElement("p", { className: "text-xs text-neutral-400" }, "Sorti"),
-              React.createElement("p", { className: "text-lg font-bold text-white" }, fmtLitres(coherenceGlobal.volumeSortiL))
+              React.createElement(
+                "tr",
+                { className: "text-xs text-neutral-400" },
+                React.createElement("th", { className: "text-left pb-1" }, ""),
+                React.createElement("th", { className: "text-right pb-1" }, "Total"),
+                React.createElement("th", { className: "text-right pb-1 text-amber-300" }, "Bière"),
+                React.createElement("th", { className: "text-right pb-1 text-green-300" }, "Cidre")
+              )
             ),
             React.createElement(
-              "div",
+              "tbody",
               null,
-              React.createElement("p", { className: "text-xs text-neutral-400" }, "Vendu"),
-              React.createElement("p", { className: "text-lg font-bold text-white" }, fmtLitres(coherenceGlobal.volumeVenduL))
-            ),
-            React.createElement(
-              "div",
-              null,
-              React.createElement("p", { className: "text-xs text-neutral-400" }, "Écart"),
-              React.createElement("p", { className: "text-lg font-bold " +
-                  (coherenceGlobal.dansSeuil ? "text-emerald-300" : "text-red-300") },
-                fmtPct(coherenceGlobal.ecartPct))
+              React.createElement(
+                "tr",
+                { className: "border-t border-neutral-800" },
+                React.createElement("td", { className: "py-1 text-xs text-neutral-400" }, "Sorti"),
+                React.createElement("td", { className: "py-1 text-right text-white" }, fmtLitres(coherenceGlobal.volumeSortiL)),
+                React.createElement("td", { className: "py-1 text-right text-white" }, fmtLitres(cohBiere.volumeSortiL)),
+                React.createElement("td", { className: "py-1 text-right text-white" }, fmtLitres(cohCidre.volumeSortiL))
+              ),
+              React.createElement(
+                "tr",
+                { className: "border-t border-neutral-800" },
+                React.createElement("td", { className: "py-1 text-xs text-neutral-400" }, "Vendu"),
+                React.createElement("td", { className: "py-1 text-right text-white" }, fmtLitres(coherenceGlobal.volumeVenduL)),
+                React.createElement("td", { className: "py-1 text-right text-white" }, fmtLitres(cohBiere.volumeVenduL)),
+                React.createElement("td", { className: "py-1 text-right text-white" }, fmtLitres(cohCidre.volumeVenduL))
+              ),
+              React.createElement(
+                "tr",
+                { className: "border-t border-neutral-800" },
+                React.createElement("td", { className: "py-1 text-xs text-neutral-400" }, "Écart"),
+                React.createElement("td", { className: "py-1 text-right " + classeEcart(coherenceGlobal) }, fmtPct(coherenceGlobal.ecartPct)),
+                React.createElement("td", { className: "py-1 text-right " + classeEcart(cohBiere) }, fmtPct(cohBiere.ecartPct)),
+                React.createElement("td", { className: "py-1 text-right " + classeEcart(cohCidre) }, fmtPct(cohCidre.ecartPct))
+              ),
+              React.createElement(
+                "tr",
+                { className: "border-t border-neutral-800" },
+                React.createElement("td", { className: "py-1 text-xs text-neutral-400" }, "Statut"),
+                React.createElement("td", { className: "py-1 text-right " + classeStatut(coherenceGlobal) }, coherenceGlobal.dansSeuil ? "OK" : "Dépasse"),
+                React.createElement("td", { className: "py-1 text-right " + classeStatut(cohBiere) }, cohBiere.volumeSortiL > 0 ? (cohBiere.dansSeuil ? "OK" : "Dépasse") : "—"),
+                React.createElement("td", { className: "py-1 text-right " + classeStatut(cohCidre) }, cohCidre.volumeSortiL > 0 ? (cohCidre.dansSeuil ? "OK" : "Dépasse") : "—")
+              )
             )
           ),
           React.createElement("p", { className: "text-xs text-neutral-500 mt-2 text-center" },
-            "Seuil : ±" + (params.seuilTolerancePerte || 0) + " % — " +
-              (coherenceGlobal.dansSeuil ? "dans la tolérance" : "DÉPASSE la tolérance"))
+            "Seuil : ±" + (params.seuilTolerancePerte || 0) + " %")
         )
       ));
 
@@ -4287,11 +4409,19 @@
           ["Stock restant cidre (fûts)", stockGlobal.cidre],
           [],
           ["Volume sorti (L)", cohe.volumeSortiL.toFixed(1)],
+          ["  dont bière (L)", cohe.parType.biere.volumeSortiL.toFixed(1)],
+          ["  dont cidre (L)", cohe.parType.cidre.volumeSortiL.toFixed(1)],
           ["Volume vendu (L)", cohe.volumeVenduL.toFixed(1)],
-          ["Écart (L)", cohe.ecartL.toFixed(1)],
-          ["Écart (%)", cohe.ecartPct.toFixed(1)],
+          ["  dont bière (L)", cohe.parType.biere.volumeVenduL.toFixed(1)],
+          ["  dont cidre (L)", cohe.parType.cidre.volumeVenduL.toFixed(1)],
+          ["Écart total (L)", cohe.ecartL.toFixed(1)],
+          ["Écart total (%)", cohe.ecartPct.toFixed(1)],
+          ["Écart bière (%)", cohe.parType.biere.ecartPct.toFixed(1)],
+          ["Écart cidre (%)", cohe.parType.cidre.ecartPct.toFixed(1)],
           ["Seuil de tolérance (%)", params.seuilTolerancePerte || 0],
-          ["Dans la tolérance ?", cohe.dansSeuil ? "Oui" : "NON"],
+          ["Dans la tolérance (total) ?", cohe.dansSeuil ? "Oui" : "NON"],
+          ["Dans la tolérance (bière) ?", cohe.parType.biere.volumeSortiL > 0 ? (cohe.parType.biere.dansSeuil ? "Oui" : "NON") : "—"],
+          ["Dans la tolérance (cidre) ?", cohe.parType.cidre.volumeSortiL > 0 ? (cohe.parType.cidre.dansSeuil ? "Oui" : "NON") : "—"],
           [],
           ["CA moyen par fût (€)", caMoyenParFut.toFixed(2)],
           ["Durée moyenne d'un fût (min)", tempsMoyenAttribMin.toFixed(0)],
@@ -4358,7 +4488,8 @@
         const dataComparatif = [
           ["Jour", "CA (€)", "Pintes", "Pichets", "Gobelets",
            "Fûts bière", "Fûts cidre", "Fûts cassés",
-           "Volume sorti (L)", "Volume vendu (L)", "Écart (%)",
+           "Vol sorti (L)", "Vol vendu (L)", "Écart total (%)",
+           "Écart bière (%)", "Écart cidre (%)",
            "PAD en panne", "Saisies actives"]
         ];
         joursPourComparatif.forEach(function (j) {
@@ -4370,6 +4501,8 @@
             parseFloat(j.coherence.volumeSortiL.toFixed(1)),
             parseFloat(j.coherence.volumeVenduL.toFixed(1)),
             parseFloat(j.coherence.ecartPct.toFixed(1)),
+            parseFloat(j.coherence.parType.biere.ecartPct.toFixed(1)),
+            parseFloat(j.coherence.parType.cidre.ecartPct.toFixed(1)),
             j.ventes.nbPadEnPanne,
             j.ventes.nbSaisies
           ]);
@@ -5030,7 +5163,7 @@
           const wbRecap = XLSX.utils.book_new();
           const v = agregerVentes(casesVentesTousJours, null, null);
           const f = agregerFuts(historique, null);
-          const c = calculerCoherence(historique, casesVentesTousJours, params, null);
+          const c = calculerCoherence(historique, casesVentesTousJours, params, null, null, bars);
           const sk = calculerStock(historique, params);
           const dataVue = [
             ["Récapitulatif", "Valeur"],
@@ -5055,7 +5188,7 @@
           (bars || []).forEach(function (bar) {
             const vb = agregerVentes(casesVentesTousJours, null, bar.id);
             const fb = agregerFuts(historique, bar.id);
-            const cb = calculerCoherence(historique, casesVentesTousJours, params, bar.id);
+            const cb = calculerCoherence(historique, casesVentesTousJours, params, bar.id, null, bars);
             dataBar.push([
               bar.nom, bar.type === TYPE_BAR.BIERE ? "bière" : "cidre", vb.ca,
               vb.nbPintes, vb.nbPichets, vb.nbGobelets,
