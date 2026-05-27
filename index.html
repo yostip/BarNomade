@@ -606,7 +606,7 @@
      L'attribution utilise une TRANSACTION (anti-concurrence).
   ========================================================================= */
   const ActionsFuts = {
-    attribuer: function (bar, type, maxFuts, prenomUtilisateur) {
+    attribuer: function (bar, type, maxFuts, prenomUtilisateur, jourActuel) {
       const nbFutsActuels = bar.futs ? Object.keys(bar.futs).length : 0;
       if (nbFutsActuels >= maxFuts) {
         return Promise.reject(new Error("Ce bar a déjà le maximum de fûts (" + maxFuts + ")."));
@@ -632,11 +632,12 @@
           idBar: bar.id,
           nomBar: bar.nom,
           par: prenomUtilisateur,
-          date: Date.now()
+          date: Date.now(),
+          jour: jourActuel || 1
         });
       });
     },
-    retourner: function (bar, idFut, fut, motif, commentaire, prenomUtilisateur) {
+    retourner: function (bar, idFut, fut, motif, commentaire, prenomUtilisateur, jourActuel) {
       /* COMPORTEMENT SPÉCIAL pour le motif "non terminé" :
          Au lieu de simplement retirer le fût du bar, on le déplace dans
          le pot "fûts en attente". Il pourra être réattribué plus tard à
@@ -656,7 +657,8 @@
             nomBar: bar.nom,
             commentaire: (commentaire || "").trim(),
             par: prenomUtilisateur,
-            date: Date.now()
+            date: Date.now(),
+            jour: jourActuel || 1
           });
         }).then(function () {
           return Base.futsEnAttente().push({
@@ -679,7 +681,8 @@
           nomBar: bar.nom,
           commentaire: (commentaire || "").trim(),
           par: prenomUtilisateur,
-          date: Date.now()
+          date: Date.now(),
+          jour: jourActuel || 1
         });
       });
     },
@@ -689,7 +692,7 @@
        cidre → bar cidre). Génère un mouvement "reattribution" dans
        l'historique (distinct d'"attribution" pour ne pas le compter
        deux fois comme sortie de stock dans le dashboard). */
-    reattribuerDepuisPot: function (idAttente, futAttente, bar, prenomUtilisateur) {
+    reattribuerDepuisPot: function (idAttente, futAttente, bar, prenomUtilisateur, jourActuel) {
       if (futAttente.type !== bar.type) {
         return Promise.reject(new Error("Type incompatible : fût " + futAttente.type +
           " vers bar " + bar.type));
@@ -711,7 +714,8 @@
           idBarPrecedent: futAttente.idBarPrecedent,
           nomBarPrecedent: futAttente.nomBarPrecedent,
           par: prenomUtilisateur,
-          date: Date.now()
+          date: Date.now(),
+          jour: jourActuel || 1
         });
       }).then(function () {
         /* Retirer du pot. */
@@ -731,7 +735,7 @@
        "idMouvement" est la clé Firebase du mouvement initial dans
        historiqueFuts. "mvt" est le mouvement lui-même (pour avoir le bar,
        le type, etc.). "idFut" est l'id du fût actuellement sur le bar. */
-    annulerAttribution: function (idMouvement, mvt, idFut, prenomUtilisateur) {
+    annulerAttribution: function (idMouvement, mvt, idFut, prenomUtilisateur, jourActuel) {
       /* Marquer le mouvement initial comme annulé. */
       return Base.historiqueFuts().child(idMouvement).update({ annule: true })
         .then(function () {
@@ -749,7 +753,8 @@
             idBar: mvt.idBar,
             nomBar: mvt.nomBar,
             par: prenomUtilisateur,
-            date: Date.now()
+            date: Date.now(),
+            jour: jourActuel || 1
           });
         });
     },
@@ -764,7 +769,7 @@
          - non terminé : on retire le fût du pot et on le remet sur le bar.
        "idMouvement" = clé du mouvement de retour initial dans historiqueFuts.
        "mvt" = le mouvement de retour. */
-    annulerRetour: function (idMouvement, mvt, prenomUtilisateur) {
+    annulerRetour: function (idMouvement, mvt, prenomUtilisateur, jourActuel) {
       /* On marque d'abord le retour initial comme annulé. */
       return Base.historiqueFuts().child(idMouvement).update({ annule: true })
         .then(function () {
@@ -814,7 +819,8 @@
             idBar: mvt.idBar,
             nomBar: mvt.nomBar,
             par: prenomUtilisateur,
-            date: Date.now()
+            date: Date.now(),
+            jour: jourActuel || 1
           });
         });
     }
@@ -1333,7 +1339,7 @@
      NB : "filtreJour" ne s'applique PAS aux fûts. Les fûts sortent à
      l'heure réelle, pas par jour de festival. L'agrégation se fait sur
      tout l'historique disponible. */
-  function agregerFuts(historique, filtreBar) {
+  function agregerFuts(historique, filtreBar, filtreJour) {
     let nbBiereSortis = 0, nbCidreSortis = 0;
     let nbCasses = 0, nbPleinsRendus = 0;
     (historique || []).forEach(function (mvt) {
@@ -1343,6 +1349,12 @@
       if (mvt.mouvement === "annulation_attribution") return;
       if (mvt.mouvement === "annulation_retour") return;
       if (filtreBar != null && mvt.idBar !== filtreBar) return;
+      /* Si on filtre par jour, le mouvement doit avoir le champ "jour"
+         égal au filtre. Les anciens mouvements (sans champ jour) ne sont
+         comptés QUE dans "total festival" (filtreJour === null/undefined). */
+      if (filtreJour != null) {
+        if (mvt.jour !== filtreJour) return;
+      }
       if (mvt.mouvement === "attribution") {
         if (mvt.typeFut === TYPE_BAR.BIERE) nbBiereSortis++;
         if (mvt.typeFut === TYPE_BAR.CIDRE) nbCidreSortis++;
@@ -1360,10 +1372,10 @@
   /* Calcul de cohérence volume : volume sorti (via fûts) vs volume vendu
      (via pintes + pichets, le gobelet n'a pas de volume).
      Renvoie { volumeSortiL, volumeVenduL, ecartL, ecartPct, dansSeuil }.
-     "filtreBar" optionnel. */
-  function calculerCoherence(historique, casesVentesTousJours, params, filtreBar) {
-    const futs = agregerFuts(historique, filtreBar);
-    const ventes = agregerVentes(casesVentesTousJours, null, filtreBar);
+     "filtreBar" optionnel. "filtreJour" optionnel. */
+  function calculerCoherence(historique, casesVentesTousJours, params, filtreBar, filtreJour) {
+    const futs = agregerFuts(historique, filtreBar, filtreJour);
+    const ventes = agregerVentes(casesVentesTousJours, filtreJour, filtreBar);
     /* Volume sorti = (nb fûts bière * volumeFutBiere) + (nb fûts cidre *
        volumeFutCidre). Un fût plein rendu reste compté comme sorti car
        l'attribution est aussi comptée — pour ne pas le compter, on
@@ -1426,7 +1438,7 @@
      Renvoie un tableau d'objets { nom, nbVendeur, nbServeur, nbRunner,
      nbTotal }, trié par nbTotal décroissant.
      Les noms sont comparés en TEXTE EXACT (cf. décision champ libre). */
-  function agregerBenevoles(planningTousJours) {
+  function agregerBenevoles(planningTousJours, filtreJour) {
     /* compteur[nom] = { nbVendeur, nbServeur, nbRunner } */
     const compteur = {};
     function ajouter(nom, poste) {
@@ -1437,6 +1449,11 @@
     }
     Object.keys(planningTousJours || {}).forEach(function (cleJour) {
       if (!cleJour.match(/^jour\d+$/)) return;
+      /* Si filtreJour est fourni, on ne traite que ce jour-là. */
+      if (filtreJour != null) {
+        const nj = parseInt(cleJour.replace("jour", ""), 10);
+        if (nj !== filtreJour) return;
+      }
       const barresDuJour = planningTousJours[cleJour] || {};
       Object.keys(barresDuJour).forEach(function (idBar) {
         const creneauxDuBar = barresDuJour[idBar] || {};
@@ -3324,7 +3341,7 @@
 
      Dashboard-2 ajoutera : Par bénévole, Anomalies, Export Excel.
   ========================================================================= */
-  function EcranDashboard({ jourActuel, bars, historique, casesVentesTousJours, params, onFermer }) {
+  function EcranDashboard({ jourActuel, bars, historique, casesVentesTousJours, historiqueRenommages, params, onFermer }) {
     /* Onglet actif : "vue" / "bar" / "benevole" / "anomalies". */
     const [onglet, setOnglet] = useState("vue");
     /* Bascule de granularité : "tout" / "jour" / "comparatif".
@@ -3356,25 +3373,104 @@
     }, []);
 
     /* Pour "jour", on filtre sur jourActuel. Pour "tout" et "comparatif",
-       pas de filtre jour. */
+       pas de filtre jour. Le filtre s'applique aux ventes ET aux fûts
+       (les fûts sont taggés avec le jour de l'attribution / du retour). */
     const filtreJourPourVentes = (granularite === "jour") ? jourActuel : null;
+    const filtreJourPourFuts   = (granularite === "jour") ? jourActuel : null;
 
     /* ----- CALCULS POUR L'ONGLET VUE D'ENSEMBLE ----- */
     const ventesGlobal = agregerVentes(casesVentesTousJours, filtreJourPourVentes, null);
-    const futsGlobal = agregerFuts(historique, null);
-    const coherenceGlobal = calculerCoherence(historique, casesVentesTousJours, params, null);
+    const futsGlobal = agregerFuts(historique, null, filtreJourPourFuts);
+    const coherenceGlobal = calculerCoherence(historique, casesVentesTousJours, params, null, filtreJourPourFuts);
     const stockGlobal = calculerStock(historique, params);
 
-    /* ----- DONNÉES POUR L'ONGLET BÉNÉVOLE (toujours tout festival) ----- */
-    const lignesBenevoles = agregerBenevoles(planningTousJours);
+    /* ----- CA BIÈRE vs CIDRE -----
+       Calculé en agrégeant les ventes par TYPE de bar (on regarde le type
+       du bar à partir de son idBar). Les saisies dont l'idBar n'est pas
+       trouvé (bar supprimé) sont ignorées pour ce calcul. */
+    function calculerCaParType() {
+      let caBiere = 0, caCidre = 0;
+      let pintesBiere = 0, pintesCidre = 0;
+      const indexType = {};
+      (bars || []).forEach(function (b) { indexType[b.id] = b.type; });
+
+      Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
+        const nj = numeroDepuisCleJour(cleJour);
+        if (nj === null) return;
+        if (filtreJourPourVentes != null && nj !== filtreJourPourVentes) return;
+        const parBar = casesVentesTousJours[cleJour] || {};
+        Object.keys(parBar).forEach(function (idBar) {
+          const typeBar = indexType[idBar];
+          if (!typeBar) return;
+          const parCr = parBar[idBar] || {};
+          Object.keys(parCr).forEach(function (idCr) {
+            const cas = parCr[idCr] || {};
+            const saisies = cas.saisies || {};
+            Object.keys(saisies).forEach(function (idS) {
+              const s = saisies[idS];
+              if (!s || s.annulee === true) return;
+              if (typeBar === TYPE_BAR.BIERE) {
+                caBiere += (s.montant || 0);
+                pintesBiere += (s.nbPintes || 0);
+              } else if (typeBar === TYPE_BAR.CIDRE) {
+                caCidre += (s.montant || 0);
+                pintesCidre += (s.nbPintes || 0);
+              }
+            });
+          });
+        });
+      });
+      return {
+        caBiere: caBiere, caCidre: caCidre,
+        pintesBiere: pintesBiere, pintesCidre: pintesCidre
+      };
+    }
+    const caParType = calculerCaParType();
+
+    /* ----- DONNÉES POUR L'ONGLET BÉNÉVOLE -----
+       Granularité par jour gérée par agregerBenevoles. Note : "comparatif"
+       comme "tout" → on agrège tout le festival. Le filtre par jour ne
+       s'applique que si granularite === "jour". */
+    const lignesBenevoles = agregerBenevoles(planningTousJours, filtreJourPourVentes);
+
+    /* ----- LISTE DÉTAILLÉE DES SAISIES ANNULÉES ----- */
+    function listerSaisiesAnnulees() {
+      const out = [];
+      Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
+        const nj = numeroDepuisCleJour(cleJour);
+        if (nj === null) return;
+        const parBar = casesVentesTousJours[cleJour] || {};
+        Object.keys(parBar).forEach(function (idBar) {
+          const parCr = parBar[idBar] || {};
+          Object.keys(parCr).forEach(function (idCr) {
+            const cas = parCr[idCr] || {};
+            const saisies = cas.saisies || {};
+            Object.keys(saisies).forEach(function (idS) {
+              const s = saisies[idS];
+              if (!s || s.annulee !== true) return;
+              out.push({
+                jour: nj, idBar: idBar, idCreneau: idCr,
+                montant: s.montant || 0,
+                par: s.par || "",
+                annuleePar: s.annuleePar || "",
+                date: s.date || 0
+              });
+            });
+          });
+        });
+      });
+      out.sort(function (a, b) { return (b.date || 0) - (a.date || 0); });
+      return out;
+    }
+    const listeAnnulees = listerSaisiesAnnulees();
 
     /* ----- DONNÉES POUR L'ONGLET ANOMALIES ----- */
     /* Bars dépassant le seuil (filtré sur tout festival). */
     const barsHorsSeuil = (bars || []).filter(function (bar) {
-      const c = calculerCoherence(historique, casesVentesTousJours, params, bar.id);
+      const c = calculerCoherence(historique, casesVentesTousJours, params, bar.id, null);
       return !c.dansSeuil && c.volumeSortiL > 0;
     }).map(function (bar) {
-      const c = calculerCoherence(historique, casesVentesTousJours, params, bar.id);
+      const c = calculerCoherence(historique, casesVentesTousJours, params, bar.id, null);
       return { id: bar.id, nom: bar.nom, ecartPct: c.ecartPct };
     });
     const listeDonneesPerdues = listerDonneesPerdues(casesVentesTousJours);
@@ -3392,8 +3488,8 @@
     /* ----- DONNÉES POUR L'ONGLET PAR BAR ----- */
     const lignesParBar = (bars || []).map(function (bar) {
       const ventesBar = agregerVentes(casesVentesTousJours, filtreJourPourVentes, bar.id);
-      const futsBar = agregerFuts(historique, bar.id);
-      const cohBar = calculerCoherence(historique, casesVentesTousJours, params, bar.id);
+      const futsBar = agregerFuts(historique, bar.id, filtreJourPourFuts);
+      const cohBar = calculerCoherence(historique, casesVentesTousJours, params, bar.id, filtreJourPourFuts);
       return {
         id: bar.id, nom: bar.nom, type: bar.type,
         archive: !!bar.archive,
@@ -3401,14 +3497,119 @@
       };
     });
 
-    /* ----- DONNÉES POUR COMPARATIF PAR JOUR ----- */
-    /* Liste de jours présents : on prend tous les jours de 1 à
-       params.nombreJours pour avoir une ligne par jour même vide. */
+    /* ----- DONNÉES POUR COMPARATIF PAR JOUR ENRICHI -----
+       Pour chaque jour, on agrège : ventes, fûts bière/cidre/cassés,
+       cohérence (écart %), PAD en panne, nb saisies. */
     const joursPourComparatif = [];
     for (let j = 1; j <= (params.nombreJours || 1); j++) {
       const v = agregerVentes(casesVentesTousJours, j, null);
-      joursPourComparatif.push({ numero: j, ventes: v });
+      const f = agregerFuts(historique, null, j);
+      const c = calculerCoherence(historique, casesVentesTousJours, params, null, j);
+      joursPourComparatif.push({
+        numero: j,
+        ventes: v,
+        futs: f,
+        coherence: c
+      });
     }
+
+    /* ----- TOP 3 / PIRE 3 BARS (par CA) ----- */
+    const lignesTriees = lignesParBar.slice().sort(function (a, b) {
+      return (b.ventes.ca || 0) - (a.ventes.ca || 0);
+    });
+    const top3Bars = lignesTriees.slice(0, 3);
+    const pire3Bars = lignesTriees.slice(-3).reverse();
+
+    /* ----- CA MOYEN PAR FÛT (sur tout festival ou filtré jour) ----- */
+    const nbFutsConsommes = (futsGlobal.nbBiereSortis + futsGlobal.nbCidreSortis) - futsGlobal.nbPleinsRendus;
+    const caMoyenParFut = nbFutsConsommes > 0 ? (ventesGlobal.ca / nbFutsConsommes) : 0;
+
+    /* ----- TEMPS MOYEN D'ATTRIBUTION DES FÛTS (en minutes) -----
+       Pour chaque fût attribué puis retourné, on calcule la durée
+       (date du retour − date d'attribution). Le mouvement de retour
+       est apparié au mouvement d'attribution le plus récent pour le
+       même bar/type. Approche pragmatique : on ne tient pas compte
+       des annulations. */
+    function calculerTempsMoyenAttribution() {
+      const attrib = {};   /* clé "idBar|type" → file d'attente de dates */
+      let totalMin = 0, nb = 0;
+      const tri = (historique || []).slice().sort(function (a, b) {
+        return (a.date || 0) - (b.date || 0);
+      });
+      tri.forEach(function (m) {
+        if (m.annule === true) return;
+        if (filtreJourPourFuts != null && m.jour !== filtreJourPourFuts) return;
+        const cle = m.idBar + "|" + m.typeFut;
+        if (m.mouvement === "attribution" || m.mouvement === "reattribution") {
+          if (!attrib[cle]) attrib[cle] = [];
+          attrib[cle].push(m.date);
+        } else if (m.mouvement === "retour") {
+          if (attrib[cle] && attrib[cle].length > 0) {
+            const dateAttrib = attrib[cle].shift();
+            const dureeMin = (m.date - dateAttrib) / 60000;
+            if (dureeMin > 0 && dureeMin < 60 * 24) { /* exclut les valeurs aberrantes */
+              totalMin += dureeMin;
+              nb++;
+            }
+          }
+        }
+      });
+      return nb > 0 ? (totalMin / nb) : 0;
+    }
+    const tempsMoyenAttribMin = calculerTempsMoyenAttribution();
+
+    /* ----- BARS AVEC CRÉNEAU CLÔTURÉ SANS SAISIE -----
+       Détecte les "trous" : un créneau est marqué clôturé mais aucune
+       saisie active. Symptôme : oubli de saisie avant clôture. */
+    function listerBarsSansSaisieMaisCloture() {
+      const out = [];
+      Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
+        const nj = numeroDepuisCleJour(cleJour);
+        if (nj === null) return;
+        const parBar = casesVentesTousJours[cleJour] || {};
+        Object.keys(parBar).forEach(function (idBar) {
+          const parCr = parBar[idBar] || {};
+          Object.keys(parCr).forEach(function (idCr) {
+            const cas = parCr[idCr] || {};
+            if (cas.cloturee !== true) return;
+            const saisies = cas.saisies || {};
+            const nbActives = Object.keys(saisies).filter(function (idS) {
+              return saisies[idS] && saisies[idS].annulee !== true;
+            }).length;
+            if (nbActives === 0) {
+              out.push({ jour: nj, idBar: idBar, idCreneau: idCr });
+            }
+          });
+        });
+      });
+      return out;
+    }
+    const listeClotureSansSaisie = listerBarsSansSaisieMaisCloture();
+
+    /* ----- TAUX D'UTILISATION DU PAD -----
+       Ratio (saisies normales) / (saisies normales + saisies PAD en panne).
+       Permet d'objectiver la fiabilité matériel. */
+    let nbSaisiesNormales = 0, nbSaisiesAvecPanne = 0;
+    Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
+      const nj = numeroDepuisCleJour(cleJour);
+      if (nj === null) return;
+      const parBar = casesVentesTousJours[cleJour] || {};
+      Object.keys(parBar).forEach(function (idBar) {
+        const parCr = parBar[idBar] || {};
+        Object.keys(parCr).forEach(function (idCr) {
+          const saisies = (parCr[idCr] || {}).saisies || {};
+          Object.keys(saisies).forEach(function (idS) {
+            const s = saisies[idS];
+            if (!s || s.annulee === true) return;
+            if (s.padEnDefaut === true) nbSaisiesAvecPanne++;
+            else nbSaisiesNormales++;
+          });
+        });
+      });
+    });
+    const totalSaisies = nbSaisiesNormales + nbSaisiesAvecPanne;
+    const tauxPadOk = totalSaisies > 0
+      ? (nbSaisiesNormales / totalSaisies * 100) : 100;
 
     /* ----- HELPERS D'AFFICHAGE ----- */
     function fmtEuros(n) { return (n || 0).toFixed(2) + " €"; }
@@ -3431,13 +3632,14 @@
     /* ----- RENDU ONGLET "VUE D'ENSEMBLE" ----- */
     function rendreVue() {
       const blocs = [];
+      const libGran = granularite === "jour" ? " — jour " + jourActuel : " — total festival";
 
       /* Chiffres globaux des ventes. */
       blocs.push(React.createElement(
         "div",
         { key: "ventes", className: "mb-4" },
         React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
-          "Ventes" + (granularite === "jour" ? " — jour " + jourActuel : " — total festival")),
+          "Ventes" + libGran),
         React.createElement(
           "div",
           { className: "grid grid-cols-2 gap-2" },
@@ -3453,12 +3655,30 @@
         )
       ));
 
-      /* Fûts (toujours sur tout le festival — pas de filtre jour). */
+      /* CA bière vs CA cidre (suit la granularité). */
+      blocs.push(React.createElement(
+        "div",
+        { key: "caType", className: "mb-4" },
+        React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+          "CA par type" + libGran),
+        React.createElement(
+          "div",
+          { className: "grid grid-cols-2 gap-2" },
+          carte("CA bière", fmtEuros(caParType.caBiere),
+            caParType.pintesBiere + " pinte(s)",
+            "bg-amber-950/40 border border-amber-800"),
+          carte("CA cidre", fmtEuros(caParType.caCidre),
+            caParType.pintesCidre + " pinte(s)",
+            "bg-green-950/40 border border-green-800")
+        )
+      ));
+
+      /* Fûts (suit désormais la granularité). */
       blocs.push(React.createElement(
         "div",
         { key: "futs", className: "mb-4" },
         React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
-          "Fûts (total festival)"),
+          "Fûts" + libGran),
         React.createElement(
           "div",
           { className: "grid grid-cols-2 gap-2" },
@@ -3472,11 +3692,12 @@
         )
       ));
 
-      /* Stock restant. */
+      /* Stock restant (toujours total festival : c'est l'état actuel). */
       blocs.push(React.createElement(
         "div",
         { key: "stock", className: "mb-4" },
-        React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" }, "Stock restant"),
+        React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+          "Stock restant (état actuel)"),
         React.createElement(
           "div",
           { className: "grid grid-cols-2 gap-2" },
@@ -3487,7 +3708,7 @@
         )
       ));
 
-      /* Cohérence (toujours sur tout le festival). */
+      /* Cohérence (suit désormais la granularité). */
       const couleurCoh = coherenceGlobal.dansSeuil
         ? "bg-emerald-950/40 border border-emerald-800"
         : "bg-red-950/40 border border-red-900";
@@ -3495,7 +3716,7 @@
         "div",
         { key: "coh", className: "mb-4" },
         React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
-          "Cohérence volumes (total festival)"),
+          "Cohérence volumes" + libGran),
         React.createElement(
           "div",
           { className: "rounded-xl p-3 " + couleurCoh },
@@ -3529,36 +3750,102 @@
         )
       ));
 
-      /* Comparatif par jour (seulement si granularité = "comparatif"). */
+      /* Métriques additionnelles : CA moyen par fût, temps moyen
+         d'attribution, taux PAD OK. */
+      blocs.push(React.createElement(
+        "div",
+        { key: "metriques", className: "mb-4" },
+        React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+          "Indicateurs complémentaires" + libGran),
+        React.createElement(
+          "div",
+          { className: "grid grid-cols-2 gap-2" },
+          carte("CA moyen / fût", fmtEuros(caMoyenParFut),
+            nbFutsConsommes + " fût(s) consommé(s)"),
+          carte("Durée moy. d'un fût", tempsMoyenAttribMin.toFixed(0) + " min",
+            "entre attribution et retour"),
+          carte("Taux PAD OK", tauxPadOk.toFixed(0) + " %",
+            nbSaisiesNormales + " / " + totalSaisies + " saisies actives",
+            tauxPadOk < 90 ? "bg-amber-950/40 border border-amber-800" : null),
+          carte("Fûts au pot", listeFutsAuPot.length, "non terminés en attente",
+            listeFutsAuPot.length > 5 ? "bg-amber-950/40 border border-amber-800" : null)
+        )
+      ));
+
+      /* Top 3 / Pire 3 bars (suit la granularité via lignesParBar). */
+      if (lignesParBar.length >= 1) {
+        const ligneTop = function (l, indice, couleur) {
+          return React.createElement(
+            "div",
+            { key: l.id, className: "flex items-center justify-between bg-neutral-900 border border-neutral-800 rounded-lg p-2 text-sm" },
+            React.createElement("span", { className: "text-" + couleur + "-400 font-bold w-6" }, indice + "."),
+            React.createElement("span", { className: "flex-1 text-white" }, l.nom +
+              (l.archive ? " (archivé)" : "")),
+            React.createElement("span", { className: "text-emerald-300 font-bold" }, fmtEuros(l.ventes.ca))
+          );
+        };
+        blocs.push(React.createElement(
+          "div",
+          { key: "topbars", className: "mb-4" },
+          React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+            "Top 3 bars par CA" + libGran),
+          React.createElement(
+            "div",
+            { className: "space-y-1" },
+            top3Bars.map(function (l, i) { return ligneTop(l, i + 1, "emerald"); })
+          )
+        ));
+        if (lignesParBar.length >= 4) {
+          blocs.push(React.createElement(
+            "div",
+            { key: "pirebars", className: "mb-4" },
+            React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+              "Pire 3 bars par CA" + libGran),
+            React.createElement(
+              "div",
+              { className: "space-y-1" },
+              pire3Bars.map(function (l, i) { return ligneTop(l, i + 1, "red"); })
+            )
+          ));
+        }
+      }
+
+      /* Comparatif par jour ENRICHI (seulement si granularité = "comparatif"). */
       if (granularite === "comparatif") {
         blocs.push(React.createElement(
           "div",
           { key: "cmp", className: "mb-4" },
           React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
-            "Comparatif par jour"),
+            "Comparatif par jour (enrichi)"),
           React.createElement(
             "div",
-            { className: "rounded-xl border border-neutral-800 overflow-hidden" },
+            { className: "rounded-xl border border-neutral-800 overflow-x-auto" },
             React.createElement(
               "table",
-              { className: "w-full text-sm" },
+              { className: "w-full text-xs" },
               React.createElement(
                 "thead",
-                { className: "bg-neutral-900 text-neutral-400 text-xs" },
+                { className: "bg-neutral-900 text-neutral-400" },
                 React.createElement(
                   "tr",
                   null,
-                  React.createElement("th", { className: "text-left p-2" }, "Jour"),
+                  React.createElement("th", { className: "text-left p-2" }, "J"),
                   React.createElement("th", { className: "text-right p-2" }, "CA"),
                   React.createElement("th", { className: "text-right p-2" }, "Pintes"),
-                  React.createElement("th", { className: "text-right p-2" }, "Pichets"),
-                  React.createElement("th", { className: "text-right p-2" }, "Gobelets")
+                  React.createElement("th", { className: "text-right p-2" }, "Pich"),
+                  React.createElement("th", { className: "text-right p-2" }, "Fûts B"),
+                  React.createElement("th", { className: "text-right p-2" }, "Fûts C"),
+                  React.createElement("th", { className: "text-right p-2" }, "Cassés"),
+                  React.createElement("th", { className: "text-right p-2" }, "Écart %"),
+                  React.createElement("th", { className: "text-right p-2" }, "PAD❌"),
+                  React.createElement("th", { className: "text-right p-2" }, "Sais.")
                 )
               ),
               React.createElement(
                 "tbody",
                 null,
                 joursPourComparatif.map(function (j) {
+                  const couleurEc = j.coherence.dansSeuil ? "text-emerald-300" : "text-red-300";
                   return React.createElement(
                     "tr",
                     { key: j.numero, className: "border-t border-neutral-800" },
@@ -3566,12 +3853,19 @@
                     React.createElement("td", { className: "p-2 text-right text-emerald-300" }, fmtEuros(j.ventes.ca)),
                     React.createElement("td", { className: "p-2 text-right text-neutral-300" }, j.ventes.nbPintes),
                     React.createElement("td", { className: "p-2 text-right text-neutral-300" }, j.ventes.nbPichets),
-                    React.createElement("td", { className: "p-2 text-right text-neutral-300" }, j.ventes.nbGobelets)
+                    React.createElement("td", { className: "p-2 text-right text-amber-300" }, j.futs.nbBiereSortis),
+                    React.createElement("td", { className: "p-2 text-right text-green-300" }, j.futs.nbCidreSortis),
+                    React.createElement("td", { className: "p-2 text-right text-red-300" }, j.futs.nbCasses),
+                    React.createElement("td", { className: "p-2 text-right " + couleurEc }, fmtPct(j.coherence.ecartPct)),
+                    React.createElement("td", { className: "p-2 text-right text-amber-300" }, j.ventes.nbPadEnPanne),
+                    React.createElement("td", { className: "p-2 text-right text-neutral-300" }, j.ventes.nbSaisies)
                   );
                 })
               )
             )
-          )
+          ),
+          React.createElement("p", { className: "text-xs text-neutral-500 italic mt-2" },
+            "Pich = pichets, Fûts B/C = fûts bière/cidre sortis, PAD❌ = saisies avec panne PAD, Sais. = nb saisies actives")
         ));
       }
 
@@ -3665,7 +3959,8 @@
         "div",
         null,
         React.createElement("p", { className: "text-xs text-neutral-500 mb-2" },
-          "Total festival, trié par nombre de shifts décroissant. " +
+          (granularite === "jour" ? "Jour " + jourActuel : "Total festival") +
+          ", trié par nombre de shifts décroissant. " +
           lignesBenevoles.length + " bénévole(s) identifié(s)."),
         React.createElement(
           "div",
@@ -3847,12 +4142,79 @@
             )
       ));
 
+      /* Section 6 : saisies annulées détaillées. */
+      blocs.push(React.createElement(
+        "div",
+        { key: "annulees", className: "mb-4" },
+        React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+          "Saisies annulées (" + listeAnnulees.length + ")"),
+        listeAnnulees.length === 0
+          ? React.createElement("p", { className: "text-xs text-neutral-600 italic" },
+              "Aucune saisie annulée.")
+          : React.createElement(
+              "div",
+              { className: "space-y-1" },
+              listeAnnulees.map(function (a, i) {
+                return React.createElement(
+                  "div",
+                  { key: i, className: "bg-red-950/30 border border-red-900 rounded-lg p-2 text-sm" },
+                  React.createElement("div", { className: "flex justify-between" },
+                    React.createElement("span", { className: "text-white" },
+                      "J" + a.jour + " — " + nomBar(a.idBar)),
+                    React.createElement("span", { className: "text-red-300" },
+                      a.montant.toFixed(2) + " €")
+                  ),
+                  React.createElement("p", { className: "text-xs text-neutral-500 mt-1" },
+                    "Saisi par " + (a.par || "?") +
+                    (a.annuleePar ? " · annulé par " + a.annuleePar : ""))
+                );
+              })
+            )
+      ));
+
+      /* Section 7 : créneaux clôturés mais sans aucune saisie active.
+         Symptôme : oubli au moment de la clôture. */
+      blocs.push(React.createElement(
+        "div",
+        { key: "cloturesvides", className: "mb-4" },
+        React.createElement("p", { className: "text-xs text-neutral-500 uppercase mb-2" },
+          "Créneaux clôturés sans saisie"),
+        listeClotureSansSaisie.length === 0
+          ? React.createElement("p", { className: "text-xs text-neutral-600 italic" },
+              "Tous les créneaux clôturés ont au moins une saisie.")
+          : React.createElement(
+              "div",
+              { className: "space-y-1" },
+              listeClotureSansSaisie.map(function (c, i) {
+                return React.createElement(
+                  "div",
+                  { key: i, className: "flex justify-between items-center bg-amber-950/30 border border-amber-900 rounded-lg p-2 text-sm" },
+                  React.createElement("span", { className: "text-white" },
+                    "J" + c.jour + " — " + nomBar(c.idBar)),
+                  React.createElement("span", { className: "text-xs text-amber-300" },
+                    "à vérifier")
+                );
+              })
+            )
+      ));
+
       return React.createElement("div", null, blocs);
     }
 
-    /* ----- EXPORT EXCEL -----
-       Génère un fichier .xlsx avec 4 feuilles (Vue, Par bar, Par bénévole,
-       Anomalies) et déclenche le téléchargement. Utilise SheetJS (XLSX). */
+    /* ----- EXPORT EXCEL RÉCAPITULATIF -----
+       Génère un fichier .xlsx avec plusieurs feuilles :
+         1. Vue d'ensemble (chiffres globaux + CA par type)
+         2. Par bar (avec métriques étendues)
+         3. Par bénévole
+         4. Anomalies
+         5. Comparatif par jour
+         6. Paramètres utilisés (audit)
+         7. Renommages de bars
+         8. Planning détaillé
+         9. Bars archivés
+        10. Fûts cassés (avec commentaires)
+        11. Saisies annulées
+       Utilise SheetJS (XLSX). */
     function telechargerExcel() {
       if (typeof XLSX === "undefined") {
         alert("La bibliothèque Excel n'est pas chargée. Vérifiez votre connexion internet.");
@@ -3860,94 +4222,319 @@
       }
       const wb = XLSX.utils.book_new();
 
-      /* Feuille 1 : Vue d'ensemble (chiffres globaux). */
-      const v = ventesGlobal;
-      const f = futsGlobal;
-      const c = coherenceGlobal;
-      const dataVue = [
-        ["Récapitulatif", "Valeur"],
-        ["CA total (€)", v.ca],
-        ["Nombre de pintes", v.nbPintes],
-        ["Nombre de pichets", v.nbPichets],
-        ["Nombre de gobelets", v.nbGobelets],
-        ["Nombre de saisies actives", v.nbSaisies],
-        ["Saisies annulées", v.nbAnnulees],
-        ["Saisies PAD en panne", v.nbPadEnPanne],
-        ["Dont données perdues", v.nbDonneesPerdues],
-        [],
-        ["Fûts bière sortis", f.nbBiereSortis],
-        ["Fûts cidre sortis", f.nbCidreSortis],
-        ["Fûts cassés", f.nbCasses],
-        ["Fûts pleins rendus", f.nbPleinsRendus],
-        [],
-        ["Stock restant bière (fûts)", stockGlobal.biere],
-        ["Stock restant cidre (fûts)", stockGlobal.cidre],
-        [],
-        ["Volume sorti (L)", c.volumeSortiL.toFixed(1)],
-        ["Volume vendu (L)", c.volumeVenduL.toFixed(1)],
-        ["Écart (L)", c.ecartL.toFixed(1)],
-        ["Écart (%)", c.ecartPct.toFixed(1)],
-        ["Seuil de tolérance (%)", params.seuilTolerancePerte || 0],
-        ["Dans la tolérance ?", c.dansSeuil ? "Oui" : "NON"]
-      ];
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataVue), "Vue d'ensemble");
+      /* On a besoin des créneaux et du planning de TOUS les jours pour
+         les nouvelles feuilles. On les lit une fois ici. */
+      const promesseCreneaux = db.ref("sessions/" + ID_SESSION + "/creneaux").once("value");
+      const promessePlanning = db.ref("sessions/" + ID_SESSION + "/planning").once("value");
 
-      /* Feuille 2 : Par bar. */
-      const dataBar = [
-        ["Bar", "Type", "CA (€)", "Pintes", "Pichets", "Gobelets",
-         "Fûts sortis", "Fûts cassés", "Volume sorti (L)", "Volume vendu (L)",
-         "Écart (%)", "Dans seuil"]
-      ];
-      lignesParBar.forEach(function (l) {
-        dataBar.push([
-          l.nom,
-          l.type === TYPE_BAR.BIERE ? "bière" : "cidre",
-          l.ventes.ca,
-          l.ventes.nbPintes, l.ventes.nbPichets, l.ventes.nbGobelets,
-          l.futs.nbBiereSortis + l.futs.nbCidreSortis,
-          l.futs.nbCasses,
-          parseFloat(l.coherence.volumeSortiL.toFixed(1)),
-          parseFloat(l.coherence.volumeVenduL.toFixed(1)),
-          parseFloat(l.coherence.ecartPct.toFixed(1)),
-          l.coherence.dansSeuil ? "Oui" : "NON"
-        ]);
-      });
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataBar), "Par bar");
+      Promise.all([promesseCreneaux, promessePlanning]).then(function (snaps) {
+        const creneauxTousJours = snaps[0].val() || {};
+        const planningTousJoursPourExport = snaps[1].val() || {};
 
-      /* Feuille 3 : Par bénévole. */
-      const dataBenevole = [["Bénévole", "Vendeur", "Serveur", "Runner", "Total"]];
-      lignesBenevoles.forEach(function (b) {
-        dataBenevole.push([b.nom, b.nbVendeur, b.nbServeur, b.nbRunner, b.nbTotal]);
-      });
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataBenevole), "Par bénévole");
+        /* Helper : libellé d'un créneau pour un jour donné. */
+        function libCreneau(numeroJour, idCreneau) {
+          const cle = "jour" + numeroJour;
+          const c = creneauxTousJours[cle];
+          if (!c || !c[idCreneau]) return idCreneau;
+          return c[idCreneau].libelle || idCreneau;
+        }
 
-      /* Feuille 4 : Anomalies. */
-      const dataAnomalies = [["Type", "Détail 1", "Détail 2", "Détail 3"]];
-      barsHorsSeuil.forEach(function (b) {
-        dataAnomalies.push(["Bar hors seuil", b.nom, b.ecartPct.toFixed(1) + " %", ""]);
-      });
-      listeDonneesPerdues.forEach(function (p) {
-        dataAnomalies.push(["Données perdues", "J" + p.jour + " — " + nomBar(p.idBar),
-          "PAD " + p.numeroPad, p.par]);
-      });
-      listeNonCloturees.forEach(function (c2) {
-        dataAnomalies.push(["Créneau non clôturé", "J" + c2.jour + " — " + nomBar(c2.idBar),
-          c2.nbSaisies + " saisie(s)", c2.total.toFixed(2) + " €"]);
-      });
-      listeFutsNonRetournes.forEach(function (ft) {
-        dataAnomalies.push(["Fût non retourné", ft.nomBar,
-          ft.type === TYPE_BAR.BIERE ? "bière" : "cidre", "par " + ft.attribuePar]);
-      });
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataAnomalies), "Anomalies");
+        /* Helper : nom d'un bar à partir de son idBar. */
+        function nomBarLocal(idBar) {
+          const b = (bars || []).find(function (x) { return x.id === idBar; });
+          return b ? b.nom : "(bar inconnu)";
+        }
 
-      /* Nom de fichier avec la date du jour. */
-      const d = new Date();
-      const pad2 = function (n) { return n < 10 ? "0" + n : "" + n; };
-      const nomFichier = "bars-nomades-recap-" +
-        d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) +
-        "-" + pad2(d.getHours()) + pad2(d.getMinutes()) + ".xlsx";
+        /* Helper : format date/heure. */
+        function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+        function fmtDateHeure(ts) {
+          if (!ts) return "";
+          const d2 = new Date(ts);
+          return d2.getFullYear() + "-" + pad2(d2.getMonth() + 1) + "-" + pad2(d2.getDate()) +
+            " " + pad2(d2.getHours()) + ":" + pad2(d2.getMinutes()) + ":" + pad2(d2.getSeconds());
+        }
 
-      XLSX.writeFile(wb, nomFichier);
+        /* ===== FEUILLE 1 : Vue d'ensemble (chiffres globaux + CA par type) ===== */
+        const v = ventesGlobal;
+        const f = futsGlobal;
+        const cohe = coherenceGlobal;
+        const dataVue = [
+          ["Récapitulatif", "Valeur"],
+          ["Granularité de l'export", granularite === "jour" ? "Jour " + jourActuel : "Tout le festival"],
+          ["Date de l'export", fmtDateHeure(Date.now())],
+          [],
+          ["CA total (€)", v.ca],
+          ["CA bière (€)", caParType.caBiere],
+          ["CA cidre (€)", caParType.caCidre],
+          ["Nombre de pintes", v.nbPintes],
+          ["Pintes bière", caParType.pintesBiere],
+          ["Pintes cidre", caParType.pintesCidre],
+          ["Nombre de pichets", v.nbPichets],
+          ["Nombre de gobelets", v.nbGobelets],
+          ["Nombre de saisies actives", v.nbSaisies],
+          ["Saisies annulées", v.nbAnnulees],
+          ["Saisies PAD en panne", v.nbPadEnPanne],
+          ["Dont données perdues", v.nbDonneesPerdues],
+          [],
+          ["Fûts bière sortis", f.nbBiereSortis],
+          ["Fûts cidre sortis", f.nbCidreSortis],
+          ["Fûts cassés", f.nbCasses],
+          ["Fûts pleins rendus", f.nbPleinsRendus],
+          ["Fûts non terminés au pot (état actuel)", listeFutsAuPot.length],
+          [],
+          ["Stock restant bière (fûts)", stockGlobal.biere],
+          ["Stock restant cidre (fûts)", stockGlobal.cidre],
+          [],
+          ["Volume sorti (L)", cohe.volumeSortiL.toFixed(1)],
+          ["Volume vendu (L)", cohe.volumeVenduL.toFixed(1)],
+          ["Écart (L)", cohe.ecartL.toFixed(1)],
+          ["Écart (%)", cohe.ecartPct.toFixed(1)],
+          ["Seuil de tolérance (%)", params.seuilTolerancePerte || 0],
+          ["Dans la tolérance ?", cohe.dansSeuil ? "Oui" : "NON"],
+          [],
+          ["CA moyen par fût (€)", caMoyenParFut.toFixed(2)],
+          ["Durée moyenne d'un fût (min)", tempsMoyenAttribMin.toFixed(0)],
+          ["Taux PAD OK (%)", tauxPadOk.toFixed(0)]
+        ];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataVue), "Vue d'ensemble");
+
+        /* ===== FEUILLE 2 : Par bar (enrichi) ===== */
+        const dataBar = [
+          ["Bar", "Type", "Statut", "CA (€)", "Pintes", "Pichets", "Gobelets",
+           "Fûts bière sortis", "Fûts cidre sortis", "Fûts cassés",
+           "Volume sorti (L)", "Volume vendu (L)",
+           "Écart (L)", "Écart (%)", "Dans seuil"]
+        ];
+        lignesParBar.forEach(function (l) {
+          dataBar.push([
+            l.nom,
+            l.type === TYPE_BAR.BIERE ? "bière" : "cidre",
+            l.archive ? "archivé" : "actif",
+            l.ventes.ca,
+            l.ventes.nbPintes, l.ventes.nbPichets, l.ventes.nbGobelets,
+            l.futs.nbBiereSortis, l.futs.nbCidreSortis, l.futs.nbCasses,
+            parseFloat(l.coherence.volumeSortiL.toFixed(1)),
+            parseFloat(l.coherence.volumeVenduL.toFixed(1)),
+            parseFloat(l.coherence.ecartL.toFixed(1)),
+            parseFloat(l.coherence.ecartPct.toFixed(1)),
+            l.coherence.dansSeuil ? "Oui" : "NON"
+          ]);
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataBar), "Par bar");
+
+        /* ===== FEUILLE 3 : Par bénévole ===== */
+        const dataBenevole = [["Bénévole", "Vendeur", "Serveur", "Runner", "Total"]];
+        lignesBenevoles.forEach(function (b) {
+          dataBenevole.push([b.nom, b.nbVendeur, b.nbServeur, b.nbRunner, b.nbTotal]);
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataBenevole), "Par bénévole");
+
+        /* ===== FEUILLE 4 : Anomalies ===== */
+        const dataAnomalies = [["Type", "Détail 1", "Détail 2", "Détail 3"]];
+        barsHorsSeuil.forEach(function (b) {
+          dataAnomalies.push(["Bar hors seuil", b.nom, b.ecartPct.toFixed(1) + " %", ""]);
+        });
+        listeDonneesPerdues.forEach(function (p) {
+          dataAnomalies.push(["Données perdues", "J" + p.jour + " — " + nomBarLocal(p.idBar),
+            "PAD " + p.numeroPad, p.par]);
+        });
+        listeNonCloturees.forEach(function (c2) {
+          dataAnomalies.push(["Créneau non clôturé", "J" + c2.jour + " — " + nomBarLocal(c2.idBar),
+            c2.nbSaisies + " saisie(s)", c2.total.toFixed(2) + " €"]);
+        });
+        listeFutsNonRetournes.forEach(function (ft) {
+          dataAnomalies.push(["Fût non retourné", ft.nomBar,
+            ft.type === TYPE_BAR.BIERE ? "bière" : "cidre", "par " + ft.attribuePar]);
+        });
+        listeClotureSansSaisie.forEach(function (c3) {
+          dataAnomalies.push(["Créneau clôturé sans saisie",
+            "J" + c3.jour + " — " + nomBarLocal(c3.idBar),
+            libCreneau(c3.jour, c3.idCreneau), ""]);
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataAnomalies), "Anomalies");
+
+        /* ===== FEUILLE 5 : Comparatif par jour ===== */
+        const dataComparatif = [
+          ["Jour", "CA (€)", "Pintes", "Pichets", "Gobelets",
+           "Fûts bière", "Fûts cidre", "Fûts cassés",
+           "Volume sorti (L)", "Volume vendu (L)", "Écart (%)",
+           "PAD en panne", "Saisies actives"]
+        ];
+        joursPourComparatif.forEach(function (j) {
+          dataComparatif.push([
+            "J" + j.numero,
+            j.ventes.ca,
+            j.ventes.nbPintes, j.ventes.nbPichets, j.ventes.nbGobelets,
+            j.futs.nbBiereSortis, j.futs.nbCidreSortis, j.futs.nbCasses,
+            parseFloat(j.coherence.volumeSortiL.toFixed(1)),
+            parseFloat(j.coherence.volumeVenduL.toFixed(1)),
+            parseFloat(j.coherence.ecartPct.toFixed(1)),
+            j.ventes.nbPadEnPanne,
+            j.ventes.nbSaisies
+          ]);
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataComparatif), "Comparatif jours");
+
+        /* ===== FEUILLE 6 : Paramètres utilisés ===== */
+        const dataParams = [
+          ["Paramètre", "Valeur"],
+          ["Nombre de jours du festival", params.nombreJours || 1],
+          ["Max fûts par bar", params.maxFutsParBar || 0],
+          ["Prix pinte (€)", params.prixPinte || 0],
+          ["Prix pichet (€)", params.prixPichet || 0],
+          ["Prix gobelet (€)", params.prixGobelet || 0],
+          ["Volume pinte (cl)", params.volumePinte || 0],
+          ["Volume pichet (cl)", params.volumePichet || 0],
+          ["Volume fût bière (L)", params.volumeFutBiere || 0],
+          ["Volume fût cidre (L)", params.volumeFutCidre || 0],
+          ["Stock initial bière (fûts)", params.stockInitialBiere || 0],
+          ["Stock initial cidre (fûts)", params.stockInitialCidre || 0],
+          ["Seuil de tolérance perte (%)", params.seuilTolerancePerte || 0],
+          [],
+          ["Date d'export", fmtDateHeure(Date.now())],
+          ["⚠ Note", "Ces paramètres reflètent l'état au moment de l'export. " +
+            "S'ils ont été modifiés en cours de festival, l'historique n'est pas tracé."]
+        ];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataParams), "Paramètres");
+
+        /* ===== FEUILLE 7 : Renommages de bars ===== */
+        const dataRenom = [["Bar (id)", "Ancien nom", "Nouveau nom", "Date", "Par"]];
+        const renomTri = [];
+        Object.keys(historiqueRenommages || {}).forEach(function (idBar) {
+          const parBar = historiqueRenommages[idBar] || {};
+          Object.keys(parBar).forEach(function (idEntree) {
+            const r = parBar[idEntree];
+            if (!r) return;
+            renomTri.push({
+              idBar: idBar,
+              ancienNom: r.ancienNom || "",
+              nouveauNom: r.nouveauNom || "",
+              date: r.date || 0,
+              par: r.par || ""
+            });
+          });
+        });
+        renomTri.sort(function (a, b) { return (a.date || 0) - (b.date || 0); });
+        renomTri.forEach(function (r) {
+          dataRenom.push([
+            r.idBar, r.ancienNom, r.nouveauNom, fmtDateHeure(r.date), r.par
+          ]);
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataRenom), "Renommages bars");
+
+        /* ===== FEUILLE 8 : Planning détaillé ===== */
+        const dataPlanning = [["Jour", "Bar", "Créneau", "Vendeur", "Serveur", "Runner"]];
+        const cleJours = Object.keys(planningTousJoursPourExport || {});
+        cleJours.sort(function (a, b) {
+          const na = parseInt(a.replace("jour", ""), 10);
+          const nb = parseInt(b.replace("jour", ""), 10);
+          return na - nb;
+        });
+        cleJours.forEach(function (cleJour) {
+          const nj = parseInt(cleJour.replace("jour", ""), 10);
+          if (isNaN(nj)) return;
+          const parBar = planningTousJoursPourExport[cleJour] || {};
+          Object.keys(parBar).forEach(function (idBar) {
+            const parCr = parBar[idBar] || {};
+            Object.keys(parCr).forEach(function (idCr) {
+              const sh = parCr[idCr] || {};
+              dataPlanning.push([
+                "J" + nj,
+                nomBarLocal(idBar),
+                libCreneau(nj, idCr),
+                sh.vendeur || "",
+                sh.serveur || "",
+                sh.runner || ""
+              ]);
+            });
+          });
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataPlanning), "Planning détaillé");
+
+        /* ===== FEUILLE 9 : Bars archivés ===== */
+        const dataArchives = [
+          ["Nom", "Type", "Date d'archivage", "Archivé par", "CA cumulé (€)", "Fûts sortis"]
+        ];
+        (bars || []).filter(function (b) { return !!b.archive; })
+          .sort(function (a, b) { return (b.archiveLe || 0) - (a.archiveLe || 0); })
+          .forEach(function (b) {
+            const ventesBar = agregerVentes(casesVentesTousJours, null, b.id);
+            const futsBar = agregerFuts(historique, b.id, null);
+            dataArchives.push([
+              b.nom,
+              b.type === TYPE_BAR.BIERE ? "bière" : "cidre",
+              fmtDateHeure(b.archiveLe),
+              b.archivePar || "",
+              ventesBar.ca,
+              futsBar.nbBiereSortis + futsBar.nbCidreSortis
+            ]);
+          });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataArchives), "Bars archivés");
+
+        /* ===== FEUILLE 10 : Fûts cassés ===== */
+        const dataCasses = [
+          ["Date/heure", "Jour", "Bar", "Type fût", "Commentaire", "Par"]
+        ];
+        const cassesTri = (historique || []).filter(function (m) {
+          return m.annule !== true && m.mouvement === "retour" && m.motifRetour === RETOUR.CASSE;
+        }).slice().sort(function (a, b) { return (a.date || 0) - (b.date || 0); });
+        cassesTri.forEach(function (m) {
+          dataCasses.push([
+            fmtDateHeure(m.date),
+            m.jour ? "J" + m.jour : "?",
+            m.nomBar || "",
+            m.typeFut || "",
+            m.commentaire || "(non renseigné)",
+            m.par || ""
+          ]);
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataCasses), "Fûts cassés");
+
+        /* ===== FEUILLE 11 : Saisies annulées ===== */
+        const dataAnnul = [
+          ["Date saisie", "Jour", "Bar", "Créneau", "Montant (€)",
+           "Pintes", "Pichets", "Gobelets", "Saisi par", "Annulé par"]
+        ];
+        /* On parcourt toutes les saisies annulées avec leur contexte. */
+        Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
+          const nj = numeroDepuisCleJour(cleJour);
+          if (nj === null) return;
+          const parBar = casesVentesTousJours[cleJour] || {};
+          Object.keys(parBar).forEach(function (idBar) {
+            const parCr = parBar[idBar] || {};
+            Object.keys(parCr).forEach(function (idCr) {
+              const saisies = (parCr[idCr] || {}).saisies || {};
+              Object.keys(saisies).forEach(function (idS) {
+                const s = saisies[idS];
+                if (!s || s.annulee !== true) return;
+                dataAnnul.push([
+                  fmtDateHeure(s.date),
+                  "J" + nj,
+                  nomBarLocal(idBar),
+                  libCreneau(nj, idCr),
+                  s.montant || 0,
+                  s.nbPintes || 0,
+                  s.nbPichets || 0,
+                  s.nbGobelets || 0,
+                  s.par || "",
+                  s.annuleePar || ""
+                ]);
+              });
+            });
+          });
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dataAnnul), "Saisies annulées");
+
+        /* Nom de fichier avec la date du jour. */
+        const d = new Date();
+        const nomFichier = "bars-nomades-recap-" +
+          d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) +
+          "-" + pad2(d.getHours()) + pad2(d.getMinutes()) + ".xlsx";
+
+        XLSX.writeFile(wb, nomFichier);
+      }).catch(function (e) {
+        alert("Erreur lors de la génération du récapitulatif : " + e.message);
+      });
     }
 
     /* ----- EXPORT JOURNAL BRUT -----
@@ -4142,7 +4729,7 @@
       /* Bascule de granularité — affichée uniquement pour les onglets
          vue/bar (les onglets benevole/anomalies sont toujours sur tout
          le festival, décision validée). */
-      (onglet === "vue" || onglet === "bar")
+      (onglet === "vue" || onglet === "bar" || onglet === "benevole")
         ? React.createElement(
             "div",
             { className: "px-3 py-2 flex gap-1 border-b border-neutral-800" },
@@ -5587,7 +6174,7 @@
        3. Le fût est créé sur le bar choisi, un mouvement "reattribution"
           est tracé dans l'historique, et le fût est retiré du pot.
   ========================================================================= */
-  function EcranFutsEnAttente({ prenom, role, bars, onFermer }) {
+  function EcranFutsEnAttente({ prenom, role, bars, jourActuel, onFermer }) {
     const [futsEnAttente, setFutsEnAttente] = useState({});
     /* Fût en cours de réattribution : on stocke { idAttente, fut } pour
        déclencher la fenêtre de choix de bar. */
@@ -5629,7 +6216,7 @@
     function lancerReattribution(idAttente, fut, bar) {
       if (enCours) return;
       setEnCours(true);
-      ActionsFuts.reattribuerDepuisPot(idAttente, fut, bar, prenom)
+      ActionsFuts.reattribuerDepuisPot(idAttente, fut, bar, prenom, jourActuel)
         .then(function () {
           setEnCours(false);
           setFutACharger(null);
@@ -5795,7 +6382,7 @@
      Cohérent avec la décision A : on n'efface pas, on marque "annule"
      et on ajoute un mouvement d'annulation visible dans l'historique.
   ========================================================================= */
-  function EcranHistoriqueFuts({ prenom, role, historique, onFermer }) {
+  function EcranHistoriqueFuts({ prenom, role, historique, jourActuel, onFermer }) {
     /* Fenêtre temporelle des actions annulables : 12 heures. */
     const FENETRE_MS = 12 * 60 * 60 * 1000;
     const maintenant = Date.now();
@@ -5888,10 +6475,10 @@
             throw new Error("Le fût attribué n'est plus sur le bar (probablement déjà retourné). " +
               "Annulez plutôt le retour s'il y en a un.");
           }
-          return ActionsFuts.annulerAttribution(m.id, m, idFutACibler, prenom);
+          return ActionsFuts.annulerAttribution(m.id, m, idFutACibler, prenom, jourActuel);
         });
       } else if (m.mouvement === "retour") {
-        action = ActionsFuts.annulerRetour(m.id, m, prenom);
+        action = ActionsFuts.annulerRetour(m.id, m, prenom, jourActuel);
       } else {
         setEnCours(false);
         return;
@@ -6334,7 +6921,7 @@
       }
       /* Toast d'envoi : signale l'état (envoi/succès/erreur/hors ligne). */
       Toasts.executer(
-        ActionsFuts.attribuer(bar, bar.type, params.maxFutsParBar, prenom),
+        ActionsFuts.attribuer(bar, bar.type, params.maxFutsParBar, prenom, jourActuel),
         "Fût attribué"
       ).catch(function () { /* déjà affiché par le toast */ });
     }
@@ -6345,7 +6932,7 @@
          de l'avancement (utile en cas d'envoi en file d'attente). */
       setRetourEnCours(null);
       Toasts.executer(
-        ActionsFuts.retourner(r.bar, r.idFut, r.fut, motif, commentaire, prenom),
+        ActionsFuts.retourner(r.bar, r.idFut, r.fut, motif, commentaire, prenom, jourActuel),
         "Retour enregistré"
       ).catch(function () { /* déjà affiché par le toast */ });
     }
@@ -6702,7 +7289,7 @@
                       "Utilisez plutôt l'écran Historique.");
                     return;
                   }
-                  ActionsFuts.annulerAttribution(idMvtTrouve, mvtTrouve, idFut, prenom)
+                  ActionsFuts.annulerAttribution(idMvtTrouve, mvtTrouve, idFut, prenom, jourActuel)
                     .catch(function (e) { alert("Erreur : " + e.message); });
                 }
               });
@@ -6793,6 +7380,7 @@
             bars: bars,
             historique: historique,
             casesVentesTousJours: casesVentesTousJours,
+            historiqueRenommages: historiqueRenommages,
             params: params,
             onFermer: function () { setEcranDashboard(false); }
           })
@@ -6845,6 +7433,7 @@
             prenom: prenom,
             role: role,
             bars: barsActifs,
+            jourActuel: jourActuel,
             onFermer: function () { setEcranFutsEnAttente(false); }
           })
         : null,
@@ -6855,6 +7444,7 @@
             prenom: prenom,
             role: role,
             historique: historique,
+            jourActuel: jourActuel,
             onFermer: function () { setEcranHistoriqueFuts(false); }
           })
         : null,
