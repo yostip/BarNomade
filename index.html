@@ -125,6 +125,30 @@
     SUPERADMIN: "superadmin"
   };
 
+  /* Masquage des noms d'admin/superadmin côté secrétaire/visiteur.
+     Confidentialité UI : un secrétaire n'a pas besoin de savoir QUEL admin
+     a fait l'action, juste que c'est un admin. Le nom reste lisible en
+     base (F12 + console accessible à tous les utilisateurs connectés),
+     mais l'interface ne le révèle pas.
+     - "nom" : prénom de l'auteur de l'action (peut être vide)
+     - "utilisateurs" : objet { prenom: { role: "..." } } depuis Firebase
+     - "monRole" : rôle de l'utilisateur connecté
+     Retourne :
+     - le nom inchangé si monRole >= admin (admins voient tout)
+     - le nom inchangé si l'auteur n'est pas admin/superadmin
+     - "Admin" / "Super admin" sinon (masquage). */
+  function masquerNom(nom, utilisateurs, monRole) {
+    if (!nom) return nom;
+    /* Les admins et super admins voient les noms en clair. */
+    if (monRole === ROLES.ADMIN || monRole === ROLES.SUPERADMIN) return nom;
+    /* Sinon (secrétaire/visiteur), on regarde le rôle de l'auteur. */
+    const u = utilisateurs && utilisateurs[nom];
+    if (!u) return nom;
+    if (u.role === ROLES.SUPERADMIN) return "Super admin";
+    if (u.role === ROLES.ADMIN) return "Admin";
+    return nom;
+  }
+
   const TYPE_BAR = {
     BIERE: "biere",
     CIDRE: "cidre"
@@ -2089,7 +2113,7 @@
   /* =========================================================================
      SECTION 13 — CARTE D'UN BAR
   ========================================================================= */
-  function CarteBar({ bar, role, maxFuts, prenom, onAttribuer, onDemanderRetour, onSupprimer, onArchiver, onAnnulerAttribution, onRenommer, historiqueRenommagesBar, barADesVentes }) {
+  function CarteBar({ bar, role, maxFuts, prenom, utilisateurs, onAttribuer, onDemanderRetour, onSupprimer, onArchiver, onAnnulerAttribution, onRenommer, historiqueRenommagesBar, barADesVentes }) {
     const futs = bar.futs || {};
     const listeFuts = Object.keys(futs).map(function (idFut) {
       return { id: idFut, donnees: futs[idFut] };
@@ -2591,7 +2615,7 @@
      S'ouvre quand on clique une case du tableau. Montre toutes les saisies
      de la case, et propose : ajouter une saisie, clôturer/rouvrir,
      annuler une saisie. */
-  function FenetreDetailCase({ bar, creneau, uneCase, role, jourActuel, prenom, onDemanderSaisie, onFermer }) {
+  function FenetreDetailCase({ bar, creneau, uneCase, role, jourActuel, prenom, utilisateurs, onDemanderSaisie, onFermer }) {
     const info = calculerTotalCase(uneCase);
     const peutSaisir = Droits.peutSaisirVentes(role);
     /* Réouverture et annulation : admin et plus (décision gelée). */
@@ -2689,10 +2713,10 @@
                         "« " + s.commentaire + " »")
                     : null,
                   React.createElement("div", { className: "text-xs text-neutral-600 mt-0.5" },
-                    "Saisi par " + (s.par || "?")),
+                    "Saisi par " + masquerNom(s.par || "?", utilisateurs, role)),
                   estAnnulee
                     ? React.createElement("div", { className: "text-xs text-red-400 mt-0.5" },
-                        "Annulée par " + (s.annuleePar || "?"))
+                        "Annulée par " + masquerNom(s.annuleePar || "?", utilisateurs, role))
                     : null
                 );
               })
@@ -2755,7 +2779,7 @@
     );
   }
 
-  function EcranVentes({ prenom, role, jourActuel, bars, creneaux, casesVentes, onFermer }) {
+  function EcranVentes({ prenom, role, jourActuel, bars, creneaux, casesVentes, utilisateurs, onFermer }) {
     /* Quelle case est ouverte en détail, et quelle saisie est en cours. */
     const [detailCase, setDetailCase] = useState(null);
     const [saisieEnCours, setSaisieEnCours] = useState(null);
@@ -2900,6 +2924,7 @@
             role: role,
             jourActuel: jourActuel,
             prenom: prenom,
+            utilisateurs: utilisateurs,
             onDemanderSaisie: function (bar, creneau) {
               setSaisieEnCours({ bar: bar, creneau: creneau });
             },
@@ -5433,7 +5458,7 @@
      Stockage des positions : sessions/festival/positionsBars/<idBar>
                               avec { x, y } en pourcentage (0-100).
   ========================================================================= */
-  function EcranPlan({ prenom, role, bars, onFermer }) {
+  function EcranPlan({ prenom, role, bars, utilisateurs, onFermer }) {
     const [positions, setPositions] = useState({});
     /* État du mode édition (admin+ uniquement). */
     const [modeEdition, setModeEdition] = useState(false);
@@ -5916,7 +5941,7 @@
                                 React.createElement("p", { className: "text-white" },
                                   f.type === TYPE_BAR.BIERE ? "Bière" : "Cidre"),
                                 React.createElement("p", { className: "text-xs text-neutral-500" },
-                                  "Par " + (f.attribuePar || "?"))
+                                  "Par " + masquerNom(f.attribuePar || "?", utilisateurs, role))
                               ),
                               React.createElement("p", { className: "text-xs text-neutral-400" }, dh)
                             );
@@ -6312,7 +6337,7 @@
        3. Le fût est créé sur le bar choisi, un mouvement "reattribution"
           est tracé dans l'historique, et le fût est retiré du pot.
   ========================================================================= */
-  function EcranFutsEnAttente({ prenom, role, bars, jourActuel, onFermer }) {
+  function EcranFutsEnAttente({ prenom, role, bars, jourActuel, utilisateurs, onFermer }) {
     const [futsEnAttente, setFutsEnAttente] = useState({});
     /* Fût en cours de réattribution : on stocke { idAttente, fut } pour
        déclencher la fenêtre de choix de bar. */
@@ -6431,7 +6456,7 @@
                       React.createElement("p", { className: "text-xs text-neutral-300" },
                         fmtDateHeure(f.dateRetour)),
                       React.createElement("p", { className: "text-xs text-neutral-500" },
-                        "par " + (f.retourPar || "?"))
+                        "par " + masquerNom(f.retourPar || "?", utilisateurs, role))
                     )
                   ),
                   React.createElement(
@@ -6827,6 +6852,10 @@
     const [params, setParams] = useState(PARAMS_DEFAUT);
     const [jourActuel, setJourActuel] = useState(1);
     const [creneaux, setCreneaux] = useState({});
+    /* Liste des utilisateurs avec leurs rôles. Sert au masquage des noms
+       d'admin/superadmin côté secrétaire (cf. masquerNom). Chargée pour
+       tous les rôles (lecture autorisée à tous). */
+    const [utilisateurs, setUtilisateurs] = useState({});
     const [fenetreAjoutBar, setFenetreAjoutBar] = useState(false);
     const [retourEnCours, setRetourEnCours] = useState(null);
     const [fenetreCreneaux, setFenetreCreneaux] = useState(false);
@@ -6893,12 +6922,15 @@
     const peutVoirDashboard = Droits.peutVoirDashboard(role);
     const peutGererUtilisateurs = Droits.peutGererUtilisateurs(role);
 
-    /* Abonnement temps réel : bars, historique, params, jour actif. */
+    /* Abonnement temps réel : bars, historique, params, jour actif, users. */
     useEffect(function () {
       const refBars = Base.bars();
       const refHisto = Base.historiqueFuts();
       const refParams = Base.params();
       const refJour = Base.jourActuel();
+      /* users/ : utilisé par masquerNom pour cacher les prénoms d'admin
+         au secrétaire/visiteur. Lecture autorisée à tous les rôles. */
+      const refUsers = db.ref("sessions/" + ID_SESSION + "/users");
 
       function surBars(s) {
         const v = s.val() || {};
@@ -6922,17 +6954,22 @@
         const v = s.val();
         if (v) setJourActuel(v);
       }
+      function surUsers(s) {
+        setUtilisateurs(s.val() || {});
+      }
 
       refBars.on("value", surBars);
       refHisto.on("value", surHisto);
       refParams.on("value", surParams);
       refJour.on("value", surJour);
+      refUsers.on("value", surUsers);
 
       return function () {
         refBars.off("value", surBars);
         refHisto.off("value", surHisto);
         refParams.off("value", surParams);
         refJour.off("value", surJour);
+        refUsers.off("value", surUsers);
       };
     }, []);
 
@@ -7404,6 +7441,7 @@
                 role: role,
                 maxFuts: params.maxFutsParBar,
                 prenom: prenom,
+                utilisateurs: utilisateurs,
                 historiqueRenommagesBar: historiqueRenommages[bar.id] || null,
                 barADesVentes: barADesVentes,
                 onAttribuer: attribuerFut,
@@ -7501,6 +7539,7 @@
             bars: barsActifs,
             creneaux: creneaux,
             casesVentes: casesVentes,
+            utilisateurs: utilisateurs,
             onFermer: function () { setEcranVentes(false); }
           })
         : null,
@@ -7571,6 +7610,7 @@
             prenom: prenom,
             role: role,
             bars: barsActifs,
+            utilisateurs: utilisateurs,
             onFermer: function () { setEcranPlan(false); }
           })
         : null,
@@ -7590,6 +7630,7 @@
             role: role,
             bars: barsActifs,
             jourActuel: jourActuel,
+            utilisateurs: utilisateurs,
             onFermer: function () { setEcranFutsEnAttente(false); }
           })
         : null,
