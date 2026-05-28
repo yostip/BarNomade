@@ -2079,12 +2079,107 @@
   /* =========================================================================
      SECTION 13 — CARTE D'UN BAR
   ========================================================================= */
+  /* Icône fleur/cône de houblon (bière). Écailles superposées en forme
+     de pétales pour bien évoquer le cône de houblon. Teinte verte
+     naturelle avec contour plus foncé. */
+  function IconeHoublon(taille) {
+    const t = taille || 16;
+    const vert = "#65a30d", vertF = "#3f6212", tige = "#15803d";
+    return React.createElement(
+      "svg",
+      { width: t, height: t, viewBox: "0 0 24 24", fill: "none",
+        style: { display: "inline-block", verticalAlign: "middle", flexShrink: 0 } },
+      /* Tige en haut. */
+      React.createElement("path", {
+        d: "M12 4V1.8", stroke: tige, strokeWidth: "1.4", strokeLinecap: "round"
+      }),
+      /* Écailles, de haut en bas, qui se chevauchent (effet pomme de pin).
+         Chaque écaille est une forme arrondie ; les rangées descendent et
+         se rétrécissent vers la pointe. */
+      /* Rangée 1 (sommet) : une écaille centrale. */
+      React.createElement("path", {
+        d: "M12 3.5c2 0 3.3 1.4 3.3 3.1 0 1.2-1.5 2.1-3.3 2.1S8.7 7.8 8.7 6.6C8.7 4.9 10 3.5 12 3.5z",
+        fill: vert, stroke: vertF, strokeWidth: "0.9", strokeLinejoin: "round"
+      }),
+      /* Rangée 2 : deux écailles latérales. */
+      React.createElement("path", {
+        d: "M9 6.3c1.8 0 3 1.3 3 2.9 0 1.1-1.3 1.9-3 1.9-1.6 0-2.8-.8-2.8-1.9 0-1.6 1.1-2.9 2.8-2.9z",
+        fill: vert, stroke: vertF, strokeWidth: "0.9", strokeLinejoin: "round"
+      }),
+      React.createElement("path", {
+        d: "M15 6.3c1.7 0 2.8 1.3 2.8 2.9 0 1.1-1.2 1.9-2.8 1.9-1.7 0-3-.8-3-1.9 0-1.6 1.2-2.9 3-2.9z",
+        fill: vert, stroke: vertF, strokeWidth: "0.9", strokeLinejoin: "round"
+      }),
+      /* Rangée 3 : écaille centrale plus basse. */
+      React.createElement("path", {
+        d: "M12 9.2c1.8 0 3 1.3 3 2.8 0 1.1-1.3 1.9-3 1.9s-3-.8-3-1.9c0-1.5 1.2-2.8 3-2.8z",
+        fill: vert, stroke: vertF, strokeWidth: "0.9", strokeLinejoin: "round"
+      }),
+      /* Rangée 4 : deux écailles resserrées. */
+      React.createElement("path", {
+        d: "M10 12.3c1.4 0 2.4 1.1 2.4 2.4 0 .9-1 1.5-2.4 1.5-1.3 0-2.3-.6-2.3-1.5 0-1.3 1-2.4 2.3-2.4z",
+        fill: vert, stroke: vertF, strokeWidth: "0.9", strokeLinejoin: "round"
+      }),
+      React.createElement("path", {
+        d: "M14 12.3c1.3 0 2.3 1.1 2.3 2.4 0 .9-1 1.5-2.3 1.5-1.4 0-2.4-.6-2.4-1.5 0-1.3 1-2.4 2.4-2.4z",
+        fill: vert, stroke: vertF, strokeWidth: "0.9", strokeLinejoin: "round"
+      }),
+      /* Pointe (écaille terminale). */
+      React.createElement("path", {
+        d: "M12 15c1.3 0 2.2 1 2.2 2.2 0 1.4-1.1 3.2-2.2 4.3-1.1-1.1-2.2-2.9-2.2-4.3C9.8 16 10.7 15 12 15z",
+        fill: vert, stroke: vertF, strokeWidth: "0.9", strokeLinejoin: "round"
+      })
+    );
+  }
+
+  /* Icône pomme (cidre), en rouge pour se distinguer nettement du houblon
+     vert. La forme suffit à l'associer au cidre ; le code couleur du
+     contexte (bouton/titre verts) garde la cohérence de navigation. */
+  function IconePomme(taille) {
+    const t = taille || 16;
+    return React.createElement(
+      "svg",
+      { width: t, height: t, viewBox: "0 0 24 24", fill: "none",
+        style: { display: "inline-block", verticalAlign: "middle", flexShrink: 0 } },
+      /* Corps de la pomme (deux lobes). */
+      React.createElement("path", {
+        d: "M12 7.5c-1.1-1.6-3.1-2.2-4.8-1.2C5 7.6 4.6 10.6 5.7 13.6c1 2.9 2.9 5.4 4.1 5.4.9 0 1.4-.5 2.2-.5s1.3.5 2.2.5c1.2 0 3.1-2.5 4.1-5.4 1.1-3 .7-6-1.5-7.3-1.7-1-3.7-.4-4.8 1.2z",
+        fill: "#dc2626", stroke: "#991b1b", strokeWidth: "1.2", strokeLinejoin: "round"
+      }),
+      /* Tige. */
+      React.createElement("path", {
+        d: "M12 7.5V4.2", stroke: "#7c4a21", strokeWidth: "1.4", strokeLinecap: "round"
+      }),
+      /* Feuille verte. */
+      React.createElement("path", {
+        d: "M12.3 4.6c1-1 2.6-1 3.4-.2-.2 1.2-1.4 2-2.6 1.8z",
+        fill: "#15803d"
+      })
+    );
+  }
+
+  /* Petite icône selon le type de fût. */
+  function iconeType(type, taille) {
+    return type === TYPE_BAR.BIERE ? IconeHoublon(taille) : IconePomme(taille);
+  }
+
   function CarteBar({ bar, role, maxFuts, prenom, utilisateurs, onAttribuer, onDemanderRetour, onSupprimer, onArchiver, onAnnulerAttribution, onRenommer, historiqueRenommagesBar, barADesVentes }) {
     const futs = bar.futs || {};
     const listeFuts = Object.keys(futs).map(function (idFut) {
       return { id: idFut, donnees: futs[idFut] };
     });
     const nbFuts = listeFuts.length;
+    /* Séparation par type pour l'affichage en 2 colonnes (bière | cidre).
+       On trie chaque colonne du plus ancien au plus récent. */
+    function triParDate(a, b) {
+      return (a.donnees.dateAttribution || 0) - (b.donnees.dateAttribution || 0);
+    }
+    const futsBiere = listeFuts.filter(function (f) {
+      return f.donnees.type === TYPE_BAR.BIERE;
+    }).sort(triParDate);
+    const futsCidre = listeFuts.filter(function (f) {
+      return f.donnees.type === TYPE_BAR.CIDRE;
+    }).sort(triParDate);
     const peutGererFuts = Droits.peutGererFuts(role);
     const peutGererBars = Droits.peutGererBars(role);
     /* L'annulation d'attribution est réservée admin et plus, conformément
@@ -2162,57 +2257,69 @@
         return React.createElement("p", { className: "text-xs text-neutral-500 italic mb-2 -mt-1" },
           "Anciennement : " + anciensNoms.join(", "));
       })(),
-      listeFuts.length === 0
-        ? React.createElement("p", { className: "text-neutral-500 text-sm" }, "Aucun fût en cours")
-        : React.createElement(
+      /* Affichage des fûts en 2 colonnes : Bière | Cidre, chacune avec
+         son icône et son décompte. Plus lisible qu'une cascade unique. */
+      (function () {
+        /* Rendu d'un fût (compact, adapté à une colonne étroite). */
+        function rendreFut(f) {
+          const duree = formatDuree(f.donnees.dateAttribution);
+          const couleur = couleurDuree(f.donnees.dateAttribution);
+          return React.createElement(
             "div",
-            { className: "space-y-1" },
-            listeFuts.map(function (f) {
-              const duree = formatDuree(f.donnees.dateAttribution);
-              const couleur = couleurDuree(f.donnees.dateAttribution);
-              return React.createElement(
-                "div",
-                { key: f.id, className: "flex items-center justify-between bg-black/40 rounded px-2 py-1.5" },
-                React.createElement(
-                  "div",
-                  { className: "flex-1 min-w-0" },
-                  React.createElement("span", { className: "text-sm text-neutral-200" },
-                    "Fût " + (f.donnees.type === TYPE_BAR.BIERE ? "bière" : "cidre")),
-                  duree
-                    ? React.createElement("span", { className: "text-xs ml-2 " + couleur },
-                        "· depuis " + duree)
-                    : null
-                ),
-                React.createElement(
-                  "div",
-                  { className: "flex gap-1" },
-                  /* Bouton "Annuler attribution" (admin et plus). Permet de
-                     corriger une attribution erronée du secrétaire. */
-                  peutAnnulerAttribution
-                    ? React.createElement(
-                        "button",
-                        {
-                          onClick: function () { onAnnulerAttribution(bar, f.id, f.donnees); },
-                          className: "text-xs px-2 py-1 bg-red-900 hover:bg-red-800 text-white rounded",
-                          title: "Annuler cette attribution (correction d'erreur)"
-                        },
-                        "↶"
-                      )
-                    : null,
-                  peutGererFuts
-                    ? React.createElement(
-                        "button",
-                        {
-                          onClick: function () { onDemanderRetour(bar, f.id, f.donnees); },
-                          className: "text-xs px-2 py-1 bg-neutral-700 hover:bg-neutral-600 text-white rounded"
-                        },
-                        "Retour"
-                      )
-                    : null
-                )
-              );
-            })
-          ),
+            { key: f.id, className: "bg-black/40 rounded px-2 py-1.5" },
+            React.createElement("div", { className: "text-xs " + couleur },
+              duree ? "depuis " + duree : "à l'instant"),
+            React.createElement(
+              "div",
+              { className: "flex gap-1 mt-1" },
+              peutAnnulerAttribution
+                ? React.createElement(
+                    "button",
+                    {
+                      onClick: function () { onAnnulerAttribution(bar, f.id, f.donnees); },
+                      className: "px-2 py-1 bg-red-900 hover:bg-red-800 text-white rounded text-xs",
+                      title: "Annuler cette attribution (correction d'erreur)"
+                    },
+                    "↶"
+                  )
+                : null,
+              peutGererFuts
+                ? React.createElement(
+                    "button",
+                    {
+                      onClick: function () { onDemanderRetour(bar, f.id, f.donnees); },
+                      className: "flex-1 px-2 py-1 bg-neutral-700 hover:bg-neutral-600 text-white rounded text-xs"
+                    },
+                    "Retour"
+                  )
+                : null
+            )
+          );
+        }
+        /* Une colonne (titre + icône + liste ou message vide). */
+        function colonne(titre, icone, couleurTitre, liste) {
+          return React.createElement(
+            "div",
+            { className: "flex-1 min-w-0" },
+            React.createElement(
+              "div",
+              { className: "flex items-center gap-1 mb-1" },
+              icone,
+              React.createElement("span", { className: "text-xs font-semibold " + couleurTitre },
+                titre + " (" + liste.length + ")")
+            ),
+            liste.length === 0
+              ? React.createElement("p", { className: "text-xs text-neutral-600 italic" }, "—")
+              : React.createElement("div", { className: "space-y-1" }, liste.map(rendreFut))
+          );
+        }
+        return React.createElement(
+          "div",
+          { className: "flex gap-2" },
+          colonne("Bière", IconeHoublon(15), "text-amber-300", futsBiere),
+          colonne("Cidre", IconePomme(15), "text-green-300", futsCidre)
+        );
+      })(),
       React.createElement(
         "div",
         { className: "flex gap-2 mt-3" },
@@ -2222,13 +2329,14 @@
               {
                 onClick: function () { onAttribuer(bar, TYPE_BAR.BIERE); },
                 disabled: barComplet,
-                className: "flex-1 py-2 rounded-lg text-sm font-medium " +
+                className: "flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1 " +
                   (barComplet
                     ? "bg-neutral-800 text-neutral-600"
                     : "bg-amber-700 hover:bg-amber-600 text-white"),
                 title: "Attribuer un fût de bière"
               },
-              barComplet ? "Complet" : "+ Bière"
+              barComplet ? "Complet" : IconeHoublon(16),
+              barComplet ? null : React.createElement("span", null, "+ Bière")
             )
           : null,
         peutGererFuts
@@ -2237,13 +2345,14 @@
               {
                 onClick: function () { onAttribuer(bar, TYPE_BAR.CIDRE); },
                 disabled: barComplet,
-                className: "flex-1 py-2 rounded-lg text-sm font-medium " +
+                className: "flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1 " +
                   (barComplet
                     ? "bg-neutral-800 text-neutral-600"
                     : "bg-green-700 hover:bg-green-600 text-white"),
                 title: "Attribuer un fût de cidre"
               },
-              barComplet ? "Complet" : "+ Cidre"
+              barComplet ? "Complet" : IconePomme(16),
+              barComplet ? null : React.createElement("span", null, "+ Cidre")
             )
           : null,
         peutGererBars
@@ -3760,6 +3869,9 @@
             ventesGlobal.nbSaisies + " saisie(s)", "bg-emerald-950/40 border border-emerald-800"),
           carte("Pintes", ventesGlobal.nbPintes,
             ventesGlobal.nbPintesBiere + " bière · " + ventesGlobal.nbPintesCidre + " cidre"),
+          carte("Pichets", ventesGlobal.nbPichets,
+            ventesGlobal.nbPichetsBiere + " bière · " + ventesGlobal.nbPichetsCidre + " cidre"),
+          carte("Gobelets", ventesGlobal.nbGobelets, "tous types confondus"),
           carte("PAD en panne", ventesGlobal.nbPadEnPanne,
             ventesGlobal.nbDonneesPerdues + " donnée(s) perdue(s)",
             ventesGlobal.nbPadEnPanne > 0 ? "bg-amber-950/40 border border-amber-800" : null),
