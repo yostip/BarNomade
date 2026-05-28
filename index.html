@@ -2163,6 +2163,30 @@
     return type === TYPE_BAR.BIERE ? IconeHoublon(taille) : IconePomme(taille);
   }
 
+  /* Icône de fût (tonneau) générique, colorée selon le type :
+     - bière  → ambre/orange (cohérent avec le titre de colonne "Bière")
+     - cidre  → vert (cohérent avec le titre de colonne "Cidre")
+     La couleur est passée en paramètre pour rester flexible. */
+  function IconeFut(couleur, taille) {
+    const t = taille || 16;
+    const contour = "rgba(0,0,0,0.4)";
+    return React.createElement(
+      "svg",
+      { width: t, height: t, viewBox: "0 0 24 24", fill: "none",
+        style: { display: "inline-block", verticalAlign: "middle", flexShrink: 0 } },
+      /* Corps du tonneau, bombé au milieu, resserré en haut et en bas. */
+      React.createElement("path", {
+        d: "M8.5 3 C7.3 3 6.5 4.2 6.3 6.5 C6.1 9 6.1 15 6.3 17.5 C6.5 19.8 7.3 21 8.5 21 L15.5 21 C16.7 21 17.5 19.8 17.7 17.5 C17.9 15 17.9 9 17.7 6.5 C17.5 4.2 16.7 3 15.5 3 Z",
+        fill: couleur, stroke: contour, strokeWidth: "1", strokeLinejoin: "round"
+      }),
+      /* Deux cerclages horizontaux. */
+      React.createElement("path", {
+        d: "M6.2 8.5 L17.8 8.5 M6.2 15.5 L17.8 15.5",
+        stroke: contour, strokeWidth: "1.1", strokeLinecap: "round"
+      })
+    );
+  }
+
   function CarteBar({ bar, role, maxFuts, prenom, utilisateurs, onAttribuer, onDemanderRetour, onSupprimer, onArchiver, onAnnulerAttribution, onRenommer, historiqueRenommagesBar, barADesVentes }) {
     const futs = bar.futs || {};
     const listeFuts = Object.keys(futs).map(function (idFut) {
@@ -2260,40 +2284,43 @@
       /* Affichage des fûts en 2 colonnes : Bière | Cidre, chacune avec
          son icône et son décompte. Plus lisible qu'une cascade unique. */
       (function () {
-        /* Rendu d'un fût (compact, adapté à une colonne étroite). */
+        /* Rendu d'un fût (option C : tout sur une seule ligne) :
+           [icône fût colorée] [durée] [bouton Retour] [↶ annulation admin]
+           La couleur de l'icône fût reprend celle du titre de colonne :
+           ambre pour la bière, vert pour le cidre. */
         function rendreFut(f) {
           const duree = formatDuree(f.donnees.dateAttribution);
-          const couleur = couleurDuree(f.donnees.dateAttribution);
+          const couleurTexte = couleurDuree(f.donnees.dateAttribution);
+          const estBiere = f.donnees.type === TYPE_BAR.BIERE;
+          const couleurFut = estBiere ? "#fcd34d" : "#86efac";  /* amber-300 / green-300 */
           return React.createElement(
             "div",
-            { key: f.id, className: "bg-black/40 rounded px-2 py-1.5" },
-            React.createElement("div", { className: "text-xs " + couleur },
-              duree ? "depuis " + duree : "à l'instant"),
-            React.createElement(
-              "div",
-              { className: "flex gap-1 mt-1" },
-              peutAnnulerAttribution
-                ? React.createElement(
-                    "button",
-                    {
-                      onClick: function () { onAnnulerAttribution(bar, f.id, f.donnees); },
-                      className: "px-2 py-1 bg-red-900 hover:bg-red-800 text-white rounded text-xs",
-                      title: "Annuler cette attribution (correction d'erreur)"
-                    },
-                    "↶"
-                  )
-                : null,
-              peutGererFuts
-                ? React.createElement(
-                    "button",
-                    {
-                      onClick: function () { onDemanderRetour(bar, f.id, f.donnees); },
-                      className: "flex-1 px-2 py-1 bg-neutral-700 hover:bg-neutral-600 text-white rounded text-xs"
-                    },
-                    "Retour"
-                  )
-                : null
-            )
+            { key: f.id, className: "flex items-center gap-1.5 bg-black/40 rounded px-2 py-1.5" },
+            IconeFut(couleurFut, 16),
+            React.createElement("span",
+              { className: "text-xs flex-1 min-w-0 truncate " + couleurTexte },
+              duree || "à l'instant"),
+            peutGererFuts
+              ? React.createElement(
+                  "button",
+                  {
+                    onClick: function () { onDemanderRetour(bar, f.id, f.donnees); },
+                    className: "flex-shrink-0 text-xs text-white bg-neutral-700 hover:bg-neutral-600 rounded px-2.5 py-1"
+                  },
+                  "Retour"
+                )
+              : null,
+            peutAnnulerAttribution
+              ? React.createElement(
+                  "button",
+                  {
+                    onClick: function () { onAnnulerAttribution(bar, f.id, f.donnees); },
+                    className: "flex-shrink-0 text-red-500 hover:text-red-400 px-1 text-sm leading-none",
+                    title: "Annuler cette attribution (correction d'erreur)"
+                  },
+                  "↶"
+                )
+              : null
           );
         }
         /* Une colonne (titre + icône + liste ou message vide). */
