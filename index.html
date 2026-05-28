@@ -560,10 +560,13 @@
      SECTION 6 — ACTIONS SUR LES BARS
   ========================================================================= */
   const ActionsBars = {
-    creer: function (nom, type) {
+    creer: function (nom) {
       const nomPropre = (nom || "").trim();
       if (!nomPropre) return Promise.reject(new Error("Nom de bar vide"));
-      return Base.bars().push({ nom: nomPropre, type: type });
+      /* Bars mixtes : tous les bars peuvent recevoir des fûts bière ET
+         cidre. Le champ "type" disparaît du modèle (chaque fût stocke
+         son propre type dans bar.futs.$idFut.type). */
+      return Base.bars().push({ nom: nomPropre });
     },
     renommer: function (idBar, ancienNom, nouveauNom, prenomUtilisateur) {
       const nomPropre = (nouveauNom || "").trim();
@@ -712,15 +715,13 @@
     },
 
     /* Réattribue un fût depuis le pot d'attente vers un bar.
-       Le bar doit être du MÊME TYPE que le fût (bière → bar bière,
-       cidre → bar cidre). Génère un mouvement "reattribution" dans
-       l'historique (distinct d'"attribution" pour ne pas le compter
-       deux fois comme sortie de stock dans le dashboard). */
+       Bars mixtes : un fût peut être réattribué à n'importe quel bar
+       (du même type de fût ne s'applique plus, tous les bars acceptent
+       bière et cidre). Le type du FÛT lui-même reste bière ou cidre.
+       Génère un mouvement "reattribution" dans l'historique (distinct
+       d'"attribution" pour ne pas le compter deux fois comme sortie de
+       stock dans le dashboard). */
     reattribuerDepuisPot: function (idAttente, futAttente, bar, prenomUtilisateur, jourActuel) {
-      if (futAttente.type !== bar.type) {
-        return Promise.reject(new Error("Type incompatible : fût " + futAttente.type +
-          " vers bar " + bar.type));
-      }
       /* On crée un nouveau fût sur le bar avec un nouvel identifiant.
          Le lien avec le fût initial est tracé via l'historique. */
       const refFut = Base.futsDuBar(bar.id).push();
@@ -1167,14 +1168,17 @@
   const ActionsVentes = {
 
     /* Enregistre une saisie de vente dans une case bar+créneau.
-       donneesSaisie peut contenir : montant, nbPintes, nbPichets,
+       BARS MIXTES : donneesSaisie peut contenir : montant,
+       nbPintesBiere, nbPintesCidre, nbPichetsBiere, nbPichetsCidre,
        nbGobelets, commentaire, padEnDefaut, numeroPad, donneesPartielles. */
     saisir: function (numeroJour, idBar, idCreneau, donneesSaisie, prenomUtilisateur) {
       const refSaisies = Base.caseVente(numeroJour, idBar, idCreneau).child("saisies");
       const nouvelleSaisie = {
         montant: donneesSaisie.montant || 0,
-        nbPintes: donneesSaisie.nbPintes || 0,
-        nbPichets: donneesSaisie.nbPichets || 0,
+        nbPintesBiere: donneesSaisie.nbPintesBiere || 0,
+        nbPintesCidre: donneesSaisie.nbPintesCidre || 0,
+        nbPichetsBiere: donneesSaisie.nbPichetsBiere || 0,
+        nbPichetsCidre: donneesSaisie.nbPichetsCidre || 0,
         nbGobelets: donneesSaisie.nbGobelets || 0,
         commentaire: (donneesSaisie.commentaire || "").trim(),
         padEnDefaut: donneesSaisie.padEnDefaut === true,
@@ -1321,6 +1325,9 @@
     let ca = 0, nbP = 0, nbPi = 0, nbG = 0;
     let nbSaisies = 0, nbAnnulees = 0;
     let nbPadEnPanne = 0, nbDonneesPerdues = 0;
+    /* Sous-totaux par type (bars mixtes : le type est dans la saisie). */
+    let nbPintesBiere = 0, nbPintesCidre = 0;
+    let nbPichetsBiere = 0, nbPichetsCidre = 0;
 
     Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
       const nj = numeroDepuisCleJour(cleJour);
@@ -1339,8 +1346,21 @@
             if (s.annulee === true) { nbAnnulees++; return; }
             nbSaisies++;
             ca += (s.montant || 0);
-            nbP += (s.nbPintes || 0);
-            nbPi += (s.nbPichets || 0);
+            /* Nouveau modèle (bars mixtes) : pintes/pichets ventilés
+               par type bière/cidre. Compatibilité descendante : si seul
+               nbPintes/nbPichets existe, on les compte en "total" mais
+               pas dans les sous-totaux par type. */
+            const pb = s.nbPintesBiere || 0;
+            const pc = s.nbPintesCidre || 0;
+            const pib = s.nbPichetsBiere || 0;
+            const pic = s.nbPichetsCidre || 0;
+            nbPintesBiere += pb;
+            nbPintesCidre += pc;
+            nbPichetsBiere += pib;
+            nbPichetsCidre += pic;
+            /* Total : somme des 2 types OU ancien champ pour rétrocompat. */
+            nbP += (pb + pc) || (s.nbPintes || 0);
+            nbPi += (pib + pic) || (s.nbPichets || 0);
             nbG += (s.nbGobelets || 0);
             if (s.padEnDefaut === true) {
               nbPadEnPanne++;
@@ -1352,6 +1372,8 @@
     });
     return {
       ca: ca, nbPintes: nbP, nbPichets: nbPi, nbGobelets: nbG,
+      nbPintesBiere: nbPintesBiere, nbPintesCidre: nbPintesCidre,
+      nbPichetsBiere: nbPichetsBiere, nbPichetsCidre: nbPichetsCidre,
       nbSaisies: nbSaisies, nbAnnulees: nbAnnulees,
       nbPadEnPanne: nbPadEnPanne, nbDonneesPerdues: nbDonneesPerdues
     };
@@ -1414,56 +1436,22 @@
        - et un sous-objet "parType" avec les mêmes champs pour bière et
          cidre séparément : { parType: { biere: {...}, cidre: {...} } }
      "filtreBar" optionnel. "filtreJour" optionnel.
-     "bars" optionnel mais nécessaire pour calculer la décomposition par
-     type (sert à connaître le type de chaque bar pour ventiler les
-     pintes/pichets). */
+     "bars" : non utilisé pour la ventilation par type (les saisies
+     contiennent maintenant directement nbPintesBiere/nbPintesCidre...
+     puisque les bars sont mixtes), conservé pour compatibilité d'API. */
   function calculerCoherence(historique, casesVentesTousJours, params, filtreBar, filtreJour, bars) {
     const futs = agregerFuts(historique, filtreBar, filtreJour);
     const ventes = agregerVentes(casesVentesTousJours, filtreJour, filtreBar);
 
-    /* Calcul du volume vendu par type : on parcourt les saisies en
-       associant chaque idBar à son type (via la liste de bars passée). */
-    function calculerVolumeVenduParType() {
-      let pintesBiere = 0, pichetsBiere = 0;
-      let pintesCidre = 0, pichetsCidre = 0;
-      if (!bars || bars.length === 0) {
-        return { pintesBiere: 0, pichetsBiere: 0, pintesCidre: 0, pichetsCidre: 0 };
-      }
-      const indexType = {};
-      bars.forEach(function (b) { indexType[b.id] = b.type; });
-      Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
-        const nj = numeroDepuisCleJour(cleJour);
-        if (nj === null) return;
-        if (filtreJour != null && nj !== filtreJour) return;
-        const parBar = casesVentesTousJours[cleJour] || {};
-        Object.keys(parBar).forEach(function (idBar) {
-          if (filtreBar != null && idBar !== filtreBar) return;
-          const typeBar = indexType[idBar];
-          if (!typeBar) return;
-          const parCr = parBar[idBar] || {};
-          Object.keys(parCr).forEach(function (idCr) {
-            const cas = parCr[idCr] || {};
-            const saisies = cas.saisies || {};
-            Object.keys(saisies).forEach(function (idS) {
-              const s = saisies[idS];
-              if (!s || s.annulee === true) return;
-              if (typeBar === TYPE_BAR.BIERE) {
-                pintesBiere += (s.nbPintes || 0);
-                pichetsBiere += (s.nbPichets || 0);
-              } else if (typeBar === TYPE_BAR.CIDRE) {
-                pintesCidre += (s.nbPintes || 0);
-                pichetsCidre += (s.nbPichets || 0);
-              }
-            });
-          });
-        });
-      });
-      return {
-        pintesBiere: pintesBiere, pichetsBiere: pichetsBiere,
-        pintesCidre: pintesCidre, pichetsCidre: pichetsCidre
-      };
-    }
-    const ventesParType = calculerVolumeVenduParType();
+    /* Bars mixtes : on lit directement les sous-totaux par type dans
+       les saisies (nbPintesBiere, nbPichetsBiere, nbPintesCidre,
+       nbPichetsCidre). Plus besoin de croiser avec le type du bar. */
+    const ventesParType = {
+      pintesBiere: ventes.nbPintesBiere,
+      pichetsBiere: ventes.nbPichetsBiere,
+      pintesCidre: ventes.nbPintesCidre,
+      pichetsCidre: ventes.nbPichetsCidre
+    };
 
     /* Helper : calcule un bilan {sorti, vendu, ecartL, ecartPct, dansSeuil}
        à partir de volumeSortiL et volumeVenduL. */
@@ -1776,11 +1764,10 @@
   ========================================================================= */
   function FenetreAjoutBar({ onConfirmer, onAnnuler }) {
     const [nom, setNom] = useState("");
-    const [type, setType] = useState(TYPE_BAR.BIERE);
 
     function confirmer() {
       if (!nom.trim()) return;
-      onConfirmer(nom, type);
+      onConfirmer(nom);
     }
 
     return React.createElement(
@@ -1796,32 +1783,11 @@
           value: nom,
           onChange: function (e) { setNom(e.target.value); },
           placeholder: "Ex : Bar Mainstage",
-          className: "w-full px-4 py-3 bg-neutral-800 rounded-lg text-white mb-4",
+          className: "w-full px-4 py-3 bg-neutral-800 rounded-lg text-white mb-2",
           autoFocus: true
         }),
-        React.createElement("label", { className: "block text-sm text-neutral-400 mb-1" }, "Type de boisson"),
-        React.createElement(
-          "div",
-          { className: "flex gap-2 mb-6" },
-          React.createElement(
-            "button",
-            {
-              onClick: function () { setType(TYPE_BAR.BIERE); },
-              className: "flex-1 py-3 rounded-lg font-medium " +
-                (type === TYPE_BAR.BIERE ? "bg-amber-600 text-white" : "bg-neutral-800 text-neutral-400")
-            },
-            "Bière"
-          ),
-          React.createElement(
-            "button",
-            {
-              onClick: function () { setType(TYPE_BAR.CIDRE); },
-              className: "flex-1 py-3 rounded-lg font-medium " +
-                (type === TYPE_BAR.CIDRE ? "bg-green-600 text-white" : "bg-neutral-800 text-neutral-400")
-            },
-            "Cidre"
-          )
-        ),
+        React.createElement("p", { className: "text-xs text-neutral-500 mb-6" },
+          "Tous les bars peuvent vendre bière et cidre. Le type est défini sur chaque fût attribué."),
         React.createElement(
           "div",
           { className: "flex gap-2" },
@@ -2119,7 +2085,6 @@
       return { id: idFut, donnees: futs[idFut] };
     });
     const nbFuts = listeFuts.length;
-    const estBiere = bar.type === TYPE_BAR.BIERE;
     const peutGererFuts = Droits.peutGererFuts(role);
     const peutGererBars = Droits.peutGererBars(role);
     /* L'annulation d'attribution est réservée admin et plus, conformément
@@ -2163,17 +2128,14 @@
 
     return React.createElement(
       "div",
-      { className: "rounded-xl border p-3 " +
-          (estBiere ? "border-amber-800 bg-amber-950/30" : "border-green-800 bg-green-950/30") },
+      { className: "rounded-xl border p-3 border-neutral-800 bg-neutral-900/50" },
       React.createElement(
         "div",
         { className: "flex items-center justify-between mb-2" },
         React.createElement(
           "div",
           null,
-          React.createElement("span", { className: "font-bold text-white" }, bar.nom),
-          React.createElement("span", { className: "ml-2 text-xs text-neutral-400" },
-            estBiere ? "Bière" : "Cidre")
+          React.createElement("span", { className: "font-bold text-white" }, bar.nom)
         ),
         React.createElement(
           "span",
@@ -2258,14 +2220,30 @@
           ? React.createElement(
               "button",
               {
-                onClick: function () { onAttribuer(bar); },
+                onClick: function () { onAttribuer(bar, TYPE_BAR.BIERE); },
                 disabled: barComplet,
                 className: "flex-1 py-2 rounded-lg text-sm font-medium " +
                   (barComplet
                     ? "bg-neutral-800 text-neutral-600"
-                    : "bg-emerald-600 hover:bg-emerald-500 text-white")
+                    : "bg-amber-700 hover:bg-amber-600 text-white"),
+                title: "Attribuer un fût de bière"
               },
-              barComplet ? "Bar complet" : "+ Attribuer un fût"
+              barComplet ? "Complet" : "+ Bière"
+            )
+          : null,
+        peutGererFuts
+          ? React.createElement(
+              "button",
+              {
+                onClick: function () { onAttribuer(bar, TYPE_BAR.CIDRE); },
+                disabled: barComplet,
+                className: "flex-1 py-2 rounded-lg text-sm font-medium " +
+                  (barComplet
+                    ? "bg-neutral-800 text-neutral-600"
+                    : "bg-green-700 hover:bg-green-600 text-white"),
+                title: "Attribuer un fût de cidre"
+              },
+              barComplet ? "Complet" : "+ Cidre"
             )
           : null,
         peutGererBars
@@ -2392,10 +2370,14 @@
      En 3B-1 : cas simple uniquement (PAD OK). On saisit montant + quantités.
   ========================================================================= */
   function FenetreSaisieVente({ bar, creneau, onConfirmer, onAnnuler }) {
-    /* Champs de saisie. Gardés en texte, convertis à la validation. */
+    /* Champs de saisie. Gardés en texte, convertis à la validation.
+       BARS MIXTES : 4 champs au lieu de 2 (pintes/pichets ventilés par
+       bière/cidre). Le gobelet reste unique (contenant, pas typé). */
     const [montant, setMontant] = useState("");
-    const [pintes, setPintes] = useState("");
-    const [pichets, setPichets] = useState("");
+    const [pintesBiere, setPintesBiere] = useState("");
+    const [pintesCidre, setPintesCidre] = useState("");
+    const [pichetsBiere, setPichetsBiere] = useState("");
+    const [pichetsCidre, setPichetsCidre] = useState("");
     const [gobelets, setGobelets] = useState("");
     const [commentaire, setCommentaire] = useState("");
 
@@ -2415,12 +2397,14 @@
 
     function confirmer() {
       const m = versNombre(montant);
-      const p = versEntier(pintes);
-      const pi = versEntier(pichets);
+      const pb = versEntier(pintesBiere);
+      const pc = versEntier(pintesCidre);
+      const pib = versEntier(pichetsBiere);
+      const pic = versEntier(pichetsCidre);
       const g = versEntier(gobelets);
 
       /* Pas de nombres négatifs. */
-      if (m < 0 || p < 0 || pi < 0 || g < 0) {
+      if (m < 0 || pb < 0 || pc < 0 || pib < 0 || pic < 0 || g < 0) {
         alert("Les valeurs ne peuvent pas être négatives.");
         return;
       }
@@ -2432,7 +2416,7 @@
           return;
         }
         /* Si données partielles : il faut au moins une valeur récupérée. */
-        if (donneesPartielles && m <= 0 && p <= 0 && pi <= 0 && g <= 0) {
+        if (donneesPartielles && m <= 0 && pb <= 0 && pc <= 0 && pib <= 0 && pic <= 0 && g <= 0) {
           alert("Données partielles : saisissez au moins une valeur récupérée.");
           return;
         }
@@ -2441,8 +2425,10 @@
         const donneesPerdues = !donneesPartielles;
         onConfirmer({
           montant: donneesPerdues ? 0 : m,
-          nbPintes: donneesPerdues ? 0 : p,
-          nbPichets: donneesPerdues ? 0 : pi,
+          nbPintesBiere: donneesPerdues ? 0 : pb,
+          nbPintesCidre: donneesPerdues ? 0 : pc,
+          nbPichetsBiere: donneesPerdues ? 0 : pib,
+          nbPichetsCidre: donneesPerdues ? 0 : pic,
           nbGobelets: donneesPerdues ? 0 : g,
           commentaire: commentaire,
           padEnDefaut: true,
@@ -2453,14 +2439,16 @@
       }
 
       /* Cas normal (PAD OK) : au moins une valeur. */
-      if (m <= 0 && p <= 0 && pi <= 0 && g <= 0) {
+      if (m <= 0 && pb <= 0 && pc <= 0 && pib <= 0 && pic <= 0 && g <= 0) {
         alert("Saisissez au moins un montant ou une quantité.");
         return;
       }
       onConfirmer({
         montant: m,
-        nbPintes: p,
-        nbPichets: pi,
+        nbPintesBiere: pb,
+        nbPintesCidre: pc,
+        nbPichetsBiere: pib,
+        nbPichetsCidre: pic,
         nbGobelets: g,
         commentaire: commentaire,
         padEnDefaut: false,
@@ -2567,10 +2555,30 @@
               ),
               React.createElement(
                 "div",
-                { className: "grid grid-cols-3 gap-2 mb-3" },
-                champNombre("Pintes", pintes, setPintes),
-                champNombre("Pichets", pichets, setPichets),
-                champNombre("Gobelets", gobelets, setGobelets)
+                { className: "mb-3" },
+                React.createElement("p", { className: "text-xs text-neutral-400 mb-2 uppercase" }, "Bière"),
+                React.createElement(
+                  "div",
+                  { className: "grid grid-cols-2 gap-2" },
+                  champNombre("Pintes bière", pintesBiere, setPintesBiere),
+                  champNombre("Pichets bière", pichetsBiere, setPichetsBiere)
+                )
+              ),
+              React.createElement(
+                "div",
+                { className: "mb-3" },
+                React.createElement("p", { className: "text-xs text-neutral-400 mb-2 uppercase" }, "Cidre"),
+                React.createElement(
+                  "div",
+                  { className: "grid grid-cols-2 gap-2" },
+                  champNombre("Pintes cidre", pintesCidre, setPintesCidre),
+                  champNombre("Pichets cidre", pichetsCidre, setPichetsCidre)
+                )
+              ),
+              React.createElement(
+                "div",
+                { className: "mb-3" },
+                champNombre("Gobelets (tous types)", gobelets, setGobelets)
               )
             )
           : null,
@@ -2696,8 +2704,26 @@
                   React.createElement(
                     "div",
                     { className: "text-xs text-neutral-400 mt-0.5 " + (estAnnulee ? "line-through" : "") },
-                    (s.nbPintes || 0) + " pintes, " + (s.nbPichets || 0) + " pichets, " +
-                      (s.nbGobelets || 0) + " gobelets"
+                    /* Nouveau modèle (saisies bars mixtes) : 4 champs.
+                       Compatibilité descendante : si la saisie n'a que
+                       nbPintes/nbPichets (ancien modèle, ne devrait plus
+                       arriver après RAZ), on les affiche comme "non
+                       ventilés". */
+                    (function () {
+                      const pb = s.nbPintesBiere || 0;
+                      const pc = s.nbPintesCidre || 0;
+                      const pib = s.nbPichetsBiere || 0;
+                      const pic = s.nbPichetsCidre || 0;
+                      const ancienP = s.nbPintes || 0;
+                      const ancienPi = s.nbPichets || 0;
+                      const morceaux = [];
+                      if (pb || pc) morceaux.push(pb + " pintes B / " + pc + " pintes C");
+                      else if (ancienP) morceaux.push(ancienP + " pintes (non ventilé)");
+                      if (pib || pic) morceaux.push(pib + " pichets B / " + pic + " pichets C");
+                      else if (ancienPi) morceaux.push(ancienPi + " pichets (non ventilé)");
+                      morceaux.push((s.nbGobelets || 0) + " gobelets");
+                      return morceaux.join(" · ");
+                    })()
                   ),
                   /* Mention PAD en panne. */
                   s.padEnDefaut
@@ -2875,7 +2901,7 @@
                     React.createElement(
                       "div",
                       { className: "px-3 py-2 bg-neutral-900 font-bold text-white" },
-                      bar.nom + " (" + (bar.type === TYPE_BAR.BIERE ? "bière" : "cidre") + ")"
+                      bar.nom
                     ),
                     React.createElement(
                       "div",
@@ -3371,7 +3397,7 @@
                     React.createElement(
                       "div",
                       { className: "px-3 py-2 bg-neutral-900 font-bold text-white" },
-                      bar.nom + " (" + (bar.type === TYPE_BAR.BIERE ? "bière" : "cidre") + ")"
+                      bar.nom
                     ),
                     React.createElement(
                       "div",
@@ -3495,44 +3521,21 @@
     const stockGlobal = calculerStock(historique, params);
 
     /* ----- CA BIÈRE vs CIDRE -----
-       Calculé en agrégeant les ventes par TYPE de bar (on regarde le type
-       du bar à partir de son idBar). Les saisies dont l'idBar n'est pas
-       trouvé (bar supprimé) sont ignorées pour ce calcul. */
+       Bars mixtes : le CA par type est calculé à partir des sous-totaux
+       pintes/pichets par type stockés directement dans les saisies. Le
+       prix d'une pinte bière = prix d'une pinte cidre (paramètre unique).
+       Les gobelets ne sont pas typés (compris dans le CA total mais pas
+       ventilés). */
     function calculerCaParType() {
-      let caBiere = 0, caCidre = 0;
-      let pintesBiere = 0, pintesCidre = 0;
-      const indexType = {};
-      (bars || []).forEach(function (b) { indexType[b.id] = b.type; });
-
-      Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
-        const nj = numeroDepuisCleJour(cleJour);
-        if (nj === null) return;
-        if (filtreJourPourVentes != null && nj !== filtreJourPourVentes) return;
-        const parBar = casesVentesTousJours[cleJour] || {};
-        Object.keys(parBar).forEach(function (idBar) {
-          const typeBar = indexType[idBar];
-          if (!typeBar) return;
-          const parCr = parBar[idBar] || {};
-          Object.keys(parCr).forEach(function (idCr) {
-            const cas = parCr[idCr] || {};
-            const saisies = cas.saisies || {};
-            Object.keys(saisies).forEach(function (idS) {
-              const s = saisies[idS];
-              if (!s || s.annulee === true) return;
-              if (typeBar === TYPE_BAR.BIERE) {
-                caBiere += (s.montant || 0);
-                pintesBiere += (s.nbPintes || 0);
-              } else if (typeBar === TYPE_BAR.CIDRE) {
-                caCidre += (s.montant || 0);
-                pintesCidre += (s.nbPintes || 0);
-              }
-            });
-          });
-        });
-      });
+      const prixPinte = params.prixPinte || 0;
+      const prixPichet = params.prixPichet || 0;
       return {
-        caBiere: caBiere, caCidre: caCidre,
-        pintesBiere: pintesBiere, pintesCidre: pintesCidre
+        caBiere: (ventesGlobal.nbPintesBiere * prixPinte) +
+                 (ventesGlobal.nbPichetsBiere * prixPichet),
+        caCidre: (ventesGlobal.nbPintesCidre * prixPinte) +
+                 (ventesGlobal.nbPichetsCidre * prixPichet),
+        pintesBiere: ventesGlobal.nbPintesBiere,
+        pintesCidre: ventesGlobal.nbPintesCidre
       };
     }
     const caParType = calculerCaParType();
@@ -3601,7 +3604,7 @@
       const futsBar = agregerFuts(historique, bar.id, filtreJourPourFuts);
       const cohBar = calculerCoherence(historique, casesVentesTousJours, params, bar.id, filtreJourPourFuts, bars);
       return {
-        id: bar.id, nom: bar.nom, type: bar.type,
+        id: bar.id, nom: bar.nom,
         archive: !!bar.archive,
         ventes: ventesBar, futs: futsBar, coherence: cohBar
       };
@@ -3756,7 +3759,7 @@
           carte("CA total", fmtEuros(ventesGlobal.ca),
             ventesGlobal.nbSaisies + " saisie(s)", "bg-emerald-950/40 border border-emerald-800"),
           carte("Pintes", ventesGlobal.nbPintes,
-            ventesGlobal.nbPichets + " pichets · " + ventesGlobal.nbGobelets + " gobelets"),
+            ventesGlobal.nbPintesBiere + " bière · " + ventesGlobal.nbPintesCidre + " cidre"),
           carte("PAD en panne", ventesGlobal.nbPadEnPanne,
             ventesGlobal.nbDonneesPerdues + " donnée(s) perdue(s)",
             ventesGlobal.nbPadEnPanne > 0 ? "bg-amber-950/40 border border-amber-800" : null),
@@ -4047,9 +4050,7 @@
                   ? React.createElement("span", { className: "ml-2 text-xs text-amber-400 italic" },
                       "(archivé)")
                   : null
-              ),
-              React.createElement("span", { className: "text-xs text-neutral-400" },
-                l.type === TYPE_BAR.BIERE ? "Bière" : "Cidre")
+              )
             ),
             React.createElement(
               "div",
@@ -4063,9 +4064,16 @@
               React.createElement(
                 "div",
                 null,
-                React.createElement("p", { className: "text-xs text-neutral-500" }, "Pintes / Pichets / Gobelets"),
+                React.createElement("p", { className: "text-xs text-neutral-500" }, "Pintes B / C"),
                 React.createElement("p", { className: "font-bold text-white" },
-                  l.ventes.nbPintes + " / " + l.ventes.nbPichets + " / " + l.ventes.nbGobelets)
+                  l.ventes.nbPintesBiere + " / " + l.ventes.nbPintesCidre)
+              ),
+              React.createElement(
+                "div",
+                null,
+                React.createElement("p", { className: "text-xs text-neutral-500" }, "Pichets B / C"),
+                React.createElement("p", { className: "font-bold text-white" },
+                  l.ventes.nbPichetsBiere + " / " + l.ventes.nbPichetsCidre)
               ),
               React.createElement(
                 "div",
@@ -4418,6 +4426,8 @@
           ["Pintes bière", caParType.pintesBiere],
           ["Pintes cidre", caParType.pintesCidre],
           ["Nombre de pichets", v.nbPichets],
+          ["Pichets bière", v.nbPichetsBiere],
+          ["Pichets cidre", v.nbPichetsCidre],
           ["Nombre de gobelets", v.nbGobelets],
           ["Nombre de saisies actives", v.nbSaisies],
           ["Saisies annulées", v.nbAnnulees],
@@ -4456,7 +4466,8 @@
 
         /* ===== FEUILLE 2 : Par bar (enrichi) ===== */
         const dataBar = [
-          ["Bar", "Type", "Statut", "CA (€)", "Pintes", "Pichets", "Gobelets",
+          ["Bar", "Statut", "CA (€)",
+           "Pintes bière", "Pintes cidre", "Pichets bière", "Pichets cidre", "Gobelets",
            "Fûts bière sortis", "Fûts cidre sortis", "Fûts cassés",
            "Volume sorti (L)", "Volume vendu (L)",
            "Écart (L)", "Écart (%)", "Dans seuil"]
@@ -4464,10 +4475,10 @@
         lignesParBar.forEach(function (l) {
           dataBar.push([
             l.nom,
-            l.type === TYPE_BAR.BIERE ? "bière" : "cidre",
             l.archive ? "archivé" : "actif",
             l.ventes.ca,
-            l.ventes.nbPintes, l.ventes.nbPichets, l.ventes.nbGobelets,
+            l.ventes.nbPintesBiere, l.ventes.nbPintesCidre,
+            l.ventes.nbPichetsBiere, l.ventes.nbPichetsCidre, l.ventes.nbGobelets,
             l.futs.nbBiereSortis, l.futs.nbCidreSortis, l.futs.nbCasses,
             parseFloat(l.coherence.volumeSortiL.toFixed(1)),
             parseFloat(l.coherence.volumeVenduL.toFixed(1)),
@@ -4511,7 +4522,8 @@
 
         /* ===== FEUILLE 5 : Comparatif par jour ===== */
         const dataComparatif = [
-          ["Jour", "CA (€)", "Pintes", "Pichets", "Gobelets",
+          ["Jour", "CA (€)",
+           "Pintes bière", "Pintes cidre", "Pichets bière", "Pichets cidre", "Gobelets",
            "Fûts bière", "Fûts cidre", "Fûts cassés",
            "Vol sorti (L)", "Vol vendu (L)", "Écart total (%)",
            "Écart bière (%)", "Écart cidre (%)",
@@ -4521,7 +4533,8 @@
           dataComparatif.push([
             "J" + j.numero,
             j.ventes.ca,
-            j.ventes.nbPintes, j.ventes.nbPichets, j.ventes.nbGobelets,
+            j.ventes.nbPintesBiere, j.ventes.nbPintesCidre,
+            j.ventes.nbPichetsBiere, j.ventes.nbPichetsCidre, j.ventes.nbGobelets,
             j.futs.nbBiereSortis, j.futs.nbCidreSortis, j.futs.nbCasses,
             parseFloat(j.coherence.volumeSortiL.toFixed(1)),
             parseFloat(j.coherence.volumeVenduL.toFixed(1)),
@@ -4612,7 +4625,7 @@
 
         /* ===== FEUILLE 9 : Bars archivés ===== */
         const dataArchives = [
-          ["Nom", "Type", "Date d'archivage", "Archivé par", "CA cumulé (€)", "Fûts sortis"]
+          ["Nom", "Date d'archivage", "Archivé par", "CA cumulé (€)", "Fûts sortis"]
         ];
         (bars || []).filter(function (b) { return !!b.archive; })
           .sort(function (a, b) { return (b.archiveLe || 0) - (a.archiveLe || 0); })
@@ -4621,7 +4634,6 @@
             const futsBar = agregerFuts(historique, b.id, null);
             dataArchives.push([
               b.nom,
-              b.type === TYPE_BAR.BIERE ? "bière" : "cidre",
               fmtDateHeure(b.archiveLe),
               b.archivePar || "",
               ventesBar.ca,
@@ -4652,7 +4664,8 @@
         /* ===== FEUILLE 11 : Saisies annulées ===== */
         const dataAnnul = [
           ["Date saisie", "Jour", "Bar", "Créneau", "Montant (€)",
-           "Pintes", "Pichets", "Gobelets", "Saisi par", "Annulé par"]
+           "Pintes bière", "Pintes cidre", "Pichets bière", "Pichets cidre",
+           "Gobelets", "Saisi par", "Annulé par"]
         ];
         /* On parcourt toutes les saisies annulées avec leur contexte. */
         Object.keys(casesVentesTousJours || {}).forEach(function (cleJour) {
@@ -4672,8 +4685,10 @@
                   nomBarLocal(idBar),
                   libCreneau(nj, idCr),
                   s.montant || 0,
-                  s.nbPintes || 0,
-                  s.nbPichets || 0,
+                  s.nbPintesBiere || 0,
+                  s.nbPintesCidre || 0,
+                  s.nbPichetsBiere || 0,
+                  s.nbPichetsCidre || 0,
                   s.nbGobelets || 0,
                   s.par || "",
                   s.annuleePar || ""
@@ -4761,7 +4776,8 @@
         /* --- Feuille 2 : Ventes détaillées --- */
         const dataVentes = [[
           "Jour", "Bar", "Créneau", "Date/heure saisie",
-          "Montant (€)", "Pintes", "Pichets", "Gobelets",
+          "Montant (€)", "Pintes bière", "Pintes cidre",
+          "Pichets bière", "Pichets cidre", "Gobelets",
           "PAD en panne", "N° PAD", "Données partielles",
           "Commentaire", "Saisi par",
           "Annulée", "Annulée par"
@@ -4801,8 +4817,10 @@
             l.creneau,
             fmtDateHeure(s.date),
             s.montant || 0,
-            s.nbPintes || 0,
-            s.nbPichets || 0,
+            s.nbPintesBiere || 0,
+            s.nbPintesCidre || 0,
+            s.nbPichetsBiere || 0,
+            s.nbPichetsCidre || 0,
             s.nbGobelets || 0,
             s.padEnDefaut === true ? "oui" : "non",
             s.numeroPad || "",
@@ -5193,7 +5211,9 @@
           const dataVue = [
             ["Récapitulatif", "Valeur"],
             ["CA total (€)", v.ca],
-            ["Pintes", v.nbPintes], ["Pichets", v.nbPichets], ["Gobelets", v.nbGobelets],
+            ["Pintes bière", v.nbPintesBiere], ["Pintes cidre", v.nbPintesCidre],
+            ["Pichets bière", v.nbPichetsBiere], ["Pichets cidre", v.nbPichetsCidre],
+            ["Gobelets", v.nbGobelets],
             ["Saisies actives", v.nbSaisies], ["Annulées", v.nbAnnulees],
             ["PAD en panne", v.nbPadEnPanne], ["Dont données perdues", v.nbDonneesPerdues],
             [], ["Fûts bière sortis", f.nbBiereSortis], ["Fûts cidre sortis", f.nbCidreSortis],
@@ -5208,15 +5228,16 @@
           XLSX.utils.book_append_sheet(wbRecap, XLSX.utils.aoa_to_sheet(dataVue), "Vue d'ensemble");
 
           /* Par bar. */
-          const dataBar = [["Bar", "Type", "CA (€)", "Pintes", "Pichets", "Gobelets",
+          const dataBar = [["Bar", "CA (€)",
+            "Pintes bière", "Pintes cidre", "Pichets bière", "Pichets cidre", "Gobelets",
             "Fûts sortis", "Cassés", "Vol sorti L", "Vol vendu L", "Écart %", "Dans seuil"]];
           (bars || []).forEach(function (bar) {
             const vb = agregerVentes(casesVentesTousJours, null, bar.id);
             const fb = agregerFuts(historique, bar.id);
             const cb = calculerCoherence(historique, casesVentesTousJours, params, bar.id, null, bars);
             dataBar.push([
-              bar.nom, bar.type === TYPE_BAR.BIERE ? "bière" : "cidre", vb.ca,
-              vb.nbPintes, vb.nbPichets, vb.nbGobelets,
+              bar.nom, vb.ca,
+              vb.nbPintesBiere, vb.nbPintesCidre, vb.nbPichetsBiere, vb.nbPichetsCidre, vb.nbGobelets,
               fb.nbBiereSortis + fb.nbCidreSortis, fb.nbCasses,
               parseFloat(cb.volumeSortiL.toFixed(1)),
               parseFloat(cb.volumeVenduL.toFixed(1)),
@@ -5268,7 +5289,8 @@
 
             /* Ventes détaillées. */
             const dataV = [["Jour", "Bar", "Créneau", "Date/heure saisie",
-              "Montant (€)", "Pintes", "Pichets", "Gobelets",
+              "Montant (€)", "Pintes bière", "Pintes cidre",
+              "Pichets bière", "Pichets cidre", "Gobelets",
               "PAD en panne", "N° PAD", "Données partielles",
               "Commentaire", "Saisi par", "Annulée", "Annulée par"]];
             const lignes = [];
@@ -5299,7 +5321,8 @@
               dataV.push([
                 "J" + l.nj, nomBar(l.idBar), libCreneau(l.nj, l.idCr),
                 fmtDH(s.date), s.montant || 0,
-                s.nbPintes || 0, s.nbPichets || 0, s.nbGobelets || 0,
+                s.nbPintesBiere || 0, s.nbPintesCidre || 0,
+                s.nbPichetsBiere || 0, s.nbPichetsCidre || 0, s.nbGobelets || 0,
                 s.padEnDefaut === true ? "oui" : "non",
                 s.numeroPad || "",
                 s.padEnDefaut === true ? (s.donneesPartielles === true ? "oui" : "non") : "",
@@ -5494,7 +5517,7 @@
     const barsPlaces = (bars || []).map(function (b) {
       const p = positions[b.id];
       if (!p) return null;
-      return { id: b.id, nom: b.nom, type: b.type, x: p.x, y: p.y, futs: b.futs };
+      return { id: b.id, nom: b.nom, x: p.x, y: p.y, futs: b.futs };
     }).filter(function (b) { return b !== null; });
 
     /* Gestion du tap sur la carte en mode "place".
@@ -5540,11 +5563,11 @@
       }
     }
 
-    /* Couleur de pastille selon le type de bar. */
-    function couleurPastille(type) {
-      return type === TYPE_BAR.BIERE
-        ? "bg-amber-500 border-amber-200"
-        : "bg-green-500 border-green-200";
+    /* Couleur de pastille : neutre pour les bars mixtes (le bar n'a
+       plus de type, c'est sur chaque fût attribué que le type bière/
+       cidre est défini). */
+    function couleurPastille() {
+      return "bg-neutral-300 border-neutral-100";
     }
 
     return React.createElement(
@@ -5681,7 +5704,7 @@
                 { className: "flex flex-col items-center" },
                 React.createElement(
                   "div",
-                  { className: "w-6 h-6 rounded-full border-2 shadow-lg " + couleurPastille(b.type) +
+                  { className: "w-6 h-6 rounded-full border-2 shadow-lg " + couleurPastille() +
                       " flex items-center justify-center text-xs font-bold text-black" },
                   nbFuts
                 ),
@@ -5746,9 +5769,7 @@
                   "span",
                   {
                     key: b.id,
-                    className: "text-xs px-2 py-0.5 rounded " +
-                      (b.type === TYPE_BAR.BIERE ? "bg-amber-800" : "bg-green-800") +
-                      " text-white"
+                    className: "text-xs px-2 py-0.5 rounded bg-neutral-700 text-white"
                   },
                   b.nom
                 );
@@ -5812,7 +5833,7 @@
                             onClick: function () { confirmerPlacement(b.id); },
                             className: "w-full text-left px-3 py-2 bg-neutral-800 hover:bg-emerald-800 text-white rounded text-sm"
                           },
-                          b.nom + " (" + (b.type === TYPE_BAR.BIERE ? "bière" : "cidre") + ")"
+                          b.nom
                         );
                       })
                     )
@@ -5870,30 +5891,26 @@
             React.createElement(
               "div",
               {
-                className: "bg-neutral-900 rounded-2xl w-full max-w-sm p-5 max-h-[80vh] overflow-y-auto border " +
-                  (barFiche.type === TYPE_BAR.BIERE ? "border-amber-700" : "border-green-700"),
+                className: "bg-neutral-900 rounded-2xl w-full max-w-sm p-5 max-h-[80vh] overflow-y-auto border border-neutral-700",
                 /* Empêche le clic dans la fiche de fermer la fiche (sinon
                    c'est piégeux : tu essaies de scroller, ça ferme). */
                 onClick: function (e) { e.stopPropagation(); }
               },
 
-              /* En-tête : nom + type + pastille colorée. */
+              /* En-tête : nom + pastille. */
               React.createElement(
                 "div",
                 { className: "flex items-center gap-3 mb-3" },
                 React.createElement(
                   "div",
-                  { className: "w-10 h-10 rounded-full border-2 " + couleurPastille(barFiche.type) +
+                  { className: "w-10 h-10 rounded-full border-2 " + couleurPastille() +
                       " flex items-center justify-center text-base font-bold text-black" },
                   barFiche.futs ? Object.keys(barFiche.futs).length : 0
                 ),
                 React.createElement(
                   "div",
                   null,
-                  React.createElement("h3", { className: "text-lg font-bold text-white" }, barFiche.nom),
-                  React.createElement("p", {
-                    className: "text-xs " + (barFiche.type === TYPE_BAR.BIERE ? "text-amber-300" : "text-green-300")
-                  }, barFiche.type === TYPE_BAR.BIERE ? "Bière" : "Cidre")
+                  React.createElement("h3", { className: "text-lg font-bold text-white" }, barFiche.nom)
                 )
               ),
 
@@ -6368,12 +6385,10 @@
         " à " + p(d.getHours()) + ":" + p(d.getMinutes());
     }
 
-    /* Bars compatibles pour la réattribution : même type que le fût,
-       et pas saturés (sous la limite paramétrée). */
+    /* Bars compatibles pour la réattribution : avec les bars mixtes,
+       tous les bars peuvent recevoir n'importe quel type de fût. */
     function barsCompatibles(typeFut) {
-      return (bars || []).filter(function (b) {
-        return b.type === typeFut;
-      });
+      return (bars || []);
     }
 
     function lancerReattribution(idAttente, fut, bar) {
@@ -6808,7 +6823,6 @@
               "div",
               { className: "space-y-2" },
               archivables.map(function (b) {
-                const estBiere = b.type === TYPE_BAR.BIERE;
                 return React.createElement(
                   "div",
                   {
@@ -6823,8 +6837,7 @@
                       null,
                       React.createElement("p", { className: "font-bold text-white" }, b.nom),
                       React.createElement("p", { className: "text-xs text-neutral-500" },
-                        (estBiere ? "Bière" : "Cidre") +
-                        " — archivé le " + fmtDateHeure(b.archiveLe) +
+                        "Archivé le " + fmtDateHeure(b.archiveLe) +
                         " par " + (b.archivePar || "?"))
                     )
                   ),
@@ -7067,8 +7080,8 @@
        données historiques. */
     const barsActifs = (bars || []).filter(function (b) { return !b.archive; });
 
-    function creerBar(nom, type) {
-      ActionsBars.creer(nom, type)
+    function creerBar(nom) {
+      ActionsBars.creer(nom)
         .then(function () { setFenetreAjoutBar(false); })
         .catch(function (e) { alert(e.message); });
     }
@@ -7088,16 +7101,19 @@
       ActionsBars.archiver(bar, prenom).catch(function (e) { alert(e.message); });
     }
 
-    function attribuerFut(bar) {
-      const stockDispo = bar.type === TYPE_BAR.BIERE ? stock.biere : stock.cidre;
+    function attribuerFut(bar, typeFut) {
+      /* Bars mixtes : le type vient en paramètre (cliqué par l'utilisateur
+         sur le bouton "+ Bière" ou "+ Cidre" de la carte du bar). */
+      const stockDispo = typeFut === TYPE_BAR.BIERE ? stock.biere : stock.cidre;
       if (stockDispo <= 0) {
-        alert("Stock épuisé pour ce type de boisson.");
+        alert("Stock épuisé pour ce type de boisson (" +
+          (typeFut === TYPE_BAR.BIERE ? "bière" : "cidre") + ").");
         return;
       }
       /* Toast d'envoi : signale l'état (envoi/succès/erreur/hors ligne). */
       Toasts.executer(
-        ActionsFuts.attribuer(bar, bar.type, params.maxFutsParBar, prenom, jourActuel),
-        "Fût attribué"
+        ActionsFuts.attribuer(bar, typeFut, params.maxFutsParBar, prenom, jourActuel),
+        "Fût " + (typeFut === TYPE_BAR.BIERE ? "bière" : "cidre") + " attribué"
       ).catch(function () { /* déjà affiché par le toast */ });
     }
 
