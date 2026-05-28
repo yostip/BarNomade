@@ -2301,14 +2301,29 @@
               { className: "text-xs flex-1 min-w-0 truncate " + couleurTexte },
               duree || "à l'instant"),
             peutGererFuts
-              ? React.createElement(
-                  "button",
-                  {
-                    onClick: function () { onDemanderRetour(bar, f.id, f.donnees); },
-                    className: "flex-shrink-0 text-xs text-white bg-neutral-700 hover:bg-neutral-600 rounded px-2.5 py-1"
-                  },
-                  "Retour"
-                )
+              ? (peutAnnulerAttribution
+                  /* Admin/superadmin : la ligne contient déjà la flèche ↶,
+                     donc on compacte le bouton Retour en icône carrée. */
+                  ? React.createElement(
+                      "button",
+                      {
+                        onClick: function () { onDemanderRetour(bar, f.id, f.donnees); },
+                        className: "flex-shrink-0 w-7 h-7 flex items-center justify-center text-white bg-neutral-700 hover:bg-neutral-600 rounded text-sm leading-none",
+                        title: "Retourner ce fût"
+                      },
+                      "↩"
+                    )
+                  /* Secrétaire/visiteur : pas de flèche ↶, donc on garde
+                     le bouton Retour en toutes lettres (plus explicite). */
+                  : React.createElement(
+                      "button",
+                      {
+                        onClick: function () { onDemanderRetour(bar, f.id, f.donnees); },
+                        className: "flex-shrink-0 text-xs text-white bg-neutral-700 hover:bg-neutral-600 rounded px-2.5 py-1",
+                        title: "Retourner ce fût"
+                      },
+                      "Retour"
+                    ))
               : null,
             peutAnnulerAttribution
               ? React.createElement(
